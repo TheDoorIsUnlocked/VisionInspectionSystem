@@ -1,0 +1,50 @@
+{
+  "productId": "sample_product",
+  "productName": "示例产品",
+  "version": "1.0",
+
+  "rois": [
+    {
+      "id": "roi_main",
+      "name": "主检测区域",
+      "type": "rectangle",
+      "coordinates": [100, 100, 800, 600],
+      "color": "#FF0000"
+    }
+  ],
+
+  "modules": [
+    {
+      "name": "SOPModule",
+      "enabled": true,
+      "config": {
+        "modelPath": "models/sop_yolov8.onnx",
+        "useGpu": true,
+        "confidenceThreshold": 0.6,
+        "steps": [
+          {
+            "stepId": 1,
+            "stepName": "检测人员",
+            "conditions": [
+              {
+                "type": "object_present",
+                "objectClass": "person",
+                "minConfidence": 0.7
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+
+  "judgement": {
+    "rules": [
+      {
+        "name": "合格判定",
+        "condition": "level == 0",
+        "action": "pass"
+      }
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "system": {
+    "name": "视觉检测系统",
+    "version": "1.0.0",
+    "maxProductsPerMinute": 12,
+    "logLevel": "info",
+    "saveDefectImages": true,
+    "retentionDays": 30
+  },
+  "cameras": [
+    {
+      "id": "main_camera",
+      "type": "webcam",
+      "index": 0,
+      "resolution": { "w": 1920, "h": 1080 },
+      "trigger": {
+        "mode": "software"
+      }
+    }
+  ],
+  "lighting": {
+    "type": "constant",
+    "channels": []
+  }
+}
