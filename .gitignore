@@ -1,0 +1,53 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+.vs/
+.vscode/
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+build/
+bld/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+msbuild.log
+msbuild.err
+msbuild.wrn
+
+# Visual Studio
+.vs/
+*.ncb
+*.sdf
+*.opensdf
+*.cachefile
+
+# NuGet
+*.nupkg
+**/packages/*
+!**/packages/build/
+
+# Logs
+logs/*.log
+logs/*.txt
+
+# Models (large files)
+models/*.onnx
+models/*.pt
+models/*.weights
+
+# Configs with sensitive data
+configs/system.local.json
+configs/*.local.json
+
+# OS
+.DS_Store
+Thumbs.db
