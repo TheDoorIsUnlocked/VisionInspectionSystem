@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Core\VisionInspection.Core\VisionInspection.Core.csproj" />
+    <ProjectReference Include="..\..\Modules\VisionInspection.Modules.SOP\VisionInspection.Modules.SOP.csproj" />
   </ItemGroup>
 
 </Project>

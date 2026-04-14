@@ -18,26 +18,59 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
         
-        <!-- 工具栏 -->
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10">
-            <Button Content="加载图像" Command="{Binding LoadImageCommand}" Margin="0,0,10,0" />
-            <Button Content="保存ROI" Command="{Binding SaveROIsCommand}" Margin="0,0,10,0" />
-            <Button Content="清空ROI" Command="{Binding ClearROIsCommand}" Margin="0,0,10,0" />
+        <Grid Grid.Row="0" Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
             
-            <Separator Width="2" Height="20" Background="Gray" Margin="0,0,10,0" />
+            <!-- 左侧：ROI工具 -->
+            <StackPanel Grid.Column="0" Orientation="Horizontal">
+                <Button Content="加载图像" Command="{Binding LoadImageCommand}" Margin="0,0,10,0" />
+                <Button Content="保存ROI" Command="{Binding SaveROIsCommand}" Margin="0,0,10,0" />
+                <Button Content="清空ROI" Command="{Binding ClearROIsCommand}" Margin="0,0,10,0" />
+                
+                <Separator Width="2" Height="20" Background="Gray" Margin="0,0,10,0" />
+                
+                <TextBlock Text="形状类型: " VerticalAlignment="Center" Margin="0,0,5,0" />
+                <ComboBox SelectedValue="{Binding ROIEditorViewModel.CurrentShapeType}" Width="100">
+                    <ComboBoxItem Tag="0">矩形</ComboBoxItem>
+                    <ComboBoxItem Tag="1">圆形</ComboBoxItem>
+                </ComboBox>
+            </StackPanel>
             
-            <TextBlock Text="形状类型: " VerticalAlignment="Center" Margin="0,0,5,0" />
-            <ComboBox SelectedValue="{Binding ROIEditorViewModel.CurrentShapeType}" Width="100">
-                <ComboBoxItem Tag="0">矩形</ComboBoxItem>
-                <ComboBoxItem Tag="1">圆形</ComboBoxItem>
-            </ComboBox>
-        </StackPanel>
+            <!-- 右侧：SOP工具 -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="初始化SOP" Command="{Binding InitializeSOPModuleCommand}" Margin="0,0,10,0" />
+                <Button Content="运行SOP检测" Command="{Binding RunSOPDetectionCommand}" Margin="0,0,10,0" />
+            </StackPanel>
+        </Grid>
         
-        <!-- ROI编辑器 -->
-        <controls:ROIEditorControl 
-            Grid.Row="1" 
-            ViewModel="{Binding ROIEditorViewModel}" 
-            Margin="10" />
+        <!-- 图像显示区域 -->
+        <Grid Grid.Row="1" Margin="10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            
+            <!-- ROI编辑器 -->
+            <controls:ROIEditorControl 
+                Grid.Row="0" 
+                ViewModel="{Binding RoiEditorViewModel}" 
+                Margin="0,0,0,10" />
+            
+            <!-- SOP状态 -->
+            <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1">
+                <StackPanel Orientation="Horizontal" Background="LightGray">
+                    <TextBlock Text="SOP状态: " FontWeight="Bold" Margin="10,5,10,5" />
+                    <TextBlock Text="{Binding SopStatus}" Margin="0,5,20,5" />
+                    <TextBlock Text="  步骤: " FontWeight="Bold" Margin="0,5,5,5" />
+                    <TextBlock Text="{Binding CurrentStep}" Margin="0,5,2,5" />
+                    <TextBlock Text="/" Margin="0,5,2,5" />
+                    <TextBlock Text="{Binding TotalSteps}" Margin="0,5,10,5" />
+                </StackPanel>
+            </Border>
+        </Grid>
         
         <!-- 状态栏 -->
         <StatusBar Grid.Row="2" Height="25">
