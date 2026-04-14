@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using VisionInspection.Core.Models;
 
 namespace VisionInspection.Core.Interfaces;
 
