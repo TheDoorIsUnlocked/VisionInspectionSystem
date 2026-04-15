@@ -290,8 +290,35 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private void ConfigButton_Click(object sender, RoutedEventArgs e)
         {
-            // TODO: 打开SOP配置窗口
-            AddLog("打开SOP配置...");
+            var configWindow = new SOPConfigWindow();
+            configWindow.Owner = Window.GetWindow(this);
+            
+            // 传递当前步骤配置
+            var configSteps = _steps.Select(s => new SOPConfigStep
+            {
+                Name = s.Name,
+                Description = s.Description,
+                Icon = s.Icon,
+                DetectionType = "物体检测",
+                ModelName = "默认YOLOv8模型"
+            }).ToList();
+            
+            configWindow.SetSteps(configSteps);
+            
+            if (configWindow.ShowDialog() == true)
+            {
+                // 应用新配置
+                var newSteps = configWindow.GetSteps();
+                _steps.Clear();
+                
+                for (int i = 0; i < newSteps.Count; i++)
+                {
+                    AddStep((i + 1).ToString(), newSteps[i].Name, newSteps[i].Description, newSteps[i].Icon);
+                }
+                
+                UpdateStepDisplay();
+                AddLog("SOP配置已更新");
+            }
         }
 
         /// <summary>
