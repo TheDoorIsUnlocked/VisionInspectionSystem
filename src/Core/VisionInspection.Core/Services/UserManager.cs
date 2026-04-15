@@ -42,48 +42,65 @@ public class UserManager
     /// </summary>
     private void InitializeDatabase()
     {
-        using var connection = new SqliteConnection(_connectionString);
-        connection.Open();
-
-        // 创建用户表
-        var createUserTable = @"
-            CREATE TABLE IF NOT EXISTS Users (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                Username TEXT UNIQUE NOT NULL,
-                DisplayName TEXT NOT NULL,
-                PasswordHash TEXT NOT NULL,
-                Role INTEGER NOT NULL DEFAULT 1,
-                IsActive INTEGER NOT NULL DEFAULT 1,
-                CreatedAt TEXT NOT NULL,
-                LastLoginAt TEXT,
-                LastLoginIp TEXT
-            )";
-
-        // 创建登录记录表
-        var createLoginRecordTable = @"
-            CREATE TABLE IF NOT EXISTS LoginRecords (
-                Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                UserId INTEGER NOT NULL,
-                Username TEXT NOT NULL,
-                LoginTime TEXT NOT NULL,
-                LogoutTime TEXT,
-                LoginIp TEXT,
-                IsSuccess INTEGER NOT NULL DEFAULT 1,
-                FailReason TEXT
-            )";
-
-        using (var cmd = new SqliteCommand(createUserTable, connection))
+        Console.WriteLine($"InitializeDatabase: 开始初始化，连接字符串={_connectionString}");
+        
+        try
         {
-            cmd.ExecuteNonQuery();
-        }
+            using var connection = new SqliteConnection(_connectionString);
+            Console.WriteLine("InitializeDatabase: 创建连接对象成功");
+            
+            connection.Open();
+            Console.WriteLine("InitializeDatabase: 打开连接成功");
 
-        using (var cmd = new SqliteCommand(createLoginRecordTable, connection))
+            // 创建用户表
+            var createUserTable = @"
+                CREATE TABLE IF NOT EXISTS Users (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    Username TEXT UNIQUE NOT NULL,
+                    DisplayName TEXT NOT NULL,
+                    PasswordHash TEXT NOT NULL,
+                    Role INTEGER NOT NULL DEFAULT 1,
+                    IsActive INTEGER NOT NULL DEFAULT 1,
+                    CreatedAt TEXT NOT NULL,
+                    LastLoginAt TEXT,
+                    LastLoginIp TEXT
+                )";
+
+            // 创建登录记录表
+            var createLoginRecordTable = @"
+                CREATE TABLE IF NOT EXISTS LoginRecords (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    UserId INTEGER NOT NULL,
+                    Username TEXT NOT NULL,
+                    LoginTime TEXT NOT NULL,
+                    LogoutTime TEXT,
+                    LoginIp TEXT,
+                    IsSuccess INTEGER NOT NULL DEFAULT 1,
+                    FailReason TEXT
+                )";
+
+            using (var cmd = new SqliteCommand(createUserTable, connection))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Console.WriteLine("InitializeDatabase: 创建Users表成功");
+
+            using (var cmd = new SqliteCommand(createLoginRecordTable, connection))
+            {
+                cmd.ExecuteNonQuery();
+            }
+            Console.WriteLine("InitializeDatabase: 创建LoginRecords表成功");
+
+            // 检查是否需要创建默认管理员账户
+            CreateDefaultAdminIfNeeded(connection);
+            Console.WriteLine("InitializeDatabase: 初始化完成");
+        }
+        catch (Exception ex)
         {
-            cmd.ExecuteNonQuery();
+            Console.WriteLine($"InitializeDatabase 异常：{ex.Message}");
+            Console.WriteLine($"InitializeDatabase 堆栈：{ex.StackTrace}");
+            throw;
         }
-
-        // 检查是否需要创建默认管理员账户
-        CreateDefaultAdminIfNeeded(connection);
     }
 
     /// <summary>
