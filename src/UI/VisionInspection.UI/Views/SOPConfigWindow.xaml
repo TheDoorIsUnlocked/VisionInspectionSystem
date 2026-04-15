@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
-        Title="SOP流程配置" Height="850" Width="1000"
+        Title="SOP流程配置" Height="900" Width="1000"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
     <Grid Background="#F5F5F5">
@@ -38,7 +38,7 @@
         </Border>
 
         <!-- 主内容区 -->
-        <Grid Grid.Row="1" Margin="20">
+        <Grid Grid.Row="1" Margin="15">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="350"/>
