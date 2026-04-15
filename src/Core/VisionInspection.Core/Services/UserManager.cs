@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using VisionInspection.Core.Models;
@@ -42,15 +43,15 @@ public class UserManager
     /// </summary>
     private void InitializeDatabase()
     {
-        Console.WriteLine($"InitializeDatabase: 开始初始化，连接字符串={_connectionString}");
+        Debug.WriteLine($"InitializeDatabase: 开始初始化，连接字符串={_connectionString}");
         
         try
         {
             using var connection = new SqliteConnection(_connectionString);
-            Console.WriteLine("InitializeDatabase: 创建连接对象成功");
+            Debug.WriteLine("InitializeDatabase: 创建连接对象成功");
             
             connection.Open();
-            Console.WriteLine("InitializeDatabase: 打开连接成功");
+            Debug.WriteLine("InitializeDatabase: 打开连接成功");
 
             // 创建用户表
             var createUserTable = @"
@@ -83,22 +84,22 @@ public class UserManager
             {
                 cmd.ExecuteNonQuery();
             }
-            Console.WriteLine("InitializeDatabase: 创建Users表成功");
+            Debug.WriteLine("InitializeDatabase: 创建Users表成功");
 
             using (var cmd = new SqliteCommand(createLoginRecordTable, connection))
             {
                 cmd.ExecuteNonQuery();
             }
-            Console.WriteLine("InitializeDatabase: 创建LoginRecords表成功");
+            Debug.WriteLine("InitializeDatabase: 创建LoginRecords表成功");
 
             // 检查是否需要创建默认管理员账户
             CreateDefaultAdminIfNeeded(connection);
-            Console.WriteLine("InitializeDatabase: 初始化完成");
+            Debug.WriteLine("InitializeDatabase: 初始化完成");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"InitializeDatabase 异常：{ex.Message}");
-            Console.WriteLine($"InitializeDatabase 堆栈：{ex.StackTrace}");
+            Debug.WriteLine($"InitializeDatabase 异常：{ex.Message}");
+            Debug.WriteLine($"InitializeDatabase 堆栈：{ex.StackTrace}");
             throw;
         }
     }
@@ -148,37 +149,37 @@ public class UserManager
     {
         try
         {
-            Console.WriteLine($"LoginAsync: 开始登录，用户名={username}");
+            Debug.WriteLine($"LoginAsync: 开始登录，用户名={username}");
             
             using var connection = new SqliteConnection(_connectionString);
-            Console.WriteLine("LoginAsync: 创建连接成功");
+            Debug.WriteLine("LoginAsync: 创建连接成功");
             
             await connection.OpenAsync();
-            Console.WriteLine("LoginAsync: 打开连接成功");
+            Debug.WriteLine("LoginAsync: 打开连接成功");
 
             // 查询用户
             using var cmd = new SqliteCommand(
                 "SELECT * FROM Users WHERE Username = @Username", connection);
             cmd.Parameters.AddWithValue("@Username", username);
-            Console.WriteLine("LoginAsync: 创建命令成功");
+            Debug.WriteLine("LoginAsync: 创建命令成功");
 
             using var reader = await cmd.ExecuteReaderAsync();
-            Console.WriteLine("LoginAsync: 执行查询成功");
+            Debug.WriteLine("LoginAsync: 执行查询成功");
             
             if (!await reader.ReadAsync())
             {
-                Console.WriteLine("LoginAsync: 用户不存在");
+                Debug.WriteLine("LoginAsync: 用户不存在");
                 await RecordLoginAsync(0, username, false, ipAddress, "用户名不存在");
                 return (false, "用户名或密码错误");
             }
 
-            Console.WriteLine("LoginAsync: 找到用户");
+            Debug.WriteLine("LoginAsync: 找到用户");
             var user = MapUserFromReader(reader);
 
             // 检查账户是否启用
             if (!user.IsActive)
             {
-                Console.WriteLine("LoginAsync: 账户已禁用");
+                Debug.WriteLine("LoginAsync: 账户已禁用");
                 await RecordLoginAsync(user.Id, username, false, ipAddress, "账户已禁用");
                 return (false, "账户已禁用，请联系管理员");
             }
@@ -186,12 +187,12 @@ public class UserManager
             // 验证密码
             if (!user.VerifyPassword(password))
             {
-                Console.WriteLine("LoginAsync: 密码错误");
+                Debug.WriteLine("LoginAsync: 密码错误");
                 await RecordLoginAsync(user.Id, username, false, ipAddress, "密码错误");
                 return (false, "用户名或密码错误");
             }
 
-            Console.WriteLine("LoginAsync: 密码验证成功");
+            Debug.WriteLine("LoginAsync: 密码验证成功");
             
             // 更新最后登录信息
             user.LastLoginAt = DateTime.Now;
@@ -202,19 +203,19 @@ public class UserManager
             await RecordLoginAsync(user.Id, username, true, ipAddress, "");
 
             _currentUser = user;
-            Console.WriteLine($"LoginAsync: 登录成功，欢迎{user.DisplayName}");
+            Debug.WriteLine($"LoginAsync: 登录成功，欢迎{user.DisplayName}");
             return (true, $"欢迎，{user.DisplayName}");
         }
         catch (Microsoft.Data.Sqlite.SqliteException ex)
         {
-            Console.WriteLine($"LoginAsync SQLite异常：{ex.Message}, 错误码={ex.SqliteErrorCode}");
-            Console.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
+            Debug.WriteLine($"LoginAsync SQLite异常：{ex.Message}, 错误码={ex.SqliteErrorCode}");
+            Debug.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
             return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"LoginAsync 异常：{ex.Message}");
-            Console.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
+            Debug.WriteLine($"LoginAsync 异常：{ex.Message}");
+            Debug.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
             return (false, $"登录失败：{ex.Message}");
         }
     }

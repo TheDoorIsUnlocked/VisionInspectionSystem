@@ -1,5 +1,6 @@
 using System.Configuration;
 using System.Data;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using VisionInspection.Core.Services;
@@ -47,9 +48,9 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            // 输出到控制台
-            Console.WriteLine($"程序启动失败：{ex.Message}");
-            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
+            // 输出到调试窗口
+            Debug.WriteLine($"程序启动失败：{ex.Message}");
+            Debug.WriteLine($"堆栈跟踪：{ex.StackTrace}");
             
             // 确保在主线程上显示错误消息
             Dispatcher.Invoke(() =>
