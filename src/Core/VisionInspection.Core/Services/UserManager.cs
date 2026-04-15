@@ -17,21 +17,6 @@ public class UserManager
     private readonly string _connectionString;
     private User? _currentUser;
 
-    static UserManager()
-    {
-        // 静态构造函数中初始化SQLitePCL，确保只执行一次
-        try
-        {
-            Batteries_V2.Init();
-            Console.WriteLine("SQLitePCL初始化成功");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"SQLitePCL初始化失败：{ex.Message}");
-            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
-        }
-    }
-
     public UserManager(string dbPath)
     {
         try
@@ -554,17 +539,16 @@ public class UserManager
 
             using var cmd = new SqliteCommand(@"
                 INSERT INTO LoginRecords (UserId, Username, LoginTime, LoginIp, IsSuccess, FailReason)
-                VALUES (@UserId, @Username, @LoginTime, @LoginIp, @IsSuccess, @FailReason)
-                RETURNING Id", connection);
+                VALUES (@UserId, @Username, @LoginTime, @LoginIp, @IsSuccess, @FailReason)", connection);
 
             cmd.Parameters.AddWithValue("@UserId", userId);
             cmd.Parameters.AddWithValue("@Username", username);
             cmd.Parameters.AddWithValue("@LoginTime", DateTime.Now.ToString("O"));
             cmd.Parameters.AddWithValue("@LoginIp", ipAddress);
             cmd.Parameters.AddWithValue("@IsSuccess", isSuccess ? 1 : 0);
-            cmd.Parameters.AddWithValue("@FailReason", failReason);
+            cmd.Parameters.AddWithValue("@FailReason", failReason ?? (object)DBNull.Value);
 
-            await cmd.ExecuteScalarAsync();
+            await cmd.ExecuteNonQueryAsync();
         }
         catch
         {
