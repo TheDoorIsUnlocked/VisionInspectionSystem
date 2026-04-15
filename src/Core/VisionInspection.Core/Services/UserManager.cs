@@ -1,5 +1,4 @@
 using Microsoft.Data.Sqlite;
-using SQLitePCL;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -19,9 +18,6 @@ public class UserManager
 
     public UserManager(string dbPath)
     {
-        // 初始化SQLitePCL
-        Batteries_V2.Init();
-        
         _connectionString = $"Data Source={dbPath}";
         InitializeDatabase();
     }
