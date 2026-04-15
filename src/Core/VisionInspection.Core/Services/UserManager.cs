@@ -169,7 +169,7 @@ public class UserManager
             if (!await reader.ReadAsync())
             {
                 Debug.WriteLine("LoginAsync: 用户不存在");
-                await RecordLoginAsync(0, username, false, ipAddress, "用户名不存在");
+                await RecordLoginAsync(connection, 0, username, false, ipAddress, "用户名不存在");
                 return (false, "用户名或密码错误");
             }
 
@@ -180,7 +180,7 @@ public class UserManager
             if (!user.IsActive)
             {
                 Debug.WriteLine("LoginAsync: 账户已禁用");
-                await RecordLoginAsync(user.Id, username, false, ipAddress, "账户已禁用");
+                await RecordLoginAsync(connection, user.Id, username, false, ipAddress, "账户已禁用");
                 return (false, "账户已禁用，请联系管理员");
             }
 
@@ -188,7 +188,7 @@ public class UserManager
             if (!user.VerifyPassword(password))
             {
                 Debug.WriteLine("LoginAsync: 密码错误");
-                await RecordLoginAsync(user.Id, username, false, ipAddress, "密码错误");
+                await RecordLoginAsync(connection, user.Id, username, false, ipAddress, "密码错误");
                 return (false, "用户名或密码错误");
             }
 
@@ -200,7 +200,7 @@ public class UserManager
             await UpdateLastLoginAsync(connection, user);
 
             // 记录登录成功
-            await RecordLoginAsync(user.Id, username, true, ipAddress, "");
+            await RecordLoginAsync(connection, user.Id, username, true, ipAddress, "");
 
             _currentUser = user;
             Debug.WriteLine($"LoginAsync: 登录成功，欢迎{user.DisplayName}");
@@ -554,13 +554,10 @@ public class UserManager
         cmd.ExecuteNonQuery();
     }
 
-    private async Task RecordLoginAsync(int userId, string username, bool isSuccess, string ipAddress, string failReason)
+    private async Task RecordLoginAsync(SqliteConnection connection, int userId, string username, bool isSuccess, string ipAddress, string failReason)
     {
         try
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
             using var cmd = new SqliteCommand(@"
                 INSERT INTO LoginRecords (UserId, Username, LoginTime, LoginIp, IsSuccess, FailReason)
                 VALUES (@UserId, @Username, @LoginTime, @LoginIp, @IsSuccess, @FailReason)", connection);
