@@ -1,3 +1,4 @@
+using SQLitePCL;
 using System.Configuration;
 using System.Data;
 using System.IO;
@@ -20,6 +21,20 @@ public partial class App : Application
 
         try
         {
+            // 初始化SQLitePCL
+            try
+            {
+                Batteries_V2.Init();
+                Console.WriteLine("App.xaml.cs: SQLitePCL初始化成功");
+            }
+            catch (Exception sqliteEx)
+            {
+                Console.WriteLine($"App.xaml.cs: SQLitePCL初始化失败：{sqliteEx.Message}");
+                MessageBox.Show($"SQLite初始化失败：{sqliteEx.Message}\n\n请确保已安装SQLite运行库。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                Shutdown();
+                return;
+            }
+
             // 初始化用户管理器
             var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "users.db");
             var dbDir = Path.GetDirectoryName(dbPath)!;
