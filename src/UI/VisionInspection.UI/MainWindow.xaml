@@ -17,6 +17,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -34,8 +35,22 @@
             </Grid>
         </Border>
 
+        <!-- 菜单栏 -->
+        <Menu Grid.Row="1" Background="White" Height="30">
+            <MenuItem Header="系统">
+                <MenuItem x:Name="UserManagementMenuItem" Header="用户管理" Click="UserManagementMenuItem_Click"/>
+                <MenuItem Header="修改密码" Click="ChangePasswordMenuItem_Click"/>
+                <Separator/>
+                <MenuItem Header="退出登录" Click="LogoutMenuItem_Click"/>
+                <MenuItem Header="退出程序" Click="ExitMenuItem_Click"/>
+            </MenuItem>
+            <MenuItem Header="帮助">
+                <MenuItem Header="关于" Click="AboutMenuItem_Click"/>
+            </MenuItem>
+        </Menu>
+
         <!-- 工具栏 -->
-        <ToolBarTray Grid.Row="1" Background="White" Margin="0,5">
+        <ToolBarTray Grid.Row="2" Background="White" Margin="0,5">
             <ToolBar Header="图像操作" Band="0" BandIndex="0">
                 <Button Content="📁 加载图像" Command="{Binding LoadImageCommand}"
                         Style="{StaticResource ButtonPrimary}" Margin="2"/>
@@ -85,7 +100,7 @@
         </ToolBarTray>
 
         <!-- 主内容区 -->
-        <Grid Grid.Row="2" Margin="10">
+        <Grid Grid.Row="3" Margin="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="300" />
@@ -148,7 +163,7 @@
         </Grid>
 
         <!-- 状态栏 -->
-        <StatusBar Grid.Row="3" Height="30">
+        <StatusBar Grid.Row="4" Height="30">
             <StatusBarItem>
                 <TextBlock Text="{Binding Status}" />
             </StatusBarItem>
