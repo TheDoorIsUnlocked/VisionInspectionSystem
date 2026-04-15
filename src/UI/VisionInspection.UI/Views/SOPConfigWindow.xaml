@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
-        Title="SOP流程配置" Height="700" Width="800"
+        Title="SOP流程配置" Height="750" Width="900"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
     <Grid Background="#F5F5F5">
@@ -140,10 +140,11 @@
         </Grid>
 
         <!-- 底部按钮 -->
-        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,15">
+        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,12">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="CancelButton" Content="取消" Margin="5,0" Padding="25,10" Click="CancelButton_Click"/>
-                <Button x:Name="ConfirmButton" Content="确定" Margin="5,0" Padding="25,10" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click"/>
+                <Button x:Name="ClearAllButton" Content="🗑️ 清空全部" Margin="5,0" Padding="20,8" Click="ClearAllButton_Click"/>
+                <Button x:Name="CancelButton" Content="❌ 取消" Margin="5,0" Padding="20,8" Click="CancelButton_Click"/>
+                <Button x:Name="ConfirmButton" Content="✓ 确定" Margin="5,0" Padding="20,8" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click"/>
             </StackPanel>
         </Border>
     </Grid>

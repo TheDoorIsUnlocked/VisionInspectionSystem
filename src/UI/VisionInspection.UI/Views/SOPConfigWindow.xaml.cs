@@ -440,6 +440,19 @@ namespace VisionInspection.UI.Views
             DialogResult = false;
             Close();
         }
+
+        /// <summary>
+        /// 清空全部步骤
+        /// </summary>
+        private void ClearAllButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (MessageBox.Show("确定要清空所有步骤吗？", "确认", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
+            {
+                _steps.Clear();
+                UpdateStepsList();
+                ClearForm();
+            }
+        }
     }
 
     /// <summary>

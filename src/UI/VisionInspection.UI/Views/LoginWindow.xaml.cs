@@ -121,6 +121,7 @@ public partial class LoginWindow : Window
             else
             {
                 Debug.WriteLine($"LoginWindow: 显示错误消息: {result.Message}");
+                MessageBox.Show(result.Message, "登录失败", MessageBoxButton.OK, MessageBoxImage.Warning);
                 ShowMessage(result.Message);
                 PasswordBox.Password = "";
                 PasswordBox.Focus();
