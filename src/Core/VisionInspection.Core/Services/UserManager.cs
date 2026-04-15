@@ -181,61 +181,65 @@ public class UserManager
     /// <summary>
     /// 用户登录
     /// </summary>
-    public async Task<(bool Success, string Message)> LoginAsync(string username, string password, string ipAddress = "")
+    public Task<(bool Success, string Message)> LoginAsync(string username, string password, string ipAddress = "")
     {
-        try
+        // 使用同步方法避免WPF中的死锁问题
+        return Task.Run(() =>
         {
-            using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync();
-
-            // 查询用户
-            using var cmd = new SqliteCommand(
-                "SELECT * FROM Users WHERE Username = @Username", connection);
-            cmd.Parameters.AddWithValue("@Username", username);
-
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            try
             {
-                await RecordLoginAsync(0, username, false, ipAddress, "用户名不存在");
-                return (false, "用户名或密码错误");
+                using var connection = new SqliteConnection(_connectionString);
+                connection.Open();
+
+                // 查询用户
+                using var cmd = new SqliteCommand(
+                    "SELECT * FROM Users WHERE Username = @Username", connection);
+                cmd.Parameters.AddWithValue("@Username", username);
+
+                using var reader = cmd.ExecuteReader();
+                if (!reader.Read())
+                {
+                    RecordLoginSync(0, username, false, ipAddress, "用户名不存在");
+                    return (false, "用户名或密码错误");
+                }
+
+                var user = MapUserFromReader(reader);
+
+                // 检查账户是否启用
+                if (!user.IsActive)
+                {
+                    RecordLoginSync(user.Id, username, false, ipAddress, "账户已禁用");
+                    return (false, "账户已禁用，请联系管理员");
+                }
+
+                // 验证密码
+                if (!user.VerifyPassword(password))
+                {
+                    RecordLoginSync(user.Id, username, false, ipAddress, "密码错误");
+                    return (false, "用户名或密码错误");
+                }
+
+                // 更新最后登录信息
+                user.LastLoginAt = DateTime.Now;
+                user.LastLoginIp = ipAddress;
+                UpdateLastLoginSync(connection, user);
+
+                // 记录登录成功
+                RecordLoginSync(user.Id, username, true, ipAddress, "");
+
+                _currentUser = user;
+                return (true, $"欢迎，{user.DisplayName}");
             }
-
-            var user = MapUserFromReader(reader);
-
-            // 检查账户是否启用
-            if (!user.IsActive)
+            catch (Microsoft.Data.Sqlite.SqliteException ex)
             {
-                await RecordLoginAsync(user.Id, username, false, ipAddress, "账户已禁用");
-                return (false, "账户已禁用，请联系管理员");
+                // SQLite特定错误
+                return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
             }
-
-            // 验证密码
-            if (!user.VerifyPassword(password))
+            catch (Exception ex)
             {
-                await RecordLoginAsync(user.Id, username, false, ipAddress, "密码错误");
-                return (false, "用户名或密码错误");
+                return (false, $"登录失败：{ex.Message}");
             }
-
-            // 更新最后登录信息
-            user.LastLoginAt = DateTime.Now;
-            user.LastLoginIp = ipAddress;
-            await UpdateLastLoginAsync(connection, user);
-
-            // 记录登录成功
-            await RecordLoginAsync(user.Id, username, true, ipAddress, "");
-
-            _currentUser = user;
-            return (true, $"欢迎，{user.DisplayName}");
-        }
-        catch (Microsoft.Data.Sqlite.SqliteException ex)
-        {
-            // SQLite特定错误
-            return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
-        }
-        catch (Exception ex)
-        {
-            return (false, $"登录失败：{ex.Message}");
-        }
+        });
     }
 
     /// <summary>
@@ -548,6 +552,21 @@ public class UserManager
         await cmd.ExecuteNonQueryAsync();
     }
 
+    private void UpdateLastLoginSync(SqliteConnection connection, User user)
+    {
+        using var cmd = new SqliteCommand(@"
+            UPDATE Users SET 
+                LastLoginAt = @LastLoginAt,
+                LastLoginIp = @LastLoginIp
+            WHERE Id = @Id", connection);
+
+        cmd.Parameters.AddWithValue("@Id", user.Id);
+        cmd.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt.ToString("O"));
+        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp);
+
+        cmd.ExecuteNonQuery();
+    }
+
     private async Task RecordLoginAsync(int userId, string username, bool isSuccess, string ipAddress, string failReason)
     {
         try
@@ -567,6 +586,32 @@ public class UserManager
             cmd.Parameters.AddWithValue("@FailReason", failReason ?? (object)DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync();
+        }
+        catch
+        {
+            // 记录日志失败不应影响登录流程
+        }
+    }
+
+    private void RecordLoginSync(int userId, string username, bool isSuccess, string ipAddress, string failReason)
+    {
+        try
+        {
+            using var connection = new SqliteConnection(_connectionString);
+            connection.Open();
+
+            using var cmd = new SqliteCommand(@"
+                INSERT INTO LoginRecords (UserId, Username, LoginTime, LoginIp, IsSuccess, FailReason)
+                VALUES (@UserId, @Username, @LoginTime, @LoginIp, @IsSuccess, @FailReason)", connection);
+
+            cmd.Parameters.AddWithValue("@UserId", userId);
+            cmd.Parameters.AddWithValue("@Username", username);
+            cmd.Parameters.AddWithValue("@LoginTime", DateTime.Now.ToString("O"));
+            cmd.Parameters.AddWithValue("@LoginIp", ipAddress);
+            cmd.Parameters.AddWithValue("@IsSuccess", isSuccess ? 1 : 0);
+            cmd.Parameters.AddWithValue("@FailReason", failReason ?? (object)DBNull.Value);
+
+            cmd.ExecuteNonQuery();
         }
         catch
         {
