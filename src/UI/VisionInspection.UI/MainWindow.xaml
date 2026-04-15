@@ -50,10 +50,11 @@
                              Style="{StaticResource ToggleButtonPrimary}" Margin="2"/>
                 <Separator/>
                 <TextBlock Text="形状:" VerticalAlignment="Center" Margin="5,0"/>
-                <ComboBox SelectedValue="{Binding RoiEditorViewModel.CurrentShapeType}" 
-                         Width="100" VerticalAlignment="Center" Margin="2">
-                    <ComboBoxItem Content="矩形" Tag="0"/>
-                    <ComboBoxItem Content="圆形" Tag="1"/>
+                <ComboBox Text="{Binding RoiEditorViewModel.CurrentShapeTypeString}" 
+                         Width="100" VerticalAlignment="Center" Margin="2"
+                         IsEditable="False" IsReadOnly="True">
+                    <ComboBoxItem Content="Rectangle"/>
+                    <ComboBoxItem Content="Circle"/>
                 </ComboBox>
             </ToolBar>
 

@@ -15,6 +15,19 @@ public partial class ROIEditorViewModel : ViewModelBase
     [ObservableProperty]
     private ROIShapeType _currentShapeType = ROIShapeType.Rectangle;
 
+    // 用于ComboBox绑定的字符串属性
+    public string CurrentShapeTypeString
+    {
+        get => CurrentShapeType.ToString();
+        set
+        {
+            if (Enum.TryParse<ROIShapeType>(value, out var shapeType))
+            {
+                CurrentShapeType = shapeType;
+            }
+        }
+    }
+
     [ObservableProperty]
     private bool _isEditing;
 
@@ -32,6 +45,12 @@ public partial class ROIEditorViewModel : ViewModelBase
 
     [ObservableProperty]
     private bool _isCreatingROI = false;
+
+    [ObservableProperty]
+    private SKPoint _mousePosition;
+
+    [ObservableProperty]
+    private ROI? _hoveredROI;
 
     public IReadOnlyList<ROI> ROIs => _roiManager.ROIs;
 

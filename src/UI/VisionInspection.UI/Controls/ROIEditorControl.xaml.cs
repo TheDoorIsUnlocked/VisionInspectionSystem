@@ -88,6 +88,7 @@ public partial class ROIEditorControl : SKElement
         if (e.PropertyName == nameof(ROIEditorViewModel.CurrentImage) ||
             e.PropertyName == nameof(ROIEditorViewModel.ROIs) ||
             e.PropertyName == nameof(ROIEditorViewModel.SelectedROI) ||
+            e.PropertyName == nameof(ROIEditorViewModel.HoveredROI) ||
             e.PropertyName == nameof(ROIEditorViewModel.IsEditing) ||
             e.PropertyName == nameof(ROIEditorViewModel.StartPoint) ||
             e.PropertyName == nameof(ROIEditorViewModel.EndPoint))
@@ -128,27 +129,104 @@ public partial class ROIEditorControl : SKElement
 
     private void DrawROI(SKCanvas canvas, Core.Models.ROI roi, bool isSelected)
     {
-        using var paint = new SKPaint
-        {
-            Color = isSelected ? SKColors.Blue : roi.Color,
-            Style = SKPaintStyle.Stroke,
-            StrokeWidth = isSelected ? 3 : 2,
-            IsAntialias = true
-        };
-
         var path = roi.GetPath();
-        canvas.DrawPath(path, paint);
+        var bbox = roi.GetBoundingBox();
+        bool isHovered = (roi == ViewModel?.HoveredROI);
 
-        // 绘制ROI名称
+        // 如果选中，绘制填充背景（半透明）
+        if (isSelected)
+        {
+            using var fillPaint = new SKPaint
+            {
+                Color = new SKColor(0, 150, 255, 80), // 半透明蓝色填充（更浓）
+                Style = SKPaintStyle.Fill,
+                IsAntialias = true
+            };
+            canvas.DrawPath(path, fillPaint);
+
+            // 绘制选中边框（更粗，发光效果）
+            using var strokePaint = new SKPaint
+            {
+                Color = new SKColor(0, 200, 255), // 亮蓝色
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 4,
+                IsAntialias = true
+            };
+            canvas.DrawPath(path, strokePaint);
+
+            // 绘制选中标记（角落的小方块）
+            DrawSelectionHandles(canvas, bbox);
+        }
+        else if (isHovered)
+        {
+            // 悬停效果：半透明白色填充
+            using var hoverFillPaint = new SKPaint
+            {
+                Color = new SKColor(255, 255, 255, 40),
+                Style = SKPaintStyle.Fill,
+                IsAntialias = true
+            };
+            canvas.DrawPath(path, hoverFillPaint);
+
+            // 悬停边框：黄色
+            using var hoverStrokePaint = new SKPaint
+            {
+                Color = new SKColor(255, 220, 0),
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 3,
+                IsAntialias = true
+            };
+            canvas.DrawPath(path, hoverStrokePaint);
+        }
+        else
+        {
+            // 普通ROI绘制
+            using var paint = new SKPaint
+            {
+                Color = roi.Color,
+                Style = SKPaintStyle.Stroke,
+                StrokeWidth = 2,
+                IsAntialias = true
+            };
+            canvas.DrawPath(path, paint);
+        }
+
+        // 绘制ROI名称（带背景）
+        using var bgPaint = new SKPaint
+        {
+            Color = isSelected ? new SKColor(0, 150, 255, 220) : new SKColor(0, 0, 0, 180),
+            Style = SKPaintStyle.Fill
+        };
         using var textPaint = new SKPaint
         {
-            Color = SKColors.Black,
-            TextSize = 12,
-            IsAntialias = true
+            Color = SKColors.White,
+            TextSize = isSelected ? 14 : 12,
+            IsAntialias = true,
+            FakeBoldText = isSelected
         };
 
-        var bbox = roi.GetBoundingBox();
-        canvas.DrawText(roi.ROIName, bbox.Left, bbox.Top - 5, textPaint);
+        var text = roi.ROIName;
+        var textBounds = new SKRect();
+        textPaint.MeasureText(text, ref textBounds);
+        var bgRect = new SKRect(bbox.Left, bbox.Top - 22, bbox.Left + textBounds.Width + 10, bbox.Top - 2);
+        canvas.DrawRect(bgRect, bgPaint);
+        canvas.DrawText(text, bbox.Left + 5, bbox.Top - 6, textPaint);
+    }
+
+    private void DrawSelectionHandles(SKCanvas canvas, SKRect bbox)
+    {
+        using var handlePaint = new SKPaint
+        {
+            Color = new SKColor(0, 150, 255),
+            Style = SKPaintStyle.Fill
+        };
+
+        float handleSize = 8;
+        // 四个角
+        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, bbox.Top - handleSize/2, bbox.Left + handleSize/2, bbox.Top + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Top - handleSize/2, bbox.Right + handleSize/2, bbox.Top + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, bbox.Bottom - handleSize/2, bbox.Left + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Bottom - handleSize/2, bbox.Right + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
     }
 
     private void DrawEditingROI(SKCanvas canvas)
@@ -219,6 +297,40 @@ public partial class ROIEditorControl : SKElement
 
         var point = e.GetPosition(this);
         var skPoint = new SKPoint((float)point.X, (float)point.Y);
+
+        // 更新鼠标位置
+        ViewModel.MousePosition = skPoint;
+
+        // 检查鼠标悬停在哪个ROI上
+        ROI? hoveredROI = null;
+        foreach (var roi in ViewModel.ROIs)
+        {
+            if (roi.ContainsPoint(skPoint))
+            {
+                hoveredROI = roi;
+                break;
+            }
+        }
+
+        if (ViewModel.HoveredROI != hoveredROI)
+        {
+            ViewModel.HoveredROI = hoveredROI;
+            InvalidateVisual();
+        }
+
+        // 更新鼠标光标
+        if (hoveredROI != null || _isDragging)
+        {
+            Cursor = Cursors.Hand;
+        }
+        else if (ViewModel.IsCreatingROI)
+        {
+            Cursor = Cursors.Cross;
+        }
+        else
+        {
+            Cursor = Cursors.Arrow;
+        }
 
         if (_isDragging && _draggedROI != null)
         {
