@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
-        Title="SOP流程配置" Height="750" Width="900"
+        Title="SOP流程配置" Height="850" Width="1000"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
     <Grid Background="#F5F5F5">
@@ -88,12 +88,12 @@
                     
                     <StackPanel Grid.Row="1">
                         <!-- 步骤名称 -->
-                        <TextBlock Text="步骤名称" FontSize="12" Foreground="#666" Margin="0,0,0,8"/>
-                        <TextBox x:Name="StepNameTextBox" Height="35" Padding="10,0" VerticalContentAlignment="Center"/>
+                        <TextBlock Text="步骤名称" FontSize="12" Foreground="#666" Margin="0,0,0,5"/>
+                        <TextBox x:Name="StepNameTextBox" Height="32" Padding="10,0" VerticalContentAlignment="Center"/>
                         
                         <!-- 检测类型 -->
-                        <TextBlock Text="检测类型" FontSize="12" Foreground="#666" Margin="0,15,0,8"/>
-                        <ComboBox x:Name="DetectionTypeComboBox" Height="35" Padding="10,0" VerticalContentAlignment="Center">
+                        <TextBlock Text="检测类型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
+                        <ComboBox x:Name="DetectionTypeComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
                             <ComboBoxItem Content="物体检测"/>
                             <ComboBoxItem Content="OCR识别"/>
                             <ComboBoxItem Content="二维码识别"/>
@@ -103,8 +103,8 @@
                         </ComboBox>
                         
                         <!-- 模型选择 -->
-                        <TextBlock Text="使用模型" FontSize="12" Foreground="#666" Margin="0,15,0,8"/>
-                        <ComboBox x:Name="ModelComboBox" Height="35" Padding="10,0" VerticalContentAlignment="Center">
+                        <TextBlock Text="使用模型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
+                        <ComboBox x:Name="ModelComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
                             <ComboBoxItem Content="默认YOLOv8模型"/>
                             <ComboBoxItem Content="车牌识别模型"/>
                             <ComboBoxItem Content="人脸检测模型"/>
@@ -112,28 +112,28 @@
                         </ComboBox>
                         
                         <!-- 描述 -->
-                        <TextBlock Text="步骤描述" FontSize="12" Foreground="#666" Margin="0,15,0,8"/>
-                        <TextBox x:Name="StepDescriptionTextBox" Height="80" Padding="10" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                        <TextBlock Text="步骤描述" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
+                        <TextBox x:Name="StepDescriptionTextBox" Height="60" Padding="10" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
                         
                         <!-- 图标选择 -->
-                        <TextBlock Text="步骤图标" FontSize="12" Foreground="#666" Margin="0,15,0,8"/>
+                        <TextBlock Text="步骤图标" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
                         <WrapPanel x:Name="IconPanel">
-                            <Button Content="🔍" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📄" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="✓" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🔌" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📷" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🔧" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📏" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🎨" Width="40" Height="40" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="🔍" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="📄" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="✓" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="🔌" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="📷" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="🔧" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="📏" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
+                            <Button Content="🎨" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
                         </WrapPanel>
                     </StackPanel>
                     
                     <!-- 按钮 -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-                        <Button x:Name="ClearButton" Content="清空" Margin="5,0" Padding="20,10" Click="ClearButton_Click"/>
-                        <Button x:Name="AddStepButton" Content="➕ 添加步骤" Margin="5,0" Padding="20,10" Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
-                        <Button x:Name="UpdateStepButton" Content="💾 更新步骤" Margin="5,0" Padding="20,10" Background="#1890FF" Foreground="White" Click="UpdateStepButton_Click" Visibility="Collapsed"/>
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
+                        <Button x:Name="ClearButton" Content="🗑️ 清空" Margin="5,0" Padding="15,8" Click="ClearButton_Click"/>
+                        <Button x:Name="AddStepButton" Content="➕ 添加步骤" Margin="5,0" Padding="15,8" Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
+                        <Button x:Name="UpdateStepButton" Content="💾 更新步骤" Margin="5,0" Padding="15,8" Background="#1890FF" Foreground="White" Click="UpdateStepButton_Click" Visibility="Collapsed"/>
                     </StackPanel>
                 </Grid>
             </Border>
