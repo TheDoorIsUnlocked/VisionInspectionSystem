@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using System;
 using System.Collections.Generic;
-using System.IO;
+using System.Data;
 using System.Linq;
 using System.Threading.Tasks;
 using VisionInspection.Core.Models;
@@ -19,43 +19,11 @@ public class UserManager
 
     public UserManager(string dbPath)
     {
-        try
-        {
-            // 确保目录存在
-            var directory = Path.GetDirectoryName(dbPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-                Console.WriteLine($"创建数据库目录：{directory}");
-            }
-
-            // 检查目录写入权限
-            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
-            {
-                try
-                {
-                    var testFile = Path.Combine(directory, $".write_test_{Guid.NewGuid()}.tmp");
-                    File.WriteAllText(testFile, "test");
-                    File.Delete(testFile);
-                    Console.WriteLine($"目录写入权限检查通过：{directory}");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"目录写入权限检查失败：{directory}, 错误：{ex.Message}");
-                }
-            }
-
-            _connectionString = $"Data Source={dbPath}";
-            Console.WriteLine($"数据库连接字符串：{_connectionString}");
-            
-            InitializeDatabase();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"UserManager初始化失败：{ex.Message}");
-            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
-            throw; // 重新抛出以便上层处理
-        }
+        // 初始化SQLitePCL
+        Batteries_V2.Init();
+        
+        _connectionString = $"Data Source={dbPath}";
+        InitializeDatabase();
     }
 
     /// <summary>
@@ -78,66 +46,48 @@ public class UserManager
     /// </summary>
     private void InitializeDatabase()
     {
-        try
+        using var connection = new SqliteConnection(_connectionString);
+        connection.Open();
+
+        // 创建用户表
+        var createUserTable = @"
+            CREATE TABLE IF NOT EXISTS Users (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Username TEXT UNIQUE NOT NULL,
+                DisplayName TEXT NOT NULL,
+                PasswordHash TEXT NOT NULL,
+                Role INTEGER NOT NULL DEFAULT 1,
+                IsActive INTEGER NOT NULL DEFAULT 1,
+                CreatedAt TEXT NOT NULL,
+                LastLoginAt TEXT,
+                LastLoginIp TEXT
+            )";
+
+        // 创建登录记录表
+        var createLoginRecordTable = @"
+            CREATE TABLE IF NOT EXISTS LoginRecords (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                UserId INTEGER NOT NULL,
+                Username TEXT NOT NULL,
+                LoginTime TEXT NOT NULL,
+                LogoutTime TEXT,
+                LoginIp TEXT,
+                IsSuccess INTEGER NOT NULL DEFAULT 1,
+                FailReason TEXT
+            )";
+
+        using (var cmd = new SqliteCommand(createUserTable, connection))
         {
-            Console.WriteLine("开始初始化数据库...");
-            using var connection = new SqliteConnection(_connectionString);
-            connection.Open();
-            Console.WriteLine("数据库连接已打开");
-
-            // 创建用户表
-            var createUserTable = @"
-                CREATE TABLE IF NOT EXISTS Users (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    Username TEXT UNIQUE NOT NULL,
-                    DisplayName TEXT NOT NULL,
-                    PasswordHash TEXT NOT NULL,
-                    Role INTEGER NOT NULL DEFAULT 1,
-                    IsActive INTEGER NOT NULL DEFAULT 1,
-                    CreatedAt TEXT NOT NULL,
-                    LastLoginAt TEXT,
-                    LastLoginIp TEXT
-                )";
-
-            // 创建登录记录表
-            var createLoginRecordTable = @"
-                CREATE TABLE IF NOT EXISTS LoginRecords (
-                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    UserId INTEGER NOT NULL,
-                    Username TEXT NOT NULL,
-                    LoginTime TEXT NOT NULL,
-                    LogoutTime TEXT,
-                    LoginIp TEXT,
-                    IsSuccess INTEGER NOT NULL DEFAULT 1,
-                    FailReason TEXT
-                )";
-
-            using (var cmd = new SqliteCommand(createUserTable, connection))
-            {
-                cmd.ExecuteNonQuery();
-                Console.WriteLine("用户表创建成功");
-            }
-
-            using (var cmd = new SqliteCommand(createLoginRecordTable, connection))
-            {
-                cmd.ExecuteNonQuery();
-                Console.WriteLine("登录记录表创建成功");
-            }
-
-            // 检查是否需要创建默认管理员账户
-            CreateDefaultAdminIfNeeded(connection);
-            Console.WriteLine("数据库初始化完成");
+            cmd.ExecuteNonQuery();
         }
-        catch (Microsoft.Data.Sqlite.SqliteException ex)
+
+        using (var cmd = new SqliteCommand(createLoginRecordTable, connection))
         {
-            Console.WriteLine($"数据库初始化失败(SQLite)：{ex.Message}, 错误码：{ex.SqliteErrorCode}");
-            throw;
+            cmd.ExecuteNonQuery();
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"数据库初始化失败：{ex.Message}");
-            throw;
-        }
+
+        // 检查是否需要创建默认管理员账户
+        CreateDefaultAdminIfNeeded(connection);
     }
 
     /// <summary>
@@ -183,7 +133,7 @@ public class UserManager
     /// </summary>
     public Task<(bool Success, string Message)> LoginAsync(string username, string password, string ipAddress = "")
     {
-        // 使用同步方法避免WPF中的死锁问题
+        // 使用Task.Run在后台线程执行，避免WPF死锁
         return Task.Run(() =>
         {
             try
@@ -232,7 +182,6 @@ public class UserManager
             }
             catch (Microsoft.Data.Sqlite.SqliteException ex)
             {
-                // SQLite特定错误
                 return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
             }
             catch (Exception ex)
@@ -547,7 +496,7 @@ public class UserManager
 
         cmd.Parameters.AddWithValue("@Id", user.Id);
         cmd.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt.ToString("O"));
-        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp);
+        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp ?? (object)DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync();
     }
@@ -562,7 +511,7 @@ public class UserManager
 
         cmd.Parameters.AddWithValue("@Id", user.Id);
         cmd.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt.ToString("O"));
-        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp);
+        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp ?? (object)DBNull.Value);
 
         cmd.ExecuteNonQuery();
     }

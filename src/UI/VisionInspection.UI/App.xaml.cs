@@ -42,12 +42,8 @@ public partial class App : Application
             }
 
             // 登录成功，显示主窗口
-            Console.WriteLine("登录成功，准备创建主窗口...");
             var mainWindow = new MainWindow(_userManager);
-            Console.WriteLine("主窗口创建成功，准备显示...");
-            mainWindow.Closed += (s, args) => Shutdown();
             mainWindow.Show();
-            Console.WriteLine("主窗口已显示");
         }
         catch (Exception ex)
         {
