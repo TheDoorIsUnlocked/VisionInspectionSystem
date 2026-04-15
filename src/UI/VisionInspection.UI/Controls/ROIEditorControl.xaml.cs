@@ -34,6 +34,34 @@ public partial class ROIEditorControl : SKElement
         MouseUp += OnMouseUp;
     }
 
+    private SKRect CalculateImageRect(SKBitmap image, int controlWidth, int controlHeight)
+    {
+        float imageAspect = (float)image.Width / image.Height;
+        float controlAspect = (float)controlWidth / controlHeight;
+
+        float drawWidth, drawHeight;
+        float drawX, drawY;
+
+        if (imageAspect > controlAspect)
+        {
+            // 图像更宽，以控制区宽度为准
+            drawWidth = controlWidth;
+            drawHeight = controlWidth / imageAspect;
+            drawX = 0;
+            drawY = (controlHeight - drawHeight) / 2;
+        }
+        else
+        {
+            // 图像更高，以控制区高度为准
+            drawWidth = controlHeight * imageAspect;
+            drawHeight = controlHeight;
+            drawX = (controlWidth - drawWidth) / 2;
+            drawY = 0;
+        }
+
+        return new SKRect(drawX, drawY, drawX + drawWidth, drawY + drawHeight);
+    }
+
     private static void OnViewModelChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is ROIEditorControl control)
@@ -50,12 +78,13 @@ public partial class ROIEditorControl : SKElement
         var info = e.Info;
 
         // 清空画布
-        canvas.Clear(SKColors.White);
+        canvas.Clear(SKColors.DarkGray);
 
-        // 绘制当前图像
+        // 绘制当前图像（保持比例）
         if (ViewModel.CurrentImage != null)
         {
-            canvas.DrawBitmap(ViewModel.CurrentImage, new SKRect(0, 0, info.Width, info.Height));
+            var imageRect = CalculateImageRect(ViewModel.CurrentImage, info.Width, info.Height);
+            canvas.DrawBitmap(ViewModel.CurrentImage, imageRect);
         }
 
         // 绘制所有ROI
@@ -151,8 +180,11 @@ public partial class ROIEditorControl : SKElement
             }
         }
 
-        // 开始绘制新ROI
-        ViewModel.StartDrawingCommand.Execute(skPoint);
+        // 只有在创建ROI模式下才允许绘制新ROI
+        if (ViewModel.IsCreatingROI)
+        {
+            ViewModel.StartDrawingCommand.Execute(skPoint);
+        }
     }
 
     private void OnMouseMove(object sender, MouseEventArgs e)

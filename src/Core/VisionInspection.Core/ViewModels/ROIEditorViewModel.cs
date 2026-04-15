@@ -30,6 +30,9 @@ public partial class ROIEditorViewModel : ViewModelBase
     [ObservableProperty]
     private float _imageScale = 1.0f;
 
+    [ObservableProperty]
+    private bool _isCreatingROI = false;
+
     public IReadOnlyList<ROI> ROIs => _roiManager.ROIs;
 
     public ROIEditorViewModel(ROIManager roiManager)
@@ -135,5 +138,18 @@ public partial class ROIEditorViewModel : ViewModelBase
         {
             CurrentShapeType = type;
         }
+    }
+
+    [RelayCommand]
+    public void StartCreatingROI()
+    {
+        IsCreatingROI = true;
+    }
+
+    [RelayCommand]
+    public void CancelCreatingROI()
+    {
+        IsCreatingROI = false;
+        IsEditing = false;
     }
 }

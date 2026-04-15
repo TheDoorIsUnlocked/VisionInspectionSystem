@@ -6,76 +6,144 @@
         xmlns:local="clr-namespace:VisionInspection.UI"
         xmlns:controls="clr-namespace:VisionInspection.UI.Controls"
         xmlns:viewModels="clr-namespace:VisionInspection.UI.ViewModels"
+        xmlns:hc="https://handyorg.github.io/handycontrol"
         mc:Ignorable="d"
-        Title="视觉检测系统 - ROI编辑器" Height="600" Width="1000">
+        Title="视觉检测系统" Height="700" Width="1200"
+        WindowStartupLocation="CenterScreen">
     <Window.DataContext>
         <viewModels:MainViewModel />
     </Window.DataContext>
-    <Grid>
+    <Grid Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
-        
-        <Grid Grid.Row="0" Margin="10">
+
+        <!-- 标题栏 -->
+        <Border Grid.Row="0" Background="{DynamicResource PrimaryBrush}" Height="50">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="视觉检测系统" 
+                          Foreground="White" FontSize="20" FontWeight="Bold"
+                          VerticalAlignment="Center" Margin="20,0" />
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="10,0">
+                    <hc:Badge Value="3" Margin="10,0">
+                        <Button Style="{StaticResource ButtonIcon}" hc:IconElement.Geometry="{StaticResource ClockGeometry}"/>
+                    </hc:Badge>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 工具栏 -->
+        <ToolBarTray Grid.Row="1" Background="White" Margin="0,5">
+            <ToolBar Header="图像操作" Band="0" BandIndex="0">
+                <Button hc:IconElement.Geometry="{StaticResource FolderOpenGeometry}" 
+                        Content="加载图像" Command="{Binding LoadImageCommand}"
+                        Style="{StaticResource ButtonPrimary}"/>
+                <Separator/>
+                <Button hc:IconElement.Geometry="{StaticResource SaveGeometry}" 
+                        Content="保存ROI" Command="{Binding SaveROIsCommand}"/>
+                <Button hc:IconElement.Geometry="{StaticResource DeleteGeometry}" 
+                        Content="清空ROI" Command="{Binding ClearROIsCommand}"/>
+            </ToolBar>
+
+            <ToolBar Header="ROI工具" Band="0" BandIndex="1">
+                <ToggleButton Content="创建ROI" 
+                             IsChecked="{Binding RoiEditorViewModel.IsCreatingROI}"
+                             Style="{StaticResource ToggleButtonPrimary}"/>
+                <Separator/>
+                <TextBlock Text="形状:" VerticalAlignment="Center" Margin="5,0"/>
+                <ComboBox SelectedValue="{Binding RoiEditorViewModel.CurrentShapeType}" 
+                         Width="100" VerticalAlignment="Center">
+                    <ComboBoxItem Content="矩形" Tag="0"/>
+                    <ComboBoxItem Content="圆形" Tag="1"/>
+                </ComboBox>
+            </ToolBar>
+
+            <ToolBar Header="SOP检测" Band="0" BandIndex="2" HorizontalAlignment="Right">
+                <Button Content="初始化SOP" Command="{Binding InitializeSOPModuleCommand}"
+                        Style="{StaticResource ButtonInfo}"/>
+                <Button Content="运行检测" Command="{Binding RunSOPDetectionCommand}"
+                        Style="{StaticResource ButtonSuccess}"/>
+            </ToolBar>
+        </ToolBarTray>
+
+        <!-- 主内容区 -->
+        <Grid Grid.Row="2" Margin="10">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="300" />
             </Grid.ColumnDefinitions>
-            
-            <!-- 左侧：ROI工具 -->
-            <StackPanel Grid.Column="0" Orientation="Horizontal">
-                <Button Content="加载图像" Command="{Binding LoadImageCommand}" Margin="0,0,10,0" />
-                <Button Content="保存ROI" Command="{Binding SaveROIsCommand}" Margin="0,0,10,0" />
-                <Button Content="清空ROI" Command="{Binding ClearROIsCommand}" Margin="0,0,10,0" />
-                
-                <Separator Width="2" Height="20" Background="Gray" Margin="0,0,10,0" />
-                
-                <TextBlock Text="形状类型: " VerticalAlignment="Center" Margin="0,0,5,0" />
-                <ComboBox SelectedValue="{Binding ROIEditorViewModel.CurrentShapeType}" Width="100">
-                    <ComboBoxItem Tag="0">矩形</ComboBoxItem>
-                    <ComboBoxItem Tag="1">圆形</ComboBoxItem>
-                </ComboBox>
-            </StackPanel>
-            
-            <!-- 右侧：SOP工具 -->
-            <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button Content="初始化SOP" Command="{Binding InitializeSOPModuleCommand}" Margin="0,0,10,0" />
-                <Button Content="运行SOP检测" Command="{Binding RunSOPDetectionCommand}" Margin="0,0,10,0" />
-            </StackPanel>
-        </Grid>
-        
-        <!-- 图像显示区域 -->
-        <Grid Grid.Row="1" Margin="10">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="*" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-            
-            <!-- ROI编辑器 -->
-            <controls:ROIEditorControl 
-                Grid.Row="0" 
-                ViewModel="{Binding RoiEditorViewModel}" 
-                Margin="0,0,0,10" />
-            
-            <!-- SOP状态 -->
-            <Border Grid.Row="1" BorderBrush="Gray" BorderThickness="1">
-                <StackPanel Orientation="Horizontal" Background="LightGray">
-                    <TextBlock Text="SOP状态: " FontWeight="Bold" Margin="10,5,10,5" />
-                    <TextBlock Text="{Binding SopStatus}" Margin="0,5,20,5" />
-                    <TextBlock Text="  步骤: " FontWeight="Bold" Margin="0,5,5,5" />
-                    <TextBlock Text="{Binding CurrentStep}" Margin="0,5,2,5" />
-                    <TextBlock Text="/" Margin="0,5,2,5" />
-                    <TextBlock Text="{Binding TotalSteps}" Margin="0,5,10,5" />
-                </StackPanel>
+
+            <!-- 图像显示区 -->
+            <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" 
+                    BorderThickness="1" Background="DarkGray"
+                    CornerRadius="4">
+                <Grid>
+                    <controls:ROIEditorControl 
+                        ViewModel="{Binding RoiEditorViewModel}"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"/>
+                    
+                    <!-- 提示信息 -->
+                    <TextBlock Text="点击'加载图像'按钮选择图片" 
+                              HorizontalAlignment="Center" VerticalAlignment="Center"
+                              Foreground="White" FontSize="16"
+                              Visibility="{Binding RoiEditorViewModel.CurrentImage, Converter={StaticResource Object2VisibilityReConverter}}"/>
+                </Grid>
             </Border>
+
+            <!-- 右侧面板 -->
+            <StackPanel Grid.Column="1" Margin="10,0,0,0">
+                <!-- ROI列表 -->
+                <hc:Card Header="ROI列表" Margin="0,0,0,10">
+                    <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}" 
+                            SelectedItem="{Binding RoiEditorViewModel.SelectedROI}"
+                            Height="200" BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding ROIName}" FontWeight="Bold" Margin="0,0,5,0"/>
+                                    <TextBlock Text="[" Opacity="0.5"/>
+                                    <TextBlock Text="{Binding ShapeType}" Opacity="0.5"/>
+                                    <TextBlock Text="]" Opacity="0.5"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </hc:Card>
+
+                <!-- SOP状态 -->
+                <hc:Card Header="SOP状态">
+                    <StackPanel>
+                        <hc:OutlineText Text="{Binding SopStatus}" 
+                                       Fill="{DynamicResource PrimaryBrush}"
+                                       FontSize="14" Margin="0,5"/>
+                        <ProgressBar Value="{Binding CurrentStep}" 
+                                    Maximum="{Binding TotalSteps}"
+                                    Height="20" Margin="0,10"/>
+                        <TextBlock HorizontalAlignment="Center">
+                            <Run Text="{Binding CurrentStep}"/>
+                            <Run Text="/"/>
+                            <Run Text="{Binding TotalSteps}"/>
+                        </TextBlock>
+                    </StackPanel>
+                </hc:Card>
+            </StackPanel>
         </Grid>
-        
+
         <!-- 状态栏 -->
-        <StatusBar Grid.Row="2" Height="25">
+        <StatusBar Grid.Row="3" Height="30">
             <StatusBarItem>
                 <TextBlock Text="{Binding Status}" />
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock Text="就绪" Opacity="0.5"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

@@ -1,8 +1,10 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Win32;
 using SkiaSharp;
 using System.IO;
+using System.Windows;
 using VisionInspection.Core.Interfaces;
 using VisionInspection.Core.Models;
 using VisionInspection.Core.Services;
@@ -146,16 +148,34 @@ public partial class MainViewModel : ViewModelBase
             IsBusy = true;
             Status = "加载图像...";
 
-            // 这里应该使用OpenFileDialog，为了简化先使用测试图像
-            using var stream = new FileStream("test_image.jpg", FileMode.Open, FileAccess.Read);
-            CurrentImage = SKBitmap.Decode(stream);
-            RoiEditorViewModel.CurrentImage = CurrentImage;
+            // 打开文件选择对话框
+            var openFileDialog = new OpenFileDialog
+            {
+                Title = "选择图像文件",
+                Filter = "图像文件|*.jpg;*.jpeg;*.png;*.bmp;*.gif|所有文件|*.*",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
+            };
 
-            Status = "图像加载成功";
+            if (openFileDialog.ShowDialog() == true)
+            {
+                await Task.Run(() =>
+                {
+                    using var stream = new FileStream(openFileDialog.FileName, FileMode.Open, FileAccess.Read);
+                    CurrentImage = SKBitmap.Decode(stream);
+                });
+                
+                RoiEditorViewModel.CurrentImage = CurrentImage;
+                Status = $"图像加载成功: {Path.GetFileName(openFileDialog.FileName)}";
+            }
+            else
+            {
+                Status = "取消加载图像";
+            }
         }
         catch (Exception ex)
         {
             Status = $"错误: {ex.Message}";
+            MessageBox.Show($"加载图像失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
