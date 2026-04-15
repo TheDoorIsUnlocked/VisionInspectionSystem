@@ -124,9 +124,15 @@ public partial class LoginWindow : Window
                 PasswordBox.Focus();
             }
         }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            ShowMessage($"数据库错误：{ex.Message}");
+            Console.WriteLine($"SQLite错误：{ex.Message}, 错误码：{ex.SqliteErrorCode}");
+        }
         catch (Exception ex)
         {
             ShowMessage($"登录失败：{ex.Message}");
+            Console.WriteLine($"登录异常：{ex}");
         }
         finally
         {

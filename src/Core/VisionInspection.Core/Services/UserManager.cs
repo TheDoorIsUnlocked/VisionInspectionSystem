@@ -18,11 +18,20 @@ public class UserManager
 
     public UserManager(string dbPath)
     {
-        // 初始化SQLitePCL
-        Batteries_V2.Init();
-        
-        _connectionString = $"Data Source={dbPath}";
-        InitializeDatabase();
+        try
+        {
+            // 初始化SQLitePCL
+            Batteries_V2.Init();
+            
+            _connectionString = $"Data Source={dbPath}";
+            InitializeDatabase();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"UserManager初始化失败：{ex.Message}");
+            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
+            throw; // 重新抛出以便上层处理
+        }
     }
 
     /// <summary>
