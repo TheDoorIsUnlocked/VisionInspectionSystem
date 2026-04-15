@@ -140,12 +140,19 @@ public partial class LoginWindow : Window
     private void ShowMessage(string message)
     {
         Debug.WriteLine($"LoginWindow.ShowMessage: {message}");
-        MessageTextBlock.Text = message;
-        MessageBorder.Visibility = Visibility.Visible;
+        Dispatcher.Invoke(() =>
+        {
+            MessageTextBlock.Text = message;
+            MessageBorder.Visibility = Visibility.Visible;
+            Debug.WriteLine($"LoginWindow.ShowMessage: Border visibility set to Visible");
+        });
     }
 
     private void HideMessage()
     {
-        MessageBorder.Visibility = Visibility.Collapsed;
+        Dispatcher.Invoke(() =>
+        {
+            MessageBorder.Visibility = Visibility.Collapsed;
+        });
     }
 }
