@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using SQLitePCL;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using VisionInspection.Core.Models;
@@ -16,14 +17,52 @@ public class UserManager
     private readonly string _connectionString;
     private User? _currentUser;
 
+    static UserManager()
+    {
+        // 静态构造函数中初始化SQLitePCL，确保只执行一次
+        try
+        {
+            Batteries_V2.Init();
+            Console.WriteLine("SQLitePCL初始化成功");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"SQLitePCL初始化失败：{ex.Message}");
+            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
+        }
+    }
+
     public UserManager(string dbPath)
     {
         try
         {
-            // 初始化SQLitePCL
-            Batteries_V2.Init();
-            
+            // 确保目录存在
+            var directory = Path.GetDirectoryName(dbPath);
+            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+                Console.WriteLine($"创建数据库目录：{directory}");
+            }
+
+            // 检查目录写入权限
+            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
+            {
+                try
+                {
+                    var testFile = Path.Combine(directory, $".write_test_{Guid.NewGuid()}.tmp");
+                    File.WriteAllText(testFile, "test");
+                    File.Delete(testFile);
+                    Console.WriteLine($"目录写入权限检查通过：{directory}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"目录写入权限检查失败：{directory}, 错误：{ex.Message}");
+                }
+            }
+
             _connectionString = $"Data Source={dbPath}";
+            Console.WriteLine($"数据库连接字符串：{_connectionString}");
+            
             InitializeDatabase();
         }
         catch (Exception ex)
