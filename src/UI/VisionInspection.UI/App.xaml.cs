@@ -47,7 +47,15 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"程序启动失败：{ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            // 输出到控制台
+            Console.WriteLine($"程序启动失败：{ex.Message}");
+            Console.WriteLine($"堆栈跟踪：{ex.StackTrace}");
+            
+            // 确保在主线程上显示错误消息
+            Dispatcher.Invoke(() =>
+            {
+                MessageBox.Show($"程序启动失败：{ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            });
             Shutdown();
         }
     }
