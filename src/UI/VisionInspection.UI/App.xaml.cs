@@ -18,22 +18,37 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
-        // 初始化用户管理器
-        var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "users.db");
-        Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
-        _userManager = new UserManager(dbPath);
-
-        // 显示登录窗口
-        var loginWindow = new LoginWindow(_userManager);
-        if (loginWindow.ShowDialog() != true)
+        try
         {
-            // 登录失败或取消，退出程序
-            Shutdown();
-            return;
-        }
+            // 初始化用户管理器
+            var dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "users.db");
+            var dbDir = Path.GetDirectoryName(dbPath)!;
+            
+            // 确保目录存在
+            if (!Directory.Exists(dbDir))
+            {
+                Directory.CreateDirectory(dbDir);
+            }
+            
+            _userManager = new UserManager(dbPath);
 
-        // 登录成功，显示主窗口
-        var mainWindow = new MainWindow(_userManager);
-        mainWindow.Show();
+            // 显示登录窗口
+            var loginWindow = new LoginWindow(_userManager);
+            if (loginWindow.ShowDialog() != true)
+            {
+                // 登录失败或取消，退出程序
+                Shutdown();
+                return;
+            }
+
+            // 登录成功，显示主窗口
+            var mainWindow = new MainWindow(_userManager);
+            mainWindow.Show();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"程序启动失败：{ex.Message}\n\n{ex.StackTrace}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            Shutdown();
+        }
     }
 }
