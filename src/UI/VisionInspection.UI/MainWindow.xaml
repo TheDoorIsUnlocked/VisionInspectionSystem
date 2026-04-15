@@ -68,10 +68,11 @@
                 </ToggleButton>
                 <Separator/>
                 <TextBlock Text="形状:" VerticalAlignment="Center" Margin="5,0"/>
-                <ComboBox SelectedValue="{Binding RoiEditorViewModel.CurrentShapeTypeString}" 
-                         Width="100" VerticalAlignment="Center" Margin="2">
-                    <ComboBoxItem Content="矩形" Tag="Rectangle"/>
-                    <ComboBoxItem Content="圆形" Tag="Circle"/>
+                <ComboBox Width="100" VerticalAlignment="Center" Margin="2"
+                         SelectedIndex="0"
+                         SelectionChanged="ShapeComboBox_SelectionChanged">
+                    <ComboBoxItem Content="矩形"/>
+                    <ComboBoxItem Content="圆形"/>
                 </ComboBox>
             </ToolBar>
 
