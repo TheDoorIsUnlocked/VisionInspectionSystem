@@ -176,6 +176,11 @@ public class UserManager
             _currentUser = user;
             return (true, $"欢迎，{user.DisplayName}");
         }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            // SQLite特定错误
+            return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
+        }
         catch (Exception ex)
         {
             return (false, $"登录失败：{ex.Message}");

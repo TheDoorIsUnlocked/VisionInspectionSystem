@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
-        Title="SOP流程配置" Height="600" Width="800"
+        Title="SOP流程配置" Height="700" Width="800"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
     <Grid Background="#F5F5F5">
