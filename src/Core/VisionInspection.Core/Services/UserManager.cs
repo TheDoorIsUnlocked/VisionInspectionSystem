@@ -517,17 +517,26 @@ public class UserManager
 
     private async Task UpdateLastLoginAsync(SqliteConnection connection, User user)
     {
-        using var cmd = new SqliteCommand(@"
-            UPDATE Users SET 
-                LastLoginAt = @LastLoginAt,
-                LastLoginIp = @LastLoginIp
-            WHERE Id = @Id", connection);
+        try
+        {
+            using var cmd = new SqliteCommand(@"
+                UPDATE Users SET 
+                    LastLoginAt = @LastLoginAt,
+                    LastLoginIp = @LastLoginIp
+                WHERE Id = @Id", connection);
 
-        cmd.Parameters.AddWithValue("@Id", user.Id);
-        cmd.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt.ToString("O"));
-        cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp ?? (object)DBNull.Value);
+            cmd.Parameters.AddWithValue("@Id", user.Id);
+            cmd.Parameters.AddWithValue("@LastLoginAt", user.LastLoginAt.ToString("O"));
+            cmd.Parameters.AddWithValue("@LastLoginIp", user.LastLoginIp ?? (object)DBNull.Value);
 
-        await cmd.ExecuteNonQueryAsync();
+            await cmd.ExecuteNonQueryAsync();
+            Debug.WriteLine("UpdateLastLoginAsync: 更新最后登录信息成功");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"UpdateLastLoginAsync 异常：{ex.Message}");
+            // 不抛出异常，不影响登录流程
+        }
     }
 
     private void UpdateLastLoginSync(SqliteConnection connection, User user)
@@ -564,9 +573,11 @@ public class UserManager
             cmd.Parameters.AddWithValue("@FailReason", failReason ?? (object)DBNull.Value);
 
             await cmd.ExecuteNonQueryAsync();
+            Debug.WriteLine("RecordLoginAsync: 记录登录日志成功");
         }
-        catch
+        catch (Exception ex)
         {
+            Debug.WriteLine($"RecordLoginAsync 异常：{ex.Message}");
             // 记录日志失败不应影响登录流程
         }
     }
