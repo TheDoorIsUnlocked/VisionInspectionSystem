@@ -127,64 +127,79 @@ public class UserManager
     /// <summary>
     /// 用户登录
     /// </summary>
-    public Task<(bool Success, string Message)> LoginAsync(string username, string password, string ipAddress = "")
+    public async Task<(bool Success, string Message)> LoginAsync(string username, string password, string ipAddress = "")
     {
-        // 使用Task.Run在后台线程执行，避免WPF死锁
-        return Task.Run(() =>
+        try
         {
-            try
+            Console.WriteLine($"LoginAsync: 开始登录，用户名={username}");
+            
+            using var connection = new SqliteConnection(_connectionString);
+            Console.WriteLine("LoginAsync: 创建连接成功");
+            
+            await connection.OpenAsync();
+            Console.WriteLine("LoginAsync: 打开连接成功");
+
+            // 查询用户
+            using var cmd = new SqliteCommand(
+                "SELECT * FROM Users WHERE Username = @Username", connection);
+            cmd.Parameters.AddWithValue("@Username", username);
+            Console.WriteLine("LoginAsync: 创建命令成功");
+
+            using var reader = await cmd.ExecuteReaderAsync();
+            Console.WriteLine("LoginAsync: 执行查询成功");
+            
+            if (!await reader.ReadAsync())
             {
-                using var connection = new SqliteConnection(_connectionString);
-                connection.Open();
-
-                // 查询用户
-                using var cmd = new SqliteCommand(
-                    "SELECT * FROM Users WHERE Username = @Username", connection);
-                cmd.Parameters.AddWithValue("@Username", username);
-
-                using var reader = cmd.ExecuteReader();
-                if (!reader.Read())
-                {
-                    RecordLoginSync(0, username, false, ipAddress, "用户名不存在");
-                    return (false, "用户名或密码错误");
-                }
-
-                var user = MapUserFromReader(reader);
-
-                // 检查账户是否启用
-                if (!user.IsActive)
-                {
-                    RecordLoginSync(user.Id, username, false, ipAddress, "账户已禁用");
-                    return (false, "账户已禁用，请联系管理员");
-                }
-
-                // 验证密码
-                if (!user.VerifyPassword(password))
-                {
-                    RecordLoginSync(user.Id, username, false, ipAddress, "密码错误");
-                    return (false, "用户名或密码错误");
-                }
-
-                // 更新最后登录信息
-                user.LastLoginAt = DateTime.Now;
-                user.LastLoginIp = ipAddress;
-                UpdateLastLoginSync(connection, user);
-
-                // 记录登录成功
-                RecordLoginSync(user.Id, username, true, ipAddress, "");
-
-                _currentUser = user;
-                return (true, $"欢迎，{user.DisplayName}");
+                Console.WriteLine("LoginAsync: 用户不存在");
+                await RecordLoginAsync(0, username, false, ipAddress, "用户名不存在");
+                return (false, "用户名或密码错误");
             }
-            catch (Microsoft.Data.Sqlite.SqliteException ex)
+
+            Console.WriteLine("LoginAsync: 找到用户");
+            var user = MapUserFromReader(reader);
+
+            // 检查账户是否启用
+            if (!user.IsActive)
             {
-                return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
+                Console.WriteLine("LoginAsync: 账户已禁用");
+                await RecordLoginAsync(user.Id, username, false, ipAddress, "账户已禁用");
+                return (false, "账户已禁用，请联系管理员");
             }
-            catch (Exception ex)
+
+            // 验证密码
+            if (!user.VerifyPassword(password))
             {
-                return (false, $"登录失败：{ex.Message}");
+                Console.WriteLine("LoginAsync: 密码错误");
+                await RecordLoginAsync(user.Id, username, false, ipAddress, "密码错误");
+                return (false, "用户名或密码错误");
             }
-        });
+
+            Console.WriteLine("LoginAsync: 密码验证成功");
+            
+            // 更新最后登录信息
+            user.LastLoginAt = DateTime.Now;
+            user.LastLoginIp = ipAddress;
+            await UpdateLastLoginAsync(connection, user);
+
+            // 记录登录成功
+            await RecordLoginAsync(user.Id, username, true, ipAddress, "");
+
+            _currentUser = user;
+            Console.WriteLine($"LoginAsync: 登录成功，欢迎{user.DisplayName}");
+            return (true, $"欢迎，{user.DisplayName}");
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex)
+        {
+            Console.WriteLine($"LoginAsync SQLite异常：{ex.Message}, 错误码={ex.SqliteErrorCode}");
+            Console.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
+            return (false, $"数据库错误：{ex.Message} (错误码: {ex.SqliteErrorCode})");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"LoginAsync 异常：{ex.Message}");
+            Console.WriteLine($"LoginAsync 堆栈：{ex.StackTrace}");
+            return (false, $"登录失败：{ex.Message}");
+        }
     }
 
     /// <summary>
