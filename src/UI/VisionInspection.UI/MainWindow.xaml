@@ -45,16 +45,33 @@
             </ToolBar>
 
             <ToolBar Header="ROI工具" Band="0" BandIndex="1">
-                <ToggleButton Content="✏️ 创建ROI" 
-                             IsChecked="{Binding RoiEditorViewModel.IsCreatingROI}"
-                             Style="{StaticResource ToggleButtonPrimary}" Margin="2"/>
+                <ToggleButton Margin="2" Padding="10,5"
+                             IsChecked="{Binding RoiEditorViewModel.IsCreatingROI}">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton">
+                            <Setter Property="Background" Value="#E0E0E0"/>
+                            <Setter Property="Foreground" Value="Black"/>
+                            <Setter Property="FontWeight" Value="Normal"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter Property="Background" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                    <Setter Property="FontWeight" Value="Bold"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ToggleButton.Style>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="✏️ " Margin="0,0,2,0"/>
+                        <TextBlock Text="创建ROI"/>
+                    </StackPanel>
+                </ToggleButton>
                 <Separator/>
                 <TextBlock Text="形状:" VerticalAlignment="Center" Margin="5,0"/>
-                <ComboBox Text="{Binding RoiEditorViewModel.CurrentShapeTypeString}" 
-                         Width="100" VerticalAlignment="Center" Margin="2"
-                         IsEditable="False" IsReadOnly="True">
-                    <ComboBoxItem Content="Rectangle"/>
-                    <ComboBoxItem Content="Circle"/>
+                <ComboBox SelectedValue="{Binding RoiEditorViewModel.CurrentShapeTypeString}" 
+                         Width="100" VerticalAlignment="Center" Margin="2">
+                    <ComboBoxItem Content="矩形" Tag="Rectangle"/>
+                    <ComboBoxItem Content="圆形" Tag="Circle"/>
                 </ComboBox>
             </ToolBar>
 

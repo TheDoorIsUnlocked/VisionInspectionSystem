@@ -133,18 +133,10 @@ public partial class ROIEditorControl : SKElement
         var bbox = roi.GetBoundingBox();
         bool isHovered = (roi == ViewModel?.HoveredROI);
 
-        // 如果选中，绘制填充背景（半透明）
+        // 只绘制边框，不填充背景
         if (isSelected)
         {
-            using var fillPaint = new SKPaint
-            {
-                Color = new SKColor(0, 150, 255, 80), // 半透明蓝色填充（更浓）
-                Style = SKPaintStyle.Fill,
-                IsAntialias = true
-            };
-            canvas.DrawPath(path, fillPaint);
-
-            // 绘制选中边框（更粗，发光效果）
+            // 绘制选中边框（更粗，亮蓝色）
             using var strokePaint = new SKPaint
             {
                 Color = new SKColor(0, 200, 255), // 亮蓝色
@@ -159,15 +151,6 @@ public partial class ROIEditorControl : SKElement
         }
         else if (isHovered)
         {
-            // 悬停效果：半透明白色填充
-            using var hoverFillPaint = new SKPaint
-            {
-                Color = new SKColor(255, 255, 255, 40),
-                Style = SKPaintStyle.Fill,
-                IsAntialias = true
-            };
-            canvas.DrawPath(path, hoverFillPaint);
-
             // 悬停边框：黄色
             using var hoverStrokePaint = new SKPaint
             {
