@@ -66,7 +66,33 @@ public partial class ROIEditorControl : SKElement
     {
         if (d is ROIEditorControl control)
         {
+            // 取消旧ViewModel的事件订阅
+            if (e.OldValue is ROIEditorViewModel oldViewModel)
+            {
+                oldViewModel.PropertyChanged -= control.OnViewModelPropertyChanged;
+            }
+            
+            // 订阅新ViewModel的事件
+            if (e.NewValue is ROIEditorViewModel newViewModel)
+            {
+                newViewModel.PropertyChanged += control.OnViewModelPropertyChanged;
+            }
+            
             control.InvalidateVisual();
+        }
+    }
+
+    private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        // 当CurrentImage、ROIs等属性改变时重绘
+        if (e.PropertyName == nameof(ROIEditorViewModel.CurrentImage) ||
+            e.PropertyName == nameof(ROIEditorViewModel.ROIs) ||
+            e.PropertyName == nameof(ROIEditorViewModel.SelectedROI) ||
+            e.PropertyName == nameof(ROIEditorViewModel.IsEditing) ||
+            e.PropertyName == nameof(ROIEditorViewModel.StartPoint) ||
+            e.PropertyName == nameof(ROIEditorViewModel.EndPoint))
+        {
+            InvalidateVisual();
         }
     }
 

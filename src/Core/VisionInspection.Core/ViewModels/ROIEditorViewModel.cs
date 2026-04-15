@@ -39,11 +39,18 @@ public partial class ROIEditorViewModel : ViewModelBase
     {
         _roiManager = roiManager;
         _roiManager.ROISelected += OnROISelected;
+        _roiManager.ROIChanged += OnROIChanged;
     }
 
     private void OnROISelected(object? sender, ROISelectedEventArgs e)
     {
         SelectedROI = e.ROI;
+    }
+
+    private void OnROIChanged(object? sender, ROIChangedEventArgs e)
+    {
+        // 触发ROIs属性变更通知
+        OnPropertyChanged(nameof(ROIs));
     }
 
     [RelayCommand]
