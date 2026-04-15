@@ -27,6 +27,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _userManager = userManager;
 
+        // 设置DataContext
+        DataContext = new MainViewModel();
+
         // 设置窗口标题显示当前用户
         Title = $"视觉检测系统 - [{_userManager.CurrentUser?.DisplayName} ({_userManager.CurrentUser?.RoleDisplayName})]";
 
