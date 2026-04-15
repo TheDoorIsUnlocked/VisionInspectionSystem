@@ -29,10 +29,10 @@
                         <TextBlock Text="配置检测流程步骤和参数" FontSize="12" Foreground="#999" Margin="0,5,0,0"/>
                     </StackPanel>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                    <TextBlock x:Name="StepTextBlock" Text="步骤 1" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="#666"/>
-                    <Button x:Name="LoadButton" Content="📂 加载配置" Margin="5,0" Padding="15,8" Click="LoadButton_Click"/>
-                    <Button x:Name="SaveButton" Content="💾 保存配置" Margin="5,0" Padding="15,8" Background="#1890FF" Foreground="White" Click="SaveButton_Click"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
+                    <Button x:Name="LoadButton" Content="📂 加载配置" Padding="15,7" Click="LoadButton_Click"/>
+                    <TextBlock x:Name="StepTextBlock" Text="步骤 1" VerticalAlignment="Center" Margin="5,0,5,0" Foreground="#666"/>
+                    <Button x:Name="SaveButton" Content="💾 保存配置" Margin="5,0" Padding="15,7" Background="#1890FF" Foreground="White" Click="SaveButton_Click"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -51,7 +51,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
-                    
+
                     <!-- 列表标题 -->
                     <Border Grid.Row="0" Background="#FAFAFA" Padding="15,12" CornerRadius="6,6,0,0">
                         <Grid>
@@ -67,7 +67,7 @@
                             <TextBlock Grid.Column="3" Text="操作" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
                         </Grid>
                     </Border>
-                    
+
                     <!-- 步骤列表 -->
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="StepsListPanel" Margin="10"/>
@@ -83,14 +83,14 @@
                         <RowDefinition Height="*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    
+
                     <TextBlock Grid.Row="0" Text="编辑步骤" FontSize="16" FontWeight="Bold" Margin="0,0,0,20"/>
-                    
+
                     <StackPanel Grid.Row="1">
                         <!-- 步骤名称 -->
                         <TextBlock Text="步骤名称" FontSize="12" Foreground="#666" Margin="0,0,0,5"/>
                         <TextBox x:Name="StepNameTextBox" Height="32" Padding="10,0" VerticalContentAlignment="Center"/>
-                        
+
                         <!-- 检测类型 -->
                         <TextBlock Text="检测类型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
                         <ComboBox x:Name="DetectionTypeComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
@@ -101,7 +101,7 @@
                             <ComboBoxItem Content="颜色检测"/>
                             <ComboBoxItem Content="自定义脚本"/>
                         </ComboBox>
-                        
+
                         <!-- 模型选择 -->
                         <TextBlock Text="使用模型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
                         <ComboBox x:Name="ModelComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
@@ -110,11 +110,11 @@
                             <ComboBoxItem Content="人脸检测模型"/>
                             <ComboBoxItem Content="自定义模型..."/>
                         </ComboBox>
-                        
+
                         <!-- 描述 -->
                         <TextBlock Text="步骤描述" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
                         <TextBox x:Name="StepDescriptionTextBox" Height="60" Padding="10" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
-                        
+
                         <!-- 图标选择 -->
                         <TextBlock Text="步骤图标" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
                         <WrapPanel x:Name="IconPanel">
@@ -128,12 +128,12 @@
                             <Button Content="🎨" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
                         </WrapPanel>
                     </StackPanel>
-                    
+
                     <!-- 按钮 -->
                     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
-                        <Button x:Name="ClearButton" Content="🗑️ 清空" Margin="5,0" Padding="15,8" Click="ClearButton_Click"/>
-                        <Button x:Name="AddStepButton" Content="➕ 添加步骤" Margin="5,0" Padding="15,8" Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
-                        <Button x:Name="UpdateStepButton" Content="💾 更新步骤" Margin="5,0" Padding="15,8" Background="#1890FF" Foreground="White" Click="UpdateStepButton_Click" Visibility="Collapsed"/>
+                        <Button x:Name="ClearButton" Content="🗑️ 清空" Margin="5,0" Padding="15,7" Click="ClearButton_Click"/>
+                        <Button x:Name="AddStepButton" Content="➕ 添加步骤" Margin="5,0" Padding="15,7" Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
+                        <Button x:Name="UpdateStepButton" Content="💾 更新步骤" Margin="5,0" Padding="15,7" Background="#1890FF" Foreground="White" Click="UpdateStepButton_Click" Visibility="Collapsed"/>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -142,9 +142,9 @@
         <!-- 底部按钮 -->
         <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,12">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="ClearAllButton" Content="🗑️ 清空全部" Margin="5,0" Padding="20,8" Click="ClearAllButton_Click"/>
-                <Button x:Name="CancelButton" Content="❌ 取消" Margin="5,0" Padding="20,8" Click="CancelButton_Click"/>
-                <Button x:Name="ConfirmButton" Content="✓ 确定" Margin="5,0" Padding="20,8" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click"/>
+                <Button x:Name="ClearAllButton" Content="🗑️ 清空全部" Margin="5,0" Padding="20,7" Click="ClearAllButton_Click"/>
+                <Button x:Name="CancelButton" Content="❌ 取消" Margin="5,0" Padding="20,7" Click="CancelButton_Click"/>
+                <Button x:Name="ConfirmButton" Content="✓ 确定" Margin="5,0" Padding="20,7" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click"/>
             </StackPanel>
         </Border>
     </Grid>

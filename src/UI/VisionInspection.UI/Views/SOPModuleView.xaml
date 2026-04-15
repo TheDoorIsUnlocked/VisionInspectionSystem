@@ -16,14 +16,14 @@
         </Grid.RowDefinitions>
 
         <!-- 标题和控制按钮 -->
-        <Border Grid.Row="0" Background="#F5F5F5" Padding="15,10">
+        <Border Grid.Row="0" Background="#F5F5F5" Padding="1,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="📋" FontSize="20" Margin="0,0,8,0"/>
+                    <TextBlock Text="📋" FontSize="20" Margin="0,0,0,0"/>
                     <TextBlock Text="SOP检测模块" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
