@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Input;
@@ -119,6 +120,7 @@ public partial class LoginWindow : Window
             }
             else
             {
+                Debug.WriteLine($"LoginWindow: 显示错误消息: {result.Message}");
                 ShowMessage(result.Message);
                 PasswordBox.Password = "";
                 PasswordBox.Focus();
@@ -137,12 +139,13 @@ public partial class LoginWindow : Window
 
     private void ShowMessage(string message)
     {
+        Debug.WriteLine($"LoginWindow.ShowMessage: {message}");
         MessageTextBlock.Text = message;
-        MessageTextBlock.Visibility = Visibility.Visible;
+        MessageBorder.Visibility = Visibility.Visible;
     }
 
     private void HideMessage()
     {
-        MessageTextBlock.Visibility = Visibility.Collapsed;
+        MessageBorder.Visibility = Visibility.Collapsed;
     }
 }

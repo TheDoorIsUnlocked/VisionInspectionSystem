@@ -121,14 +121,22 @@
                 </Button>
                 
                 <!-- 提示信息 -->
-                <TextBlock x:Name="MessageTextBlock"
-                          Text=""
-                          Foreground="#FF4D4F"
-                          FontSize="12"
-                          TextWrapping="Wrap"
-                          TextAlignment="Center"
-                          Margin="0,15,0,0"
-                          Visibility="Collapsed"/>
+                <Border x:Name="MessageBorder"
+                        Background="#FFF2F0"
+                        BorderBrush="#FFCCC7"
+                        BorderThickness="1"
+                        CornerRadius="4"
+                        Padding="10,8"
+                        Margin="0,15,0,0"
+                        Visibility="Collapsed">
+                    <TextBlock x:Name="MessageTextBlock"
+                              Text=""
+                              Foreground="#FF4D4F"
+                              FontSize="13"
+                              FontWeight="Medium"
+                              TextWrapping="Wrap"
+                              TextAlignment="Center"/>
+                </Border>
                 
                 <!-- 默认账户提示 -->
                 <TextBlock Text="默认账户: admin / admin123"
