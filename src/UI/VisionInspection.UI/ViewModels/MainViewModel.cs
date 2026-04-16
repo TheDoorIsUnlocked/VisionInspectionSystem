@@ -66,6 +66,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private long _totalFrames = 0;
 
+    private string _lastDetectionError = "";
+
     public MainViewModel()
     {
         _roiManager = new ROIManager();
@@ -73,6 +75,14 @@ public partial class MainViewModel : ViewModelBase
         _cameraService = new MockCameraService();
         _detectionService = new YoloDetectionService();
         _modelManager = new ModelManager();
+
+        // 订阅检测错误事件
+        _detectionService.DetectionError += OnDetectionError;
+    }
+
+    private void OnDetectionError(object? sender, string e)
+    {
+        _lastDetectionError = e;
     }
 
     [RelayCommand]
@@ -544,14 +554,17 @@ public partial class MainViewModel : ViewModelBase
                 DurationSeconds = 0
             };
 
+            // 清空之前的错误信息
+            _lastDetectionError = "";
+
             if (!_detectionService.InitializeVideoInference(options))
             {
-                Status = "视频推理初始化失败";
                 IsVideoPlaying = false;
                 
                 // 检查是否是FFmpeg未安装的问题
-                if (Status.Contains("FFmpeg"))
+                if (_lastDetectionError.Contains("FFmpeg"))
                 {
+                    Status = "FFmpeg未安装";
                     var result = MessageBox.Show(
                         "视频推理需要FFmpeg支持。\n\n" +
                         "FFmpeg未安装或未添加到系统PATH。\n\n" +
@@ -572,7 +585,8 @@ public partial class MainViewModel : ViewModelBase
                 }
                 else
                 {
-                    MessageBox.Show("视频推理初始化失败，请检查视频文件格式是否支持。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Status = $"视频推理初始化失败: {_lastDetectionError}";
+                    MessageBox.Show($"视频推理初始化失败:\n{_lastDetectionError}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 return;
             }
