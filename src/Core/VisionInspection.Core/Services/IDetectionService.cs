@@ -118,6 +118,58 @@ namespace VisionInspection.Core.Services
     }
 
     /// <summary>
+    /// 视频帧检测结果
+    /// </summary>
+    public class VideoFrameResult
+    {
+        /// <summary>
+        /// 帧索引
+        /// </summary>
+        public long FrameIndex { get; set; }
+
+        /// <summary>
+        /// 帧图像
+        /// </summary>
+        public SKBitmap Frame { get; set; } = null!;
+
+        /// <summary>
+        /// 检测结果
+        /// </summary>
+        public DetectionResult DetectionResult { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// 视频推理选项
+    /// </summary>
+    public class VideoInferenceOptions
+    {
+        /// <summary>
+        /// 视频文件路径
+        /// </summary>
+        public string VideoPath { get; set; } = "";
+
+        /// <summary>
+        /// 输出视频路径（可选）
+        /// </summary>
+        public string? OutputPath { get; set; }
+
+        /// <summary>
+        /// 处理间隔（每N帧处理一次，0表示处理所有帧）
+        /// </summary>
+        public int FrameInterval { get; set; } = 0;
+
+        /// <summary>
+        /// 开始时间（秒）
+        /// </summary>
+        public int StartTimeSeconds { get; set; } = 0;
+
+        /// <summary>
+        /// 处理时长（秒，0表示处理到结束）
+        /// </summary>
+        public int DurationSeconds { get; set; } = 0;
+    }
+
+    /// <summary>
     /// 检测服务接口
     /// </summary>
     public interface IDetectionService
@@ -148,6 +200,21 @@ namespace VisionInspection.Core.Services
         Task<DetectionResult> DetectAsync(SKBitmap image, List<ROIInfo> rois);
 
         /// <summary>
+        /// 初始化视频推理
+        /// </summary>
+        bool InitializeVideoInference(VideoInferenceOptions options);
+
+        /// <summary>
+        /// 开始视频推理
+        /// </summary>
+        void StartVideoInference();
+
+        /// <summary>
+        /// 停止视频推理
+        /// </summary>
+        void StopVideoInference();
+
+        /// <summary>
         /// 设置置信度阈值
         /// </summary>
         void SetConfidenceThreshold(float threshold);
@@ -171,5 +238,15 @@ namespace VisionInspection.Core.Services
         /// 检测错误事件
         /// </summary>
         event EventHandler<string>? DetectionError;
+
+        /// <summary>
+        /// 视频帧检测完成事件
+        /// </summary>
+        event EventHandler<VideoFrameResult>? VideoFrameDetected;
+
+        /// <summary>
+        /// 视频推理完成事件
+        /// </summary>
+        event EventHandler? VideoInferenceCompleted;
     }
 }

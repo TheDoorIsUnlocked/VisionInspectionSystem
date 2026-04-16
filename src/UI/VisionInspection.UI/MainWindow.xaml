@@ -116,7 +116,51 @@
                         Margin="2"/>
             </ToolBar>
 
-            <ToolBar Header="SOP检测" Band="0" BandIndex="3" HorizontalAlignment="Right">
+            <ToolBar Header="视频推理" Band="0" BandIndex="3">
+                <Button Content="🎬 加载视频" Command="{Binding LoadVideoCommand}"
+                        Style="{StaticResource ButtonPrimary}" Margin="2"/>
+                <TextBlock Text="{Binding VideoPath, Converter={StaticResource String2VisibilityConverter}}" 
+                          VerticalAlignment="Center" Margin="5,0" MaxWidth="150"
+                          TextTrimming="CharacterEllipsis" ToolTip="{Binding VideoPath}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="Gray"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding VideoPath}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <Separator/>
+                <Button Content="▶️ 开始推理" Command="{Binding StartVideoInferenceCommand}"
+                        Style="{StaticResource ButtonSuccess}" Margin="2">
+                    <Button.IsEnabled>
+                        <MultiBinding Converter="{StaticResource BooleanAndConverter}">
+                            <Binding Path="IsModelLoaded"/>
+                            <Binding Path="IsVideoPlaying" Converter="{StaticResource Boolean2BooleanReConverter}"/>
+                        </MultiBinding>
+                    </Button.IsEnabled>
+                </Button>
+                <Button Content="⏹️ 停止推理" Command="{Binding StopVideoInferenceCommand}" Margin="2">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ButtonDanger}">
+                            <Setter Property="IsEnabled" Value="False"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsVideoPlaying}" Value="True">
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <TextBlock Text="{Binding CurrentFrameIndex, StringFormat='帧: {0}'}" 
+                          VerticalAlignment="Center" Margin="10,0"
+                          Visibility="{Binding IsVideoPlaying, Converter={StaticResource Boolean2VisibilityConverter}}"/>
+            </ToolBar>
+
+            <ToolBar Header="SOP检测" Band="0" BandIndex="4" HorizontalAlignment="Right">
                 <Button Content="⚙️ 初始化SOP" Command="{Binding InitializeSOPModuleCommand}"
                         Style="{StaticResource ButtonInfo}" Margin="2"/>
                 <Button Content="▶️ 运行检测" Command="{Binding RunSOPDetectionCommand}"

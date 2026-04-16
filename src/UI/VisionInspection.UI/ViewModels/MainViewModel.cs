@@ -54,6 +54,18 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private List<DetectedObject> _detectionResults = new();
 
+    [ObservableProperty]
+    private string _videoPath = "";
+
+    [ObservableProperty]
+    private bool _isVideoPlaying = false;
+
+    [ObservableProperty]
+    private long _currentFrameIndex = 0;
+
+    [ObservableProperty]
+    private long _totalFrames = 0;
+
     public MainViewModel()
     {
         _roiManager = new ROIManager();
@@ -431,6 +443,142 @@ public partial class MainViewModel : ViewModelBase
             RoiEditorViewModel.CurrentImage = CurrentImage;
         }
         Status = "检测结果已清除";
+    }
+
+    #endregion
+
+    #region 视频推理功能
+
+    [RelayCommand]
+    public void LoadVideo()
+    {
+        try
+        {
+            var openFileDialog = new OpenFileDialog
+            {
+                Title = "选择视频文件",
+                Filter = "视频文件|*.mp4;*.avi;*.mkv;*.mov;*.wmv|所有文件|*.*",
+                InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyVideos)
+            };
+
+            if (openFileDialog.ShowDialog() == true)
+            {
+                VideoPath = openFileDialog.FileName;
+                Status = $"视频已加载: {Path.GetFileName(VideoPath)}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Status = $"加载视频失败: {ex.Message}";
+            MessageBox.Show($"加载视频失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    [RelayCommand]
+    public async Task StartVideoInferenceAsync()
+    {
+        try
+        {
+            if (!IsModelLoaded)
+            {
+                MessageBox.Show("请先加载模型", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(VideoPath))
+            {
+                MessageBox.Show("请先加载视频", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            IsBusy = true;
+            IsVideoPlaying = true;
+            Status = "正在初始化视频推理...";
+
+            // 初始化视频推理
+            var options = new VideoInferenceOptions
+            {
+                VideoPath = VideoPath,
+                FrameInterval = 0,  // 处理所有帧
+                StartTimeSeconds = 0,
+                DurationSeconds = 0
+            };
+
+            if (!_detectionService.InitializeVideoInference(options))
+            {
+                Status = "视频推理初始化失败";
+                IsVideoPlaying = false;
+                return;
+            }
+
+            // 订阅视频帧检测事件
+            _detectionService.VideoFrameDetected += OnVideoFrameDetected;
+            _detectionService.VideoInferenceCompleted += OnVideoInferenceCompleted;
+
+            Status = "开始视频推理...";
+            _detectionService.StartVideoInference();
+        }
+        catch (Exception ex)
+        {
+            Status = $"视频推理错误: {ex.Message}";
+            MessageBox.Show($"视频推理失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            IsVideoPlaying = false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    public void StopVideoInference()
+    {
+        try
+        {
+            _detectionService.StopVideoInference();
+            _detectionService.VideoFrameDetected -= OnVideoFrameDetected;
+            _detectionService.VideoInferenceCompleted -= OnVideoInferenceCompleted;
+            IsVideoPlaying = false;
+            Status = "视频推理已停止";
+        }
+        catch (Exception ex)
+        {
+            Status = $"停止视频推理失败: {ex.Message}";
+        }
+    }
+
+    private void OnVideoFrameDetected(object? sender, VideoFrameResult e)
+    {
+        // 在UI线程更新
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            CurrentFrameIndex = e.FrameIndex;
+            DetectionResults = e.DetectionResult.Objects;
+
+            // 绘制检测结果
+            if (e.DetectionResult.Objects.Count > 0)
+            {
+                var resultImage = DrawDetectionResults(e.Frame, e.DetectionResult.Objects);
+                RoiEditorViewModel.CurrentImage = resultImage;
+            }
+            else
+            {
+                RoiEditorViewModel.CurrentImage = e.Frame;
+            }
+
+            Status = $"处理帧 {e.FrameIndex}，检测到 {e.DetectionResult.Objects.Count} 个对象";
+        });
+    }
+
+    private void OnVideoInferenceCompleted(object? sender, EventArgs e)
+    {
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+            IsVideoPlaying = false;
+            Status = "视频推理完成";
+            _detectionService.VideoFrameDetected -= OnVideoFrameDetected;
+            _detectionService.VideoInferenceCompleted -= OnVideoInferenceCompleted;
+        });
     }
 
     #endregion

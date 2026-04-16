@@ -2,6 +2,7 @@ using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using VisionInspection.Core.Services;
 using YoloDotNet;
@@ -9,6 +10,7 @@ using YoloDotNet.Enums;
 using YoloDotNet.ExecutionProvider.Cuda;
 using YoloDotNet.ExecutionProvider.Cpu;
 using YoloDotNet.Models;
+using YoloDotNet.Video;
 
 namespace VisionInspection.Modules.Detection
 {
@@ -20,11 +22,15 @@ namespace VisionInspection.Modules.Detection
         private Yolo? _yolo;
         private ModelInfo? _modelInfo;
         private readonly object _lockObject = new();
+        private CancellationTokenSource? _videoInferenceCts;
+        private VideoInferenceOptions? _videoOptions;
 
         public bool IsInitialized => _yolo != null;
 
         public event EventHandler<DetectionResult>? DetectionCompleted;
         public event EventHandler<string>? DetectionError;
+        public event EventHandler<VideoFrameResult>? VideoFrameDetected;
+        public event EventHandler? VideoInferenceCompleted;
 
         public async Task<bool> InitializeAsync(ModelInfo modelInfo)
         {
@@ -305,5 +311,132 @@ namespace VisionInspection.Modules.Detection
         {
             return _modelInfo?.Classes ?? new List<string>();
         }
+
+        #region 视频推理
+
+        public bool InitializeVideoInference(VideoInferenceOptions options)
+        {
+            if (_yolo == null || _modelInfo == null)
+            {
+                DetectionError?.Invoke(this, "检测服务未初始化");
+                return false;
+            }
+
+            if (!File.Exists(options.VideoPath))
+            {
+                DetectionError?.Invoke(this, $"视频文件不存在: {options.VideoPath}");
+                return false;
+            }
+
+            try
+            {
+                _videoOptions = options;
+
+                // 初始化视频
+                _yolo.InitializeVideo(new VideoOptions
+                {
+                    VideoInput = options.VideoPath,
+                    VideoOutput = options.OutputPath,
+                    FrameInterval = options.FrameInterval,
+                    StartTimeSeconds = options.StartTimeSeconds,
+                    DurationSeconds = options.DurationSeconds,
+                    Width = 0,  // 使用原始宽度
+                    Height = 0  // 使用原始高度
+                });
+
+                // 设置帧接收处理
+                _yolo.OnVideoFrameReceived = OnVideoFrameReceived;
+                _yolo.OnVideoEnd = OnVideoEnd;
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                DetectionError?.Invoke(this, $"初始化视频推理失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        public void StartVideoInference()
+        {
+            if (_yolo == null || _videoOptions == null)
+            {
+                DetectionError?.Invoke(this, "视频推理未初始化");
+                return;
+            }
+
+            _videoInferenceCts = new CancellationTokenSource();
+
+            Task.Run(() =>
+            {
+                try
+                {
+                    _yolo.StartVideoProcessing();
+                }
+                catch (Exception ex)
+                {
+                    DetectionError?.Invoke(this, $"视频推理失败: {ex.Message}");
+                }
+            }, _videoInferenceCts.Token);
+        }
+
+        public void StopVideoInference()
+        {
+            _videoInferenceCts?.Cancel();
+            _videoInferenceCts?.Dispose();
+            _videoInferenceCts = null;
+        }
+
+        private void OnVideoFrameReceived(SKBitmap frame, long frameIndex)
+        {
+            if (_yolo == null || _modelInfo == null) return;
+
+            try
+            {
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+                // 执行检测
+                List<DetectedObject> detectedObjects = _modelInfo.Type switch
+                {
+                    Core.Services.ModelType.ObjectDetection => RunObjectDetection(frame, new List<ROIInfo>()),
+                    Core.Services.ModelType.Segmentation => RunSegmentation(frame, new List<ROIInfo>()),
+                    Core.Services.ModelType.Classification => RunClassification(frame),
+                    Core.Services.ModelType.PoseEstimation => RunPoseEstimation(frame, new List<ROIInfo>()),
+                    _ => RunObjectDetection(frame, new List<ROIInfo>())
+                };
+
+                stopwatch.Stop();
+
+                var result = new DetectionResult
+                {
+                    Objects = detectedObjects,
+                    ProcessingTimeMs = stopwatch.Elapsed.TotalMilliseconds,
+                    ImageWidth = frame.Width,
+                    ImageHeight = frame.Height,
+                    Timestamp = DateTime.Now
+                };
+
+                var frameResult = new VideoFrameResult
+                {
+                    FrameIndex = frameIndex,
+                    Frame = frame,
+                    DetectionResult = result
+                };
+
+                VideoFrameDetected?.Invoke(this, frameResult);
+                DetectionCompleted?.Invoke(this, result);
+            }
+            catch (Exception ex)
+            {
+                DetectionError?.Invoke(this, $"处理帧 {frameIndex} 失败: {ex.Message}");
+            }
+        }
+
+        private void OnVideoEnd()
+        {
+            VideoInferenceCompleted?.Invoke(this, EventArgs.Empty);
+        }
+
+        #endregion
     }
 }
