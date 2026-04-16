@@ -179,4 +179,36 @@ public partial class MainWindow : Window
     {
         MessageBox.Show("通信设置功能开发中...", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
     }
+
+    /// <summary>
+    /// ROI形状 - 矩形菜单点击
+    /// </summary>
+    private void ShapeRectangleMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && DataContext is MainViewModel viewModel)
+        {
+            viewModel.RoiEditorViewModel.CurrentShapeType = ROIShapeType.Rectangle;
+            // 取消圆形选中状态
+            if (FindName("ShapeCircleMenuItem") is MenuItem circleMenu)
+            {
+                circleMenu.IsChecked = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// ROI形状 - 圆形菜单点击
+    /// </summary>
+    private void ShapeCircleMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem && DataContext is MainViewModel viewModel)
+        {
+            viewModel.RoiEditorViewModel.CurrentShapeType = ROIShapeType.Circle;
+            // 取消矩形选中状态
+            if (FindName("ShapeRectangleMenuItem") is MenuItem rectMenu)
+            {
+                rectMenu.IsChecked = false;
+            }
+        }
+    }
 }

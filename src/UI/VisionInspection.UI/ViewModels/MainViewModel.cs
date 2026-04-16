@@ -450,7 +450,7 @@ public partial class MainViewModel : ViewModelBase
     #region 视频推理功能
 
     [RelayCommand]
-    public void LoadVideo()
+    public async Task LoadVideoAsync()
     {
         try
         {
@@ -464,7 +464,47 @@ public partial class MainViewModel : ViewModelBase
             if (openFileDialog.ShowDialog() == true)
             {
                 VideoPath = openFileDialog.FileName;
-                Status = $"视频已加载: {Path.GetFileName(VideoPath)}";
+                Status = $"正在加载视频: {Path.GetFileName(VideoPath)}...";
+
+                // 加载并显示视频第一帧
+                await Task.Run(() =>
+                {
+                    try
+                    {
+                        // 使用FFmpeg或视频库提取第一帧
+                        var videoCapture = new OpenCvSharp.VideoCapture(VideoPath);
+                        if (videoCapture.IsOpened())
+                        {
+                            using var frame = new OpenCvSharp.Mat();
+                            if (videoCapture.Read(frame))
+                            {
+                                // 转换OpenCV Mat为SKBitmap
+                                var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(frame);
+                                using var ms = new MemoryStream();
+                                bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+                                ms.Position = 0;
+                                
+                                var skBitmap = SKBitmap.Decode(ms);
+                                
+                                // 在UI线程更新图像
+                                Application.Current.Dispatcher.Invoke(() =>
+                                {
+                                    CurrentImage = skBitmap;
+                                    RoiEditorViewModel.CurrentImage = skBitmap;
+                                    Status = $"视频已加载: {Path.GetFileName(VideoPath)}";
+                                });
+                            }
+                            videoCapture.Release();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Application.Current.Dispatcher.Invoke(() =>
+                        {
+                            Status = $"加载视频预览失败: {ex.Message}";
+                        });
+                    }
+                });
             }
         }
         catch (Exception ex)
@@ -508,6 +548,32 @@ public partial class MainViewModel : ViewModelBase
             {
                 Status = "视频推理初始化失败";
                 IsVideoPlaying = false;
+                
+                // 检查是否是FFmpeg未安装的问题
+                if (Status.Contains("FFmpeg"))
+                {
+                    var result = MessageBox.Show(
+                        "视频推理需要FFmpeg支持。\n\n" +
+                        "FFmpeg未安装或未添加到系统PATH。\n\n" +
+                        "是否打开FFmpeg下载页面？",
+                        "缺少FFmpeg",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Warning);
+                    
+                    if (result == MessageBoxResult.Yes)
+                    {
+                        // 打开FFmpeg下载页面
+                        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = "https://ffmpeg.org/download.html",
+                            UseShellExecute = true
+                        });
+                    }
+                }
+                else
+                {
+                    MessageBox.Show("视频推理初始化失败，请检查视频文件格式是否支持。", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
                 return;
             }
 

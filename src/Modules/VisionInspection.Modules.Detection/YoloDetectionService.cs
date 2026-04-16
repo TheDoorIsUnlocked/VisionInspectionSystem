@@ -328,21 +328,44 @@ namespace VisionInspection.Modules.Detection
                 return false;
             }
 
+            // 检查FFmpeg是否已安装
+            if (!IsFFmpegInstalled())
+            {
+                DetectionError?.Invoke(this, "FFmpeg未安装或未添加到系统PATH。请安装FFmpeg并确保ffmpeg.exe和ffprobe.exe在系统PATH中。");
+                return false;
+            }
+
             try
             {
                 _videoOptions = options;
 
-                // 初始化视频
-                _yolo.InitializeVideo(new VideoOptions
+                // 创建视频选项
+                var videoOptions = new VideoOptions
                 {
                     VideoInput = options.VideoPath,
-                    VideoOutput = options.OutputPath,
                     FrameInterval = options.FrameInterval,
-                    StartTimeSeconds = options.StartTimeSeconds,
-                    DurationSeconds = options.DurationSeconds,
                     Width = 0,  // 使用原始宽度
                     Height = 0  // 使用原始高度
-                });
+                };
+
+                // 设置可选参数
+                if (!string.IsNullOrEmpty(options.OutputPath))
+                {
+                    videoOptions.VideoOutput = options.OutputPath;
+                }
+
+                if (options.StartTimeSeconds > 0)
+                {
+                    videoOptions.StartTimeSeconds = options.StartTimeSeconds;
+                }
+
+                if (options.DurationSeconds > 0)
+                {
+                    videoOptions.DurationSeconds = options.DurationSeconds;
+                }
+
+                // 初始化视频
+                _yolo.InitializeVideo(videoOptions);
 
                 // 设置帧接收处理
                 _yolo.OnVideoFrameReceived = OnVideoFrameReceived;
@@ -353,6 +376,44 @@ namespace VisionInspection.Modules.Detection
             catch (Exception ex)
             {
                 DetectionError?.Invoke(this, $"初始化视频推理失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 检查FFmpeg是否已安装
+        /// </summary>
+        private bool IsFFmpegInstalled()
+        {
+            try
+            {
+                // 检查ffmpeg
+                using var ffmpegProcess = new System.Diagnostics.Process();
+                ffmpegProcess.StartInfo.FileName = "ffmpeg";
+                ffmpegProcess.StartInfo.Arguments = "-version";
+                ffmpegProcess.StartInfo.UseShellExecute = false;
+                ffmpegProcess.StartInfo.RedirectStandardOutput = true;
+                ffmpegProcess.StartInfo.CreateNoWindow = true;
+                ffmpegProcess.Start();
+                ffmpegProcess.WaitForExit(2000);
+
+                if (ffmpegProcess.ExitCode != 0)
+                    return false;
+
+                // 检查ffprobe
+                using var ffprobeProcess = new System.Diagnostics.Process();
+                ffprobeProcess.StartInfo.FileName = "ffprobe";
+                ffprobeProcess.StartInfo.Arguments = "-version";
+                ffprobeProcess.StartInfo.UseShellExecute = false;
+                ffprobeProcess.StartInfo.RedirectStandardOutput = true;
+                ffprobeProcess.StartInfo.CreateNoWindow = true;
+                ffprobeProcess.Start();
+                ffprobeProcess.WaitForExit(2000);
+
+                return ffprobeProcess.ExitCode == 0;
+            }
+            catch
+            {
                 return false;
             }
         }

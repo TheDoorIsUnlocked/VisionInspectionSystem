@@ -34,7 +34,7 @@
         </Border>
 
         <!-- 菜单栏 -->
-        <Menu Grid.Row="1" Background="White" Height="30">
+        <Menu Grid.Row="1" Background="White" Height="32">
             <MenuItem Header="系统">
                 <MenuItem x:Name="UserManagementMenuItem" Header="用户管理" Click="UserManagementMenuItem_Click"/>
                 <MenuItem Header="修改密码" Click="ChangePasswordMenuItem_Click"/>
@@ -42,34 +42,70 @@
                 <MenuItem Header="退出登录" Click="LogoutMenuItem_Click"/>
                 <MenuItem Header="退出程序" Click="ExitMenuItem_Click"/>
             </MenuItem>
+            
+            <MenuItem Header="图像">
+                <MenuItem Header="📁 加载图像" Command="{Binding LoadImageCommand}"/>
+                <MenuItem Header="🎬 加载视频" Command="{Binding LoadVideoCommand}"/>
+                <Separator/>
+                <MenuItem Header="💾 保存ROI" Command="{Binding SaveROIsCommand}"/>
+                <MenuItem Header="🗑️ 清空ROI" Command="{Binding ClearROIsCommand}"/>
+                <Separator/>
+                <MenuItem Header="ROI工具">
+                    <MenuItem Header="✏️ 创建ROI" IsCheckable="True" 
+                             IsChecked="{Binding RoiEditorViewModel.IsCreatingROI}"/>
+                    <Separator/>
+                    <MenuItem x:Name="ShapeRectangleMenuItem" Header="矩形" IsCheckable="True" IsChecked="True" Click="ShapeRectangleMenuItem_Click"/>
+                    <MenuItem x:Name="ShapeCircleMenuItem" Header="圆形" IsCheckable="True" Click="ShapeCircleMenuItem_Click"/>
+                </MenuItem>
+            </MenuItem>
+            
+            <MenuItem Header="检测">
+                <MenuItem Header="🧠 加载模型" Command="{Binding LoadModelCommand}"/>
+                <TextBlock Text="{Binding LoadedModelName, StringFormat='当前模型: {0}'}" 
+                          Margin="20,5" Foreground="Gray"/>
+                <Separator/>
+                <MenuItem Header="🔍 图像检测" Command="{Binding RunDetectionCommand}"/>
+                <MenuItem Header="🎬 视频推理" Command="{Binding StartVideoInferenceCommand}"/>
+                <MenuItem Header="⏹️ 停止推理" Command="{Binding StopVideoInferenceCommand}"/>
+                <Separator/>
+                <MenuItem Header="🗑️ 清除结果" Command="{Binding ClearDetectionResultsCommand}"/>
+            </MenuItem>
+            
+            <MenuItem Header="SOP">
+                <MenuItem Header="⚙️ 初始化SOP" Command="{Binding InitializeSOPModuleCommand}"/>
+                <MenuItem Header="▶️ 运行检测" Command="{Binding RunSOPDetectionCommand}"/>
+            </MenuItem>
+            
             <MenuItem Header="配置">
                 <MenuItem Header="相机配置" Click="CameraConfigMenuItem_Click"/>
                 <MenuItem Header="模型管理" Click="ModelManagementMenuItem_Click"/>
                 <MenuItem Header="通信设置" Click="CommunicationConfigMenuItem_Click"/>
             </MenuItem>
+            
             <MenuItem Header="帮助">
                 <MenuItem Header="关于" Click="AboutMenuItem_Click"/>
             </MenuItem>
         </Menu>
 
-        <!-- 工具栏 -->
-        <ToolBarTray Grid.Row="2" Background="White" Margin="0,5">
-            <ToolBar Header="图像操作" Band="0" BandIndex="0">
-                <Button Content="📁 加载图像" Command="{Binding LoadImageCommand}"
-                        Style="{StaticResource ButtonPrimary}" Margin="2"/>
-                <Separator/>
-                <Button Content="💾 保存ROI" Command="{Binding SaveROIsCommand}" Margin="2"/>
-                <Button Content="🗑️ 清空ROI" Command="{Binding ClearROIsCommand}" Margin="2"/>
-            </ToolBar>
-
-            <ToolBar Header="ROI工具" Band="0" BandIndex="1">
-                <ToggleButton Margin="2" Padding="10,5"
+        <!-- 简化工具栏 - 只保留常用操作 -->
+        <ToolBarTray Grid.Row="2" Background="#F5F5F5" Margin="0,2">
+            <ToolBar Band="0" BandIndex="0" Background="Transparent">
+                <!-- 文件操作组 -->
+                <Button Content="📁" ToolTip="加载图像" Command="{Binding LoadImageCommand}"
+                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                <Button Content="🎬" ToolTip="加载视频" Command="{Binding LoadVideoCommand}"
+                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                <Separator Margin="5,0"/>
+                
+                <!-- ROI工具组 -->
+                <ToggleButton ToolTip="创建ROI" Padding="8,4" Margin="2"
                              IsChecked="{Binding RoiEditorViewModel.IsCreatingROI}">
                     <ToggleButton.Style>
                         <Style TargetType="ToggleButton">
-                            <Setter Property="Background" Value="#E0E0E0"/>
-                            <Setter Property="Foreground" Value="Black"/>
-                            <Setter Property="FontWeight" Value="Normal"/>
+                            <Setter Property="Background" Value="White"/>
+                            <Setter Property="BorderBrush" Value="#CCCCCC"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="Content" Value="✏️"/>
                             <Style.Triggers>
                                 <Trigger Property="IsChecked" Value="True">
                                     <Setter Property="Background" Value="#2196F3"/>
@@ -79,63 +115,33 @@
                             </Style.Triggers>
                         </Style>
                     </ToggleButton.Style>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="✏️ " Margin="0,0,2,0"/>
-                        <TextBlock Text="创建ROI"/>
-                    </StackPanel>
                 </ToggleButton>
-                <Separator/>
-                <TextBlock Text="形状:" VerticalAlignment="Center" Margin="5,0"/>
-                <ComboBox Width="100" VerticalAlignment="Center" Margin="2"
-                         SelectedIndex="0"
-                         SelectionChanged="ShapeComboBox_SelectionChanged">
+                <ComboBox Width="80" VerticalAlignment="Center" Margin="2" ToolTip="ROI形状"
+                         SelectedIndex="0" SelectionChanged="ShapeComboBox_SelectionChanged">
                     <ComboBoxItem Content="矩形"/>
                     <ComboBoxItem Content="圆形"/>
                 </ComboBox>
-            </ToolBar>
-
-            <ToolBar Header="YOLO检测" Band="0" BandIndex="2">
-                <Button Content="🧠 加载模型" Command="{Binding LoadModelCommand}"
-                        Style="{StaticResource ButtonPrimary}" Margin="2"/>
-                <TextBlock Text="{Binding LoadedModelName}" VerticalAlignment="Center" Margin="10,0">
+                <Separator Margin="5,0"/>
+                
+                <!-- 模型和检测组 -->
+                <Button Content="🧠" ToolTip="加载模型" Command="{Binding LoadModelCommand}"
+                        Style="{StaticResource ButtonInfo}" Margin="2" Padding="8,4"/>
+                <TextBlock Text="{Binding LoadedModelName}" VerticalAlignment="Center" Margin="5,0" Width="100"
+                          TextTrimming="CharacterEllipsis" ToolTip="{Binding LoadedModelName}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Setter Property="Foreground" Value="Gray"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsModelLoaded}" Value="True">
                                     <Setter Property="Foreground" Value="Green"/>
+                                    <Setter Property="FontWeight" Value="Bold"/>
                                 </DataTrigger>
                             </Style.Triggers>
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
-                <Separator/>
-                <Button Content="🔍 开始检测" Command="{Binding RunDetectionCommand}"
-                        Style="{StaticResource ButtonSuccess}" Margin="2"/>
-                <Button Content="🗑️ 清除结果" Command="{Binding ClearDetectionResultsCommand}"
-                        Margin="2"/>
-            </ToolBar>
-
-            <ToolBar Header="视频推理" Band="0" BandIndex="3">
-                <Button Content="🎬 加载视频" Command="{Binding LoadVideoCommand}"
-                        Style="{StaticResource ButtonPrimary}" Margin="2"/>
-                <TextBlock Text="{Binding VideoPath, Converter={StaticResource String2VisibilityConverter}}" 
-                          VerticalAlignment="Center" Margin="5,0" MaxWidth="150"
-                          TextTrimming="CharacterEllipsis" ToolTip="{Binding VideoPath}">
-                    <TextBlock.Style>
-                        <Style TargetType="TextBlock">
-                            <Setter Property="Foreground" Value="Gray"/>
-                            <Style.Triggers>
-                                <DataTrigger Binding="{Binding VideoPath}" Value="">
-                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                </DataTrigger>
-                            </Style.Triggers>
-                        </Style>
-                    </TextBlock.Style>
-                </TextBlock>
-                <Separator/>
-                <Button Content="▶️ 开始推理" Command="{Binding StartVideoInferenceCommand}"
-                        Style="{StaticResource ButtonSuccess}" Margin="2">
+                <Button Content="🔍" ToolTip="开始检测" Command="{Binding RunDetectionCommand}"
+                        Style="{StaticResource ButtonSuccess}" Margin="2" Padding="8,4">
                     <Button.IsEnabled>
                         <MultiBinding Converter="{StaticResource BooleanAndConverter}">
                             <Binding Path="IsModelLoaded"/>
@@ -143,7 +149,20 @@
                         </MultiBinding>
                     </Button.IsEnabled>
                 </Button>
-                <Button Content="⏹️ 停止推理" Command="{Binding StopVideoInferenceCommand}" Margin="2">
+                <Separator Margin="5,0"/>
+                
+                <!-- 视频推理组 -->
+                <Button Content="▶️" ToolTip="开始视频推理" Command="{Binding StartVideoInferenceCommand}"
+                        Style="{StaticResource ButtonSuccess}" Margin="2" Padding="8,4">
+                    <Button.IsEnabled>
+                        <MultiBinding Converter="{StaticResource BooleanAndConverter}">
+                            <Binding Path="IsModelLoaded"/>
+                            <Binding Path="IsVideoPlaying" Converter="{StaticResource Boolean2BooleanReConverter}"/>
+                        </MultiBinding>
+                    </Button.IsEnabled>
+                </Button>
+                <Button Content="⏹️" ToolTip="停止推理" Command="{Binding StopVideoInferenceCommand}" 
+                        Margin="2" Padding="8,4">
                     <Button.Style>
                         <Style TargetType="Button" BasedOn="{StaticResource ButtonDanger}">
                             <Setter Property="IsEnabled" Value="False"/>
@@ -156,15 +175,8 @@
                     </Button.Style>
                 </Button>
                 <TextBlock Text="{Binding CurrentFrameIndex, StringFormat='帧: {0}'}" 
-                          VerticalAlignment="Center" Margin="10,0"
+                          VerticalAlignment="Center" Margin="5,0" Width="80"
                           Visibility="{Binding IsVideoPlaying, Converter={StaticResource Boolean2VisibilityConverter}}"/>
-            </ToolBar>
-
-            <ToolBar Header="SOP检测" Band="0" BandIndex="4" HorizontalAlignment="Right">
-                <Button Content="⚙️ 初始化SOP" Command="{Binding InitializeSOPModuleCommand}"
-                        Style="{StaticResource ButtonInfo}" Margin="2"/>
-                <Button Content="▶️ 运行检测" Command="{Binding RunSOPDetectionCommand}"
-                        Style="{StaticResource ButtonSuccess}" Margin="2"/>
             </ToolBar>
         </ToolBarTray>
 
