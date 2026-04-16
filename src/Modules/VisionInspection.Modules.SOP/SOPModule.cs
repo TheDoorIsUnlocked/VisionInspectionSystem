@@ -2,13 +2,14 @@ using Microsoft.Extensions.Configuration;
 using SkiaSharp;
 using VisionInspection.Core.Interfaces;
 using VisionInspection.Core.Models;
+using VisionInspection.Core.Services;
 
 namespace VisionInspection.Modules.SOP;
 
 public class SOPModule : IDetectionModule
 {
     private SOPConfig _config = new();
-    private ICameraManager? _cameraManager;
+    private ICameraService? _cameraService;
     private int _currentStep = 0;
     private DateTime _stepStartTime = DateTime.Now;
     private Dictionary<string, int> _objectStabilityCounter = new();
@@ -24,10 +25,10 @@ public class SOPModule : IDetectionModule
         RequiredCameras = new List<string> { "main_camera" }
     };
 
-    public async Task InitializeAsync(IConfiguration config, ICameraManager cameraManager)
+    public async Task InitializeAsync(IConfiguration config, ICameraService cameraService)
     {
         State = ModuleState.Initializing;
-        _cameraManager = cameraManager;
+        _cameraService = cameraService;
 
         // 加载配置
         _config = config.GetSection("SOPModule").Get<SOPConfig>() ?? new SOPConfig();

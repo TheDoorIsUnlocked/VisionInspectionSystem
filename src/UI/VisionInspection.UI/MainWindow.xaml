@@ -42,6 +42,11 @@
                 <MenuItem Header="退出登录" Click="LogoutMenuItem_Click"/>
                 <MenuItem Header="退出程序" Click="ExitMenuItem_Click"/>
             </MenuItem>
+            <MenuItem Header="配置">
+                <MenuItem Header="相机配置" Click="CameraConfigMenuItem_Click"/>
+                <MenuItem Header="模型管理" Click="ModelManagementMenuItem_Click"/>
+                <MenuItem Header="通信设置" Click="CommunicationConfigMenuItem_Click"/>
+            </MenuItem>
             <MenuItem Header="帮助">
                 <MenuItem Header="关于" Click="AboutMenuItem_Click"/>
             </MenuItem>
@@ -89,7 +94,29 @@
                 </ComboBox>
             </ToolBar>
 
-            <ToolBar Header="SOP检测" Band="0" BandIndex="2" HorizontalAlignment="Right">
+            <ToolBar Header="YOLO检测" Band="0" BandIndex="2">
+                <Button Content="🧠 加载模型" Command="{Binding LoadModelCommand}"
+                        Style="{StaticResource ButtonPrimary}" Margin="2"/>
+                <TextBlock Text="{Binding LoadedModelName}" VerticalAlignment="Center" Margin="10,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="Gray"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsModelLoaded}" Value="True">
+                                    <Setter Property="Foreground" Value="Green"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <Separator/>
+                <Button Content="🔍 开始检测" Command="{Binding RunDetectionCommand}"
+                        Style="{StaticResource ButtonSuccess}" Margin="2"/>
+                <Button Content="🗑️ 清除结果" Command="{Binding ClearDetectionResultsCommand}"
+                        Margin="2"/>
+            </ToolBar>
+
+            <ToolBar Header="SOP检测" Band="0" BandIndex="3" HorizontalAlignment="Right">
                 <Button Content="⚙️ 初始化SOP" Command="{Binding InitializeSOPModuleCommand}"
                         Style="{StaticResource ButtonInfo}" Margin="2"/>
                 <Button Content="▶️ 运行检测" Command="{Binding RunSOPDetectionCommand}"

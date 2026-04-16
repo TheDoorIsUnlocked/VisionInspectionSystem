@@ -151,4 +151,32 @@ public partial class MainWindow : Window
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }
+
+    /// <summary>
+    /// 相机配置菜单点击
+    /// </summary>
+    private void CameraConfigMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var cameraConfigWindow = new CameraConfigWindow();
+        cameraConfigWindow.Owner = this;
+        cameraConfigWindow.ShowDialog();
+    }
+
+    /// <summary>
+    /// 模型管理菜单点击
+    /// </summary>
+    private void ModelManagementMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var modelManagerWindow = new ModelManagerWindow();
+        modelManagerWindow.Owner = this;
+        modelManagerWindow.ShowDialog();
+    }
+
+    /// <summary>
+    /// 通信设置菜单点击
+    /// </summary>
+    private void CommunicationConfigMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show("通信设置功能开发中...", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 }

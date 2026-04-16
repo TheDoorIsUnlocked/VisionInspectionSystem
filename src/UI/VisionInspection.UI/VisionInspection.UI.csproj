@@ -9,18 +9,35 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SkiaSharp" Version="2.88.8" />
-    <PackageReference Include="SkiaSharp.Views.WPF" Version="2.88.8" />
+    <PackageReference Include="SkiaSharp" Version="3.119.1" />
+    <PackageReference Include="SkiaSharp.Views.WPF" Version="3.119.1" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.2.2" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
     <PackageReference Include="HandyControl" Version="3.4.0" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.23.0" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Core\VisionInspection.Core\VisionInspection.Core.csproj" />
     <ProjectReference Include="..\..\Modules\VisionInspection.Modules.SOP\VisionInspection.Modules.SOP.csproj" />
+    <ProjectReference Include="..\..\Modules\VisionInspection.Modules.Detection\VisionInspection.Modules.Detection.csproj" />
+  </ItemGroup>
+
+  <!-- 海康相机SDK引用 -->
+  <ItemGroup>
+    <Reference Include="MvFGCtrlC.Net">
+      <HintPath>E:\yolo\YoloDotNet-master\Sample\DotNet\win64\MvFGCtrlC.Net.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- 确保SDK DLL复制到输出目录 -->
+  <ItemGroup>
+    <None Include="E:\yolo\YoloDotNet-master\Sample\DotNet\win64\MvFGCtrlC.Net.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

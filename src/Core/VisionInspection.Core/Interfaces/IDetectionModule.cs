@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using VisionInspection.Core.Models;
+using VisionInspection.Core.Services;
 
 namespace VisionInspection.Core.Interfaces;
 
@@ -26,7 +27,7 @@ public interface IDetectionModule : IDisposable
     /// <summary>
     /// 初始化模块
     /// </summary>
-    Task InitializeAsync(IConfiguration config, ICameraManager cameraManager);
+    Task InitializeAsync(IConfiguration config, ICameraService cameraService);
 
     /// <summary>
     /// 执行检测
