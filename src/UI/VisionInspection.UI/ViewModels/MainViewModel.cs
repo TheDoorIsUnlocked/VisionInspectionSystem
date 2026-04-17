@@ -225,7 +225,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     Color = SKColors.Yellow,
                     TextSize = 14,
-                    IsAntialias = true
+                    IsAntialias = true,
+                    FakeBoldText = true
+                };
+
+                var bgPaint = new SKPaint
+                {
+                    Color = new SKColor(0, 0, 0, 180),
+                    Style = SKPaintStyle.Fill
                 };
                 
                 foreach (var obj in result.Objects)
@@ -238,9 +245,33 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         obj.BoundingBox[1] + obj.BoundingBox[3]);
                     canvas.DrawRect(rect, paint);
                     
-                    // 绘制标签
+                    // 绘制标签（带背景）
                     var label = $"{obj.ClassName} {(obj.Confidence * 100):F1}%";
-                    canvas.DrawText(label, obj.BoundingBox[0], obj.BoundingBox[1] - 5, textPaint);
+                    
+                    // 计算文字尺寸
+                    var textBounds = new SKRect();
+                    textPaint.MeasureText(label, ref textBounds);
+                    
+                    // 标签位置（在边界框上方，如果空间不足则在框内）
+                    float labelX = obj.BoundingBox[0];
+                    float labelY = obj.BoundingBox[1] - 5;
+                    
+                    // 如果标签会超出图像顶部，则放在框内
+                    if (labelY - textBounds.Height < 0)
+                    {
+                        labelY = obj.BoundingBox[1] + textBounds.Height + 5;
+                    }
+                    
+                    // 绘制标签背景
+                    var bgRect = new SKRect(
+                        labelX - 2,
+                        labelY - textBounds.Height - 2,
+                        labelX + textBounds.Width + 4,
+                        labelY + 2);
+                    canvas.DrawRect(bgRect, bgPaint);
+                    
+                    // 绘制标签文字
+                    canvas.DrawText(label, labelX, labelY, textPaint);
                 }
             }
             
