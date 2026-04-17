@@ -291,6 +291,15 @@ public partial class MainViewModel : ViewModelBase
     {
         try
         {
+            // 如果正在视频推理，先停止
+            if (IsVideoPlaying)
+            {
+                Status = "正在停止视频推理...";
+                StopVideoInference();
+                // 等待一小段时间确保资源释放
+                await Task.Delay(500);
+            }
+
             IsBusy = true;
             Status = "加载模型...";
 

@@ -24,6 +24,7 @@ namespace VisionInspection.Modules.Detection
         private readonly object _lockObject = new();
         private CancellationTokenSource? _videoInferenceCts;
         private VideoInferenceOptions? _videoOptions;
+        private bool _isVideoProcessing = false;
 
         public bool IsInitialized => _yolo != null;
 
@@ -40,6 +41,18 @@ namespace VisionInspection.Modules.Detection
                 {
                     lock (_lockObject)
                     {
+                        // 如果正在视频推理，先停止
+                        if (_isVideoProcessing)
+                        {
+                            StopVideoInference();
+                            // 等待视频处理完全停止
+                            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                            while (_isVideoProcessing && stopwatch.ElapsedMilliseconds < 5000)
+                            {
+                                Thread.Sleep(100);
+                            }
+                        }
+
                         // 释放之前的实例
                         _yolo?.Dispose();
                         _yolo = null;
@@ -456,6 +469,7 @@ namespace VisionInspection.Modules.Detection
             }
 
             _videoInferenceCts = new CancellationTokenSource();
+            _isVideoProcessing = true;
 
             Task.Run(() =>
             {
@@ -467,6 +481,10 @@ namespace VisionInspection.Modules.Detection
                 {
                     DetectionError?.Invoke(this, $"视频推理失败: {ex.Message}");
                 }
+                finally
+                {
+                    _isVideoProcessing = false;
+                }
             }, _videoInferenceCts.Token);
         }
 
@@ -475,6 +493,7 @@ namespace VisionInspection.Modules.Detection
             _videoInferenceCts?.Cancel();
             _videoInferenceCts?.Dispose();
             _videoInferenceCts = null;
+            _isVideoProcessing = false;
         }
 
         private void OnVideoFrameReceived(SKBitmap frame, long frameIndex)
