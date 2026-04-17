@@ -121,7 +121,7 @@ namespace VisionInspection.UI.Services
                             nRet = _interface.GetDeviceInfo(j, ref info);
                             if (nRet == CErrorCode.MV_FG_SUCCESS)
                             {
-                                var cameraInfo = ParseDeviceInfo(info, j);
+                                var cameraInfo = ParseDeviceInfo(info, j, i);
                                 cameras.Add(cameraInfo);
                             }
                         }
@@ -169,8 +169,8 @@ namespace VisionInspection.UI.Services
                         return false;
                     }
 
-                    // 打开第一个接口（简化处理，实际应该根据相机信息选择接口）
-                    nRet = _system.OpenInterface(0, out _interface);
+                    // 根据相机信息打开对应的接口
+                    nRet = _system.OpenInterface(camera.InterfaceIndex, out _interface);
                     if (nRet != CErrorCode.MV_FG_SUCCESS)
                     {
                         ErrorOccurred?.Invoke(this, $"打开接口失败，错误码：0x{nRet:X}");
@@ -547,11 +547,12 @@ namespace VisionInspection.UI.Services
         /// <summary>
         /// 解析设备信息
         /// </summary>
-        private CameraInfo ParseDeviceInfo(MV_FG_DEVICE_INFO info, uint index)
+        private CameraInfo ParseDeviceInfo(MV_FG_DEVICE_INFO info, uint index, uint interfaceIndex)
         {
             var cameraInfo = new CameraInfo
             {
                 Index = index,
+                InterfaceIndex = interfaceIndex,
                 Type = info.nDevType
             };
 

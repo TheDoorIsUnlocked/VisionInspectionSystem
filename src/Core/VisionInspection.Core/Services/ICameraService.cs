@@ -96,6 +96,7 @@ namespace VisionInspection.Core.Services
         public string SerialNumber { get; set; } = "";
         public string InterfaceType { get; set; } = "";
         public uint Index { get; set; }
+        public uint InterfaceIndex { get; set; }
         public uint Type { get; set; }
         public string DisplayName { get; set; } = "";
     }
