@@ -51,11 +51,18 @@ namespace VisionInspection.Modules.Detection
                             {
                                 Thread.Sleep(100);
                             }
+                            // 额外等待确保资源释放
+                            Thread.Sleep(500);
                         }
 
-                        // 释放之前的实例
-                        _yolo?.Dispose();
+                        // 确保取消所有视频相关的回调
                         _yolo = null;
+                        _videoOptions = null;
+                        
+                        // 强制GC回收，确保非托管资源释放
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                        GC.Collect();
 
                         _modelInfo = modelInfo;
 
@@ -490,15 +497,36 @@ namespace VisionInspection.Modules.Detection
 
         public void StopVideoInference()
         {
-            _videoInferenceCts?.Cancel();
-            _videoInferenceCts?.Dispose();
-            _videoInferenceCts = null;
-            _isVideoProcessing = false;
+            try
+            {
+                // 先设置标志，让回调知道要停止
+                _isVideoProcessing = false;
+
+                // 取消令牌
+                _videoInferenceCts?.Cancel();
+
+                // 停止视频处理（这会中断StartVideoProcessing的阻塞调用）
+                _yolo?.StopVideoProcessing();
+
+                // 等待一小段时间让处理完全停止
+                Thread.Sleep(200);
+            }
+            catch (Exception ex)
+            {
+                DetectionError?.Invoke(this, $"停止视频推理时出错: {ex.Message}");
+            }
+            finally
+            {
+                _videoInferenceCts?.Dispose();
+                _videoInferenceCts = null;
+                _isVideoProcessing = false;
+            }
         }
 
         private void OnVideoFrameReceived(SKBitmap frame, long frameIndex)
         {
-            if (_yolo == null || _modelInfo == null) return;
+            // 如果正在停止或已停止，不再处理帧
+            if (!_isVideoProcessing || _yolo == null || _modelInfo == null) return;
 
             try
             {
