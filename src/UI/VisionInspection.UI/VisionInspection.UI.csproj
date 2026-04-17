@@ -31,15 +31,15 @@
 
   <!-- 海康相机SDK引用 -->
   <ItemGroup>
-    <Reference Include="MvFGCtrlC.Net">
-      <HintPath>E:\yolo\YoloDotNet-master\Sample\DotNet\win64\MvFGCtrlC.Net.dll</HintPath>
+    <Reference Include="MvCameraControl.Net">
+      <HintPath>E:\yolo\YoloDotNet-master\VisionInspectionSystem\libs\MvCameraControl.Net.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>
 
   <!-- 确保SDK DLL复制到输出目录 -->
   <ItemGroup>
-    <None Include="E:\yolo\YoloDotNet-master\Sample\DotNet\win64\MvFGCtrlC.Net.dll">
+    <None Include="E:\yolo\YoloDotNet-master\VisionInspectionSystem\libs\MvCameraControl.Net.dll">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

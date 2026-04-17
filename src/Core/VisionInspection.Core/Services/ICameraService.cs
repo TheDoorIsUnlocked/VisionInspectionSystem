@@ -99,5 +99,6 @@ namespace VisionInspection.Core.Services
         public uint InterfaceIndex { get; set; }
         public uint Type { get; set; }
         public string DisplayName { get; set; } = "";
+        public object ExtInfo { get; set; }
     }
 }
