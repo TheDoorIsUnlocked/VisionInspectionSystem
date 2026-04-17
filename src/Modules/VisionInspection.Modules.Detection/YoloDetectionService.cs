@@ -385,6 +385,45 @@ namespace VisionInspection.Modules.Detection
         /// </summary>
         private bool IsFFmpegInstalled()
         {
+            // 首先检查常见路径
+            var commonPaths = new[]
+            {
+                @"E:\yolo\YoloDotNet-master\VisionInspectionSystem\ffmpeg\bin",
+                @"C:\ffmpeg\bin",
+                @"C:\Program Files\ffmpeg\bin",
+                @"C:\Program Files (x86)\ffmpeg\bin"
+            };
+
+            foreach (var path in commonPaths)
+            {
+                var ffmpegPath = System.IO.Path.Combine(path, "ffmpeg.exe");
+                var ffprobePath = System.IO.Path.Combine(path, "ffprobe.exe");
+
+                if (System.IO.File.Exists(ffmpegPath) && System.IO.File.Exists(ffprobePath))
+                {
+                    // 找到了，检查能否运行
+                    try
+                    {
+                        using var ffmpegProcess = new System.Diagnostics.Process();
+                        ffmpegProcess.StartInfo.FileName = ffmpegPath;
+                        ffmpegProcess.StartInfo.Arguments = "-version";
+                        ffmpegProcess.StartInfo.UseShellExecute = false;
+                        ffmpegProcess.StartInfo.RedirectStandardOutput = true;
+                        ffmpegProcess.StartInfo.CreateNoWindow = true;
+                        ffmpegProcess.Start();
+                        ffmpegProcess.WaitForExit(2000);
+
+                        if (ffmpegProcess.ExitCode == 0)
+                            return true;
+                    }
+                    catch
+                    {
+                        // 继续检查其他路径
+                    }
+                }
+            }
+
+            // 最后尝试从PATH环境变量中查找
             try
             {
                 // 检查ffmpeg
