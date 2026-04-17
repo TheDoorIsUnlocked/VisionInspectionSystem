@@ -217,14 +217,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     Style = SKPaintStyle.Stroke,
                     Color = SKColors.Red,
-                    StrokeWidth = 2,
+                    StrokeWidth = 4,
                     IsAntialias = true
                 };
                 
                 var textPaint = new SKPaint
                 {
                     Color = SKColors.Yellow,
-                    TextSize = 18,
+                    TextSize = 32,
                     IsAntialias = true,
                     FakeBoldText = true
                 };
