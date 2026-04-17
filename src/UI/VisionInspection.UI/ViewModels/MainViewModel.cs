@@ -140,15 +140,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private async Task PerformRealTimeDetectionAsync(SKBitmap bitmap)
     {
         // 使用锁防止并发处理
-        if (!Monitor.TryEnter(_inferenceLock))
-            return;
-            
+        bool lockTaken = false;
         try
         {
+            Monitor.TryEnter(_inferenceLock, ref lockTaken);
+            if (!lockTaken)
+                return;
+
             _isProcessingFrame = true;
-            
+
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            
+
             // 执行检测
             var rois = RoiEditorViewModel.ROIs.Select(r => new ROIInfo
             {
@@ -159,21 +161,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 Height = r.GetBoundingBox().Height,
                 ShapeType = (Core.Services.ShapeType)(int)r.ShapeType
             }).ToList();
-            
+
             var result = await _detectionService.DetectAsync(bitmap, rois);
-            
+
             stopwatch.Stop();
-            
+
             // 更新UI
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
                 if (!_isDisposed)
                 {
                     DetectionResults = result.Objects;
-                    
+
                     // 绘制检测结果
                     DrawDetectionResults(bitmap, result);
-                    
+
                     // 计算推理FPS
                     _inferenceFrameCount++;
                     var elapsed = DateTime.Now - _lastInferenceTime;
@@ -193,7 +195,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         finally
         {
             _isProcessingFrame = false;
-            Monitor.Exit(_inferenceLock);
+            if (lockTaken)
+            {
+                Monitor.Exit(_inferenceLock);
+            }
         }
     }
     
