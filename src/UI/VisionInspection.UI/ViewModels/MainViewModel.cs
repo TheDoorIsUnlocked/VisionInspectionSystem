@@ -85,7 +85,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private DateTime _lastInferenceTime = DateTime.Now;
     private int _inferenceFrameCount = 0;
     private bool _isProcessingFrame = false;
-    private readonly object _inferenceLock = new();
+    private readonly SemaphoreSlim _inferenceLock = new(1, 1);
 
     public MainViewModel()
     {
@@ -139,14 +139,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task PerformRealTimeDetectionAsync(SKBitmap bitmap)
     {
-        // 使用锁防止并发处理
-        bool lockTaken = false;
+        // 使用信号量防止并发处理（支持异步）
+        if (!await _inferenceLock.WaitAsync(0))
+            return;
+
         try
         {
-            Monitor.TryEnter(_inferenceLock, ref lockTaken);
-            if (!lockTaken)
-                return;
-
             _isProcessingFrame = true;
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -195,10 +193,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         finally
         {
             _isProcessingFrame = false;
-            if (lockTaken)
-            {
-                Monitor.Exit(_inferenceLock);
-            }
+            _inferenceLock.Release();
         }
     }
     
