@@ -328,8 +328,9 @@ namespace VisionInspection.Modules.Detection
                 return false;
             }
 
-            // 检查FFmpeg是否已安装
-            if (!IsFFmpegInstalled())
+            // 检查FFmpeg是否已安装并获取路径
+            var ffmpegPath = GetFFmpegPath();
+            if (string.IsNullOrEmpty(ffmpegPath))
             {
                 DetectionError?.Invoke(this, "FFmpeg未安装或未添加到系统PATH。请安装FFmpeg并确保ffmpeg.exe和ffprobe.exe在系统PATH中。");
                 return false;
@@ -338,6 +339,13 @@ namespace VisionInspection.Modules.Detection
             try
             {
                 _videoOptions = options;
+
+                // 设置环境变量，确保YoloDotNet能找到FFmpeg
+                var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
+                if (!currentPath.Contains(ffmpegPath))
+                {
+                    Environment.SetEnvironmentVariable("PATH", $"{ffmpegPath};{currentPath}");
+                }
 
                 // 创建视频选项
                 var videoOptions = new VideoOptions
@@ -381,9 +389,9 @@ namespace VisionInspection.Modules.Detection
         }
 
         /// <summary>
-        /// 检查FFmpeg是否已安装
+        /// 获取FFmpeg路径
         /// </summary>
-        private bool IsFFmpegInstalled()
+        private string? GetFFmpegPath()
         {
             // 首先检查常见路径
             var commonPaths = new[]
@@ -401,32 +409,13 @@ namespace VisionInspection.Modules.Detection
 
                 if (System.IO.File.Exists(ffmpegPath) && System.IO.File.Exists(ffprobePath))
                 {
-                    // 找到了，检查能否运行
-                    try
-                    {
-                        using var ffmpegProcess = new System.Diagnostics.Process();
-                        ffmpegProcess.StartInfo.FileName = ffmpegPath;
-                        ffmpegProcess.StartInfo.Arguments = "-version";
-                        ffmpegProcess.StartInfo.UseShellExecute = false;
-                        ffmpegProcess.StartInfo.RedirectStandardOutput = true;
-                        ffmpegProcess.StartInfo.CreateNoWindow = true;
-                        ffmpegProcess.Start();
-                        ffmpegProcess.WaitForExit(2000);
-
-                        if (ffmpegProcess.ExitCode == 0)
-                            return true;
-                    }
-                    catch
-                    {
-                        // 继续检查其他路径
-                    }
+                    return path;
                 }
             }
 
-            // 最后尝试从PATH环境变量中查找
+            // 尝试从PATH环境变量中查找
             try
             {
-                // 检查ffmpeg
                 using var ffmpegProcess = new System.Diagnostics.Process();
                 ffmpegProcess.StartInfo.FileName = "ffmpeg";
                 ffmpegProcess.StartInfo.Arguments = "-version";
@@ -436,25 +425,26 @@ namespace VisionInspection.Modules.Detection
                 ffmpegProcess.Start();
                 ffmpegProcess.WaitForExit(2000);
 
-                if (ffmpegProcess.ExitCode != 0)
-                    return false;
-
-                // 检查ffprobe
-                using var ffprobeProcess = new System.Diagnostics.Process();
-                ffprobeProcess.StartInfo.FileName = "ffprobe";
-                ffprobeProcess.StartInfo.Arguments = "-version";
-                ffprobeProcess.StartInfo.UseShellExecute = false;
-                ffprobeProcess.StartInfo.RedirectStandardOutput = true;
-                ffprobeProcess.StartInfo.CreateNoWindow = true;
-                ffprobeProcess.Start();
-                ffprobeProcess.WaitForExit(2000);
-
-                return ffprobeProcess.ExitCode == 0;
+                if (ffmpegProcess.ExitCode == 0)
+                {
+                    // 从PATH中找到，返回空字符串表示使用系统PATH
+                    return "";
+                }
             }
             catch
             {
-                return false;
+                // 未找到
             }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 检查FFmpeg是否已安装
+        /// </summary>
+        private bool IsFFmpegInstalled()
+        {
+            return !string.IsNullOrEmpty(GetFFmpegPath());
         }
 
         public void StartVideoInference()
