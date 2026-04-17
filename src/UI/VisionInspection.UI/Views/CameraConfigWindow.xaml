@@ -158,13 +158,18 @@
             </Border>
         </Grid>
 
-        <!-- 底部按钮 -->
-        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,15">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="SaveConfigButton" Content="💾 保存配置" Padding="20,1" Margin="0,0,10,0"
-                        Click="SaveConfigButton_Click" IsEnabled="False"/>
-                <Button x:Name="CloseButton" Content="❌ 关闭" Padding="20,1" Click="CloseButton_Click"/>
-            </StackPanel>
-        </Border>
+        <!-- 状态栏 -->
+        <StatusBar Grid.Row="2" Height="32">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" Text="就绪" Opacity="0.7"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="SaveConfigButton" Content="💾 保存配置" Padding="15,2" Margin="0,0,10,0"
+                            Click="SaveConfigButton_Click" IsEnabled="False"/>
+                    <Button x:Name="CloseButton" Content="❌ 关闭" Padding="15,2" Click="CloseButton_Click"/>
+                </StackPanel>
+            </StatusBarItem>
+        </StatusBar>
     </Grid>
 </Window>

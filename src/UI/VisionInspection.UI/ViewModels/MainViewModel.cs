@@ -628,20 +628,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             {
                 IsModelLoaded = true;
                 LoadedModelName = _loadedModel.Name;
-                Status = $"模型加载成功: {_loadedModel.Name}";
-                MessageBox.Show($"模型 '{_loadedModel.Name}' 加载成功！\n类型: {_loadedModel.Type}\n类别数: {_loadedModel.Classes.Count}", 
-                    "成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                Status = $"模型加载成功: {_loadedModel.Name} | 类型: {_loadedModel.Type} | 类别数: {_loadedModel.Classes.Count}";
             }
             else
             {
-                Status = "模型加载失败";
-                MessageBox.Show("模型加载失败，请检查模型文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                Status = "模型加载失败，请检查模型文件";
             }
         }
         catch (Exception ex)
         {
-            Status = $"错误: {ex.Message}";
-            MessageBox.Show($"加载模型失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+            Status = $"加载模型失败: {ex.Message}";
         }
         finally
         {

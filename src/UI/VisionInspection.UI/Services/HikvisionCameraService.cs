@@ -467,11 +467,14 @@ namespace VisionInspection.UI.Services
                 // 关闭触发模式
                 _camera.MV_CC_SetEnumValue_NET("TriggerMode", 0);
 
-                // 设置默认曝光时间
-                _camera.MV_CC_SetFloatValue_NET("ExposureTime", 10000);
+                // 加载保存的配置参数
+                var config = CameraConfigManager.Instance.LoadConfig();
 
-                // 设置默认增益
-                _camera.MV_CC_SetFloatValue_NET("Gain", 0);
+                // 设置曝光时间为保存的值
+                _camera.MV_CC_SetFloatValue_NET("ExposureTime", config.ExposureTime);
+
+                // 设置增益为保存的值
+                _camera.MV_CC_SetFloatValue_NET("Gain", config.Gain);
             }
             catch (Exception ex)
             {

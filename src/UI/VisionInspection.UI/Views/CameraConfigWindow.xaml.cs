@@ -190,7 +190,7 @@ namespace VisionInspection.UI.Views
         {
             Dispatcher.Invoke(() =>
             {
-                MessageBox.Show(error, "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowStatus(error, true);
             });
         }
 
@@ -276,10 +276,10 @@ namespace VisionInspection.UI.Views
                 {
                     EnumInterfaceButton.IsEnabled = true;
                     EnumDeviceButton.IsEnabled = true;
-                    MessageBox.Show("未找到相机设备", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    ShowStatus("未找到相机设备", true);
                     return;
                 }
-                
+
                 foreach (var camera in _cameras)
                 {
                     var radioButton = new RadioButton
@@ -292,17 +292,13 @@ namespace VisionInspection.UI.Views
                     radioButton.Checked += CameraRadioButton_Checked;
                     DeviceListPanel.Children.Add(radioButton);
                 }
-                
+
                 EnumDeviceButton.IsEnabled = true;
-                
-                if (_cameras.Count > 0)
-                {
-                    MessageBox.Show($"找到 {_cameras.Count} 个相机", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
+                ShowStatus($"找到 {_cameras.Count} 个相机");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"搜索相机失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowStatus($"搜索相机失败: {ex.Message}", true);
             }
             finally
             {
@@ -359,16 +355,16 @@ namespace VisionInspection.UI.Views
                     // 保存当前参数值
                     _configManager.UpdateCameraParameters(currentExposure, currentGain);
 
-                    MessageBox.Show("相机连接成功", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    ShowStatus("相机连接成功");
                 }
                 else
                 {
-                    MessageBox.Show("相机连接失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowStatus("相机连接失败", true);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"连接异常: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowStatus($"连接异常: {ex.Message}", true);
             }
             finally
             {
@@ -457,16 +453,17 @@ namespace VisionInspection.UI.Views
             {
                 if (await _cameraManager.StartGrabbingAsync())
                 {
+                    ShowStatus("开始采集");
                     UpdateUIState();
                 }
                 else
                 {
-                    MessageBox.Show("开始采集失败", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ShowStatus("开始采集失败", true);
                 }
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"开始采集异常: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowStatus($"开始采集异常: {ex.Message}", true);
             }
         }
 
@@ -528,12 +525,12 @@ namespace VisionInspection.UI.Views
                 config.GainMax = (float)GainSlider.Maximum;
                 
                 _configManager.SaveConfig(config);
-                
-                MessageBox.Show("配置已保存", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+
+                ShowStatus("配置已保存");
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"保存配置失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                ShowStatus($"保存配置失败: {ex.Message}", true);
             }
         }
 
@@ -584,6 +581,25 @@ namespace VisionInspection.UI.Views
 
             // 保存配置按钮
             SaveConfigButton.IsEnabled = IsConnected;
+        }
+
+        #endregion
+
+        #region 状态显示
+
+        /// <summary>
+        /// 在状态栏显示消息
+        /// </summary>
+        private void ShowStatus(string message, bool isError = false)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (StatusText != null)
+                {
+                    StatusText.Text = message;
+                    StatusText.Foreground = isError ? new SolidColorBrush(Colors.Red) : new SolidColorBrush(Colors.Black);
+                }
+            });
         }
 
         #endregion
