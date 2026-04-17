@@ -66,7 +66,12 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private long _totalFrames = 0;
 
+    [ObservableProperty]
+    private double _fps = 0;
+
     private string _lastDetectionError = "";
+    private DateTime _lastFrameTime = DateTime.Now;
+    private int _frameCount = 0;
 
     public MainViewModel()
     {
@@ -635,6 +640,17 @@ public partial class MainViewModel : ViewModelBase
             CurrentFrameIndex = e.FrameIndex;
             DetectionResults = e.DetectionResult.Objects;
 
+            // 计算FPS
+            _frameCount++;
+            var now = DateTime.Now;
+            var elapsed = now - _lastFrameTime;
+            if (elapsed.TotalSeconds >= 1)
+            {
+                Fps = Math.Round(_frameCount / elapsed.TotalSeconds, 1);
+                _frameCount = 0;
+                _lastFrameTime = now;
+            }
+
             // 绘制检测结果
             if (e.DetectionResult.Objects.Count > 0)
             {
@@ -646,7 +662,7 @@ public partial class MainViewModel : ViewModelBase
                 RoiEditorViewModel.CurrentImage = e.Frame;
             }
 
-            Status = $"处理帧 {e.FrameIndex}，检测到 {e.DetectionResult.Objects.Count} 个对象";
+            Status = $"处理帧 {e.FrameIndex}，检测到 {e.DetectionResult.Objects.Count} 个对象，FPS: {Fps:F1}";
         });
     }
 

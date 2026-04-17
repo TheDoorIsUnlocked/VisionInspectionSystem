@@ -240,7 +240,12 @@
                 <TextBlock Text="{Binding Status}" />
             </StatusBarItem>
             <StatusBarItem HorizontalAlignment="Right">
-                <TextBlock Text="就绪" Opacity="0.5"/>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="帧率: " Opacity="0.7" VerticalAlignment="Center"/>
+                    <TextBlock Text="{Binding Fps, StringFormat='{}{0:F1}'}" FontWeight="Bold" VerticalAlignment="Center" Width="40"/>
+                    <TextBlock Text=" FPS" Opacity="0.5" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBlock Text="就绪" Opacity="0.5" VerticalAlignment="Center"/>
+                </StackPanel>
             </StatusBarItem>
         </StatusBar>
     </Grid>
