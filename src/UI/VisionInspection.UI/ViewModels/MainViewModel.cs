@@ -224,7 +224,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 var textPaint = new SKPaint
                 {
                     Color = SKColors.Yellow,
-                    TextSize = 32,
+                    TextSize = 64,
                     IsAntialias = true,
                     FakeBoldText = true
                 };
