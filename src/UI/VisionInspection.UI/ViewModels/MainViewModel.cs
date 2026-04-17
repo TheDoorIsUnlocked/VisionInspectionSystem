@@ -171,8 +171,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     DetectionResults = result.Objects;
 
-                    // 绘制检测结果
-                    DrawDetectionResults(bitmap, result);
+                    // 绘制检测结果到图像并更新显示
+                    var resultBitmap = DrawDetectionResults(bitmap, result);
+                    if (resultBitmap != null && RoiEditorViewModel != null)
+                    {
+                        RoiEditorViewModel.CurrentImage = resultBitmap;
+                    }
 
                     // 计算推理FPS
                     _inferenceFrameCount++;
@@ -200,7 +204,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 绘制检测结果到图像
     /// </summary>
-    private void DrawDetectionResults(SKBitmap sourceBitmap, DetectionResult result)
+    private SKBitmap? DrawDetectionResults(SKBitmap sourceBitmap, DetectionResult result)
     {
         try
         {
@@ -240,13 +244,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 }
             }
             
-            // 更新检测结果图像
-            DetectionResultImage?.Dispose();
-            DetectionResultImage = resultBitmap;
+            return resultBitmap;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"绘制检测结果异常: {ex.Message}");
+            return null;
         }
     }
     
