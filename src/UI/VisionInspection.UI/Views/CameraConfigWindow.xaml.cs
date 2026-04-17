@@ -55,10 +55,10 @@ namespace VisionInspection.UI.Views
             // 加载保存的配置
             _cameraConfig = _configManager.LoadConfig();
             
-            // 设置相机服务（如果还没有设置）
+            // 设置相机服务（默认使用笔记本摄像头）
             if (_cameraManager.CurrentCameraService == null)
             {
-                _cameraManager.SetCameraService(new HikvisionCameraService());
+                _cameraManager.SetCameraService(new WebCameraService());
             }
             
             // 订阅 CameraManager 的事件用于本地预览
@@ -600,6 +600,48 @@ namespace VisionInspection.UI.Views
                     StatusText.Foreground = isError ? new SolidColorBrush(Colors.Red) : new SolidColorBrush(Colors.Black);
                 }
             });
+        }
+
+        #endregion
+
+        #region 相机类型切换
+
+        /// <summary>
+        /// 相机类型切换
+        /// </summary>
+        private void CameraTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // 防止初始化时的空引用
+            if (_cameraManager == null || CameraTypeComboBox == null)
+                return;
+
+            // 如果当前有连接，先断开
+            if (_cameraManager.IsConnected)
+            {
+                _cameraManager.Disconnect();
+                IsConnected = false;
+            }
+
+            // 根据选择设置相机服务
+            if (CameraTypeComboBox.SelectedIndex == 0)
+            {
+                // 笔记本摄像头
+                _cameraManager.SetCameraService(new WebCameraService());
+                ShowStatus("已切换到笔记本摄像头模式");
+            }
+            else
+            {
+                // 海康工业相机
+                _cameraManager.SetCameraService(new HikvisionCameraService());
+                ShowStatus("已切换到海康工业相机模式");
+            }
+
+            // 清空设备列表
+            _cameras?.Clear();
+            if (DeviceListPanel != null)
+                DeviceListPanel.Children.Clear();
+            _selectedCamera = null;
+            UpdateUIState();
         }
 
         #endregion

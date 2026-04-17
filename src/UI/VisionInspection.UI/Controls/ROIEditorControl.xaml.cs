@@ -10,6 +10,35 @@ namespace VisionInspection.UI.Controls;
 
 public partial class ROIEditorControl : SKElement
 {
+    // 静态字体管理器，用于支持中文显示
+    private static SKTypeface? _chineseTypeface;
+    private static SKFont? _chineseFont;
+    
+    static ROIEditorControl()
+    {
+        // 尝试加载系统中文字体
+        try
+        {
+            // 优先尝试常见中文字体
+            string[] chineseFonts = { "Microsoft YaHei", "SimHei", "SimSun", "PingFang SC", "Source Han Sans CN" };
+            foreach (var fontName in chineseFonts)
+            {
+                _chineseTypeface = SKTypeface.FromFamilyName(fontName);
+                if (_chineseTypeface != null)
+                    break;
+            }
+            
+            // 如果没有找到中文字体，使用默认字体
+            if (_chineseTypeface == null)
+            {
+                _chineseTypeface = SKTypeface.Default;
+            }
+        }
+        catch
+        {
+            _chineseTypeface = SKTypeface.Default;
+        }
+    }
     public static readonly DependencyProperty ViewModelProperty = DependencyProperty.Register(
         nameof(ViewModel),
         typeof(ROIEditorViewModel),
@@ -313,26 +342,30 @@ public partial class ROIEditorControl : SKElement
             canvas.DrawPath(path, paint);
         }
 
-        // 绘制ROI名称（带背景）
+        // 绘制ROI名称（带背景）- 使用支持中文的字体
         using var bgPaint = new SKPaint
         {
             Color = isSelected ? new SKColor(0, 150, 255, 220) : new SKColor(0, 0, 0, 180),
             Style = SKPaintStyle.Fill
         };
+        
+        // 创建支持中文的字体
+        float fontSize = (isSelected ? 14 : 12) / _zoomScale;
+        using var font = new SKFont(_chineseTypeface, fontSize);
+        font.Embolden = isSelected;
+        
         using var textPaint = new SKPaint
         {
             Color = SKColors.White,
-            TextSize = (isSelected ? 14 : 12) / _zoomScale,
-            IsAntialias = true,
-            FakeBoldText = isSelected
+            IsAntialias = true
         };
 
         var text = roi.ROIName;
         var textBounds = new SKRect();
-        textPaint.MeasureText(text, ref textBounds);
+        font.MeasureText(text, out textBounds);
         var bgRect = new SKRect(bbox.Left, bbox.Top - 22 / _zoomScale, bbox.Left + textBounds.Width + 10 / _zoomScale, bbox.Top - 2 / _zoomScale);
         canvas.DrawRect(bgRect, bgPaint);
-        canvas.DrawText(text, bbox.Left + 5 / _zoomScale, bbox.Top - 6 / _zoomScale, textPaint);
+        canvas.DrawText(text, bbox.Left + 5 / _zoomScale, bbox.Top - 6 / _zoomScale, SKTextAlign.Left, font, textPaint);
     }
 
     private void DrawSelectionHandles(SKCanvas canvas, SKRect bbox)
@@ -387,14 +420,31 @@ public partial class ROIEditorControl : SKElement
     }
 
     /// <summary>
-    /// 将屏幕坐标转换为画布坐标（考虑缩放和平移）
+    /// 将屏幕坐标转换为图像坐标（考虑缩放、平移和控件中心）
     /// </summary>
     private SKPoint ScreenToCanvas(Point screenPoint)
     {
-        return new SKPoint(
-            (float)((screenPoint.X - _panOffset.X) / _zoomScale),
-            (float)((screenPoint.Y - _panOffset.Y) / _zoomScale)
-        );
+        if (ViewModel?.CurrentImage == null) return new SKPoint(0, 0);
+
+        var imageWidth = ViewModel.CurrentImage.Width;
+        var imageHeight = ViewModel.CurrentImage.Height;
+        var controlWidth = ActualWidth;
+        var controlHeight = ActualHeight;
+
+        // 计算控件中心到图像左上角的偏移（与绘制时一致）
+        // 绘制时: canvas.Translate(info.Width / 2.0f, info.Height / 2.0f);
+        //         canvas.Scale(_zoomScale);
+        //         canvas.Translate(_panOffset.X, _panOffset.Y);
+        // 逆变换: 先减去控件中心，除以缩放，再减去平移偏移
+
+        float centerX = (float)(controlWidth / 2.0f);
+        float centerY = (float)(controlHeight / 2.0f);
+
+        // 逆变换计算
+        float imageX = (float)((screenPoint.X - centerX) / _zoomScale - _panOffset.X);
+        float imageY = (float)((screenPoint.Y - centerY) / _zoomScale - _panOffset.Y);
+
+        return new SKPoint(imageX, imageY);
     }
 
     private void OnMouseDown(object sender, MouseButtonEventArgs e)

@@ -193,7 +193,9 @@ namespace VisionInspection.Modules.Detection
             // 应用ROI过滤
             if (rois.Count > 0)
             {
+                System.Diagnostics.Debug.WriteLine($"应用ROI过滤前: {detectedObjects.Count} 个对象");
                 ApplyROIFilter(detectedObjects, rois);
+                System.Diagnostics.Debug.WriteLine($"应用ROI过滤后: {detectedObjects.Count} 个对象");
             }
 
             return detectedObjects;
@@ -271,24 +273,28 @@ namespace VisionInspection.Modules.Detection
 
         private void ApplyROIFilter(List<DetectedObject> objects, List<ROIInfo> rois)
         {
-            foreach (var obj in objects)
+            // 过滤掉不在任何ROI内的对象
+            objects.RemoveAll(obj =>
             {
-                obj.IsInRoi = false;
-                obj.RoiId = null;
-
                 var objCenterX = obj.PixelBoundingBox.MidX;
                 var objCenterY = obj.PixelBoundingBox.MidY;
+                
+                System.Diagnostics.Debug.WriteLine($"检查对象: {obj.ClassName} 中心点({objCenterX:F1}, {objCenterY:F1})");
 
                 foreach (var roi in rois)
                 {
+                    System.Diagnostics.Debug.WriteLine($"  检查ROI: {roi.Name} 区域({roi.X}, {roi.Y}, {roi.Width}, {roi.Height})");
                     if (IsPointInROI(objCenterX, objCenterY, roi))
                     {
                         obj.IsInRoi = true;
                         obj.RoiId = roi.Id;
-                        break;
+                        System.Diagnostics.Debug.WriteLine($"  -> 在ROI内，保留");
+                        return false; // 保留此对象
                     }
                 }
-            }
+                System.Diagnostics.Debug.WriteLine($"  -> 不在任何ROI内，移除");
+                return true; // 移除此对象
+            });
         }
 
         private bool IsPointInROI(float x, float y, ROIInfo roi)

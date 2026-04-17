@@ -242,14 +242,15 @@
             <Grid Grid.Column="1" Margin="10,0,0,0">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
-                
+
                 <!-- ROI列表 -->
                 <hc:Card Grid.Row="0" Header="ROI列表" Margin="0,0,0,10">
-                    <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}" 
+                    <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}"
                             SelectedItem="{Binding RoiEditorViewModel.SelectedROI}"
-                            Height="50" BorderThickness="0">
+                            Height="30" BorderThickness="0">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
@@ -263,8 +264,55 @@
                     </ListBox>
                 </hc:Card>
 
+                <!-- 检测结果列表 -->
+                <hc:Card Grid.Row="1" Header="检测结果" Margin="0,0,0,10">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="200"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- 统计信息 -->
+                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,5">
+                            <TextBlock Text="总计: " FontWeight="Bold"/>
+                            <TextBlock Text="{Binding DetectionResults.Count}" Margin="0,0,15,0"/>
+                            <TextBlock Text="置信度≥0.5: " FontWeight="Bold" Foreground="Green"/>
+                            <TextBlock Text="{Binding HighConfidenceCount}" Foreground="Green"/>
+                        </StackPanel>
+
+                        <!-- 结果列表 -->
+                        <DataGrid Grid.Row="1" ItemsSource="{Binding DetectionResults}"
+                                  SelectedItem="{Binding SelectedDetectionResult}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  GridLinesVisibility="Horizontal"
+                                  BorderThickness="0"
+                                  HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="类别" Binding="{Binding ClassName}" Width="*"/>
+                                <DataGridTextColumn Header="置信度" Binding="{Binding Confidence, StringFormat={}{0:P1}}" Width="70"/>
+                                <DataGridTextColumn Header="位置" Width="80">
+                                    <DataGridTextColumn.Binding>
+                                        <MultiBinding StringFormat="{}{0:F0},{1:F0}">
+                                            <Binding Path="BoundingBox[0]"/>
+                                            <Binding Path="BoundingBox[1]"/>
+                                        </MultiBinding>
+                                    </DataGridTextColumn.Binding>
+                                </DataGridTextColumn>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- 操作按钮 -->
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0">
+                            <Button Content="📋 复制" Command="{Binding CopyDetectionResultsCommand}" Margin="0,0,5,0" Padding="10,2"/>
+                            <Button Content="💾 导出" Command="{Binding ExportDetectionResultsCommand}" Padding="10,2"/>
+                        </StackPanel>
+                    </Grid>
+                </hc:Card>
+
                 <!-- SOP流程显示 -->
-                <views:SOPModuleView Grid.Row="1" x:Name="SOPModule"/>
+                <views:SOPModuleView Grid.Row="2" x:Name="SOPModule"/>
             </Grid>
         </Grid>
 

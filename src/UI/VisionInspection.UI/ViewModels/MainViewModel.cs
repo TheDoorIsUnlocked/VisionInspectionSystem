@@ -56,6 +56,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private List<DetectedObject> _detectionResults = new();
 
     [ObservableProperty]
+    private DetectedObject? _selectedDetectionResult;
+
+    [ObservableProperty]
+    private int _highConfidenceCount = 0;
+
+    [ObservableProperty]
     private string _videoPath = "";
 
     [ObservableProperty]
@@ -149,18 +155,34 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            // 执行检测
-            var rois = RoiEditorViewModel.ROIs.Select(r => new ROIInfo
+            // 执行检测：有ROI则检测ROI区域，无ROI则检测全图
+            DetectionResult result;
+            if (RoiEditorViewModel.ROIs.Count > 0)
             {
-                Name = r.ROIName,
-                X = r.GetBoundingBox().Left,
-                Y = r.GetBoundingBox().Top,
-                Width = r.GetBoundingBox().Width,
-                Height = r.GetBoundingBox().Height,
-                ShapeType = (Core.Services.ShapeType)(int)r.ShapeType
-            }).ToList();
-
-            var result = await _detectionService.DetectAsync(bitmap, rois);
+                // 有ROI，检测ROI区域
+                var rois = RoiEditorViewModel.ROIs.Select(r => new ROIInfo
+                {
+                    Name = r.ROIName,
+                    X = r.GetBoundingBox().Left,
+                    Y = r.GetBoundingBox().Top,
+                    Width = r.GetBoundingBox().Width,
+                    Height = r.GetBoundingBox().Height,
+                    ShapeType = (Core.Services.ShapeType)(int)r.ShapeType
+                }).ToList();
+                
+                // 调试输出ROI信息
+                foreach (var roi in rois)
+                {
+                    System.Diagnostics.Debug.WriteLine($"ROI: {roi.Name}, X={roi.X}, Y={roi.Y}, W={roi.Width}, H={roi.Height}");
+                }
+                
+                result = await _detectionService.DetectAsync(bitmap, rois);
+            }
+            else
+            {
+                // 无ROI，检测全图
+                result = await _detectionService.DetectAsync(bitmap);
+            }
 
             stopwatch.Stop();
 
@@ -170,6 +192,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 if (!_isDisposed)
                 {
                     DetectionResults = result.Objects;
+                    HighConfidenceCount = result.Objects.Count(o => o.Confidence >= 0.5);
 
                     // 绘制检测结果到图像并更新显示
                     var resultBitmap = DrawDetectionResults(bitmap, result);
@@ -670,6 +693,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             // 保存检测结果
             DetectionResults = result.Objects;
+            HighConfidenceCount = result.Objects.Count(o => o.Confidence >= 0.5);
 
             // 绘制检测结果到图像
             DetectionResultImage = DrawDetectionResults(CurrentImage, result.Objects);
@@ -756,12 +780,68 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void ClearDetectionResults()
     {
         DetectionResults.Clear();
+        HighConfidenceCount = 0;
         DetectionResultImage = null;
         if (CurrentImage != null)
         {
             RoiEditorViewModel.CurrentImage = CurrentImage;
         }
         Status = "检测结果已清除";
+    }
+
+    [RelayCommand]
+    public void CopyDetectionResults()
+    {
+        if (DetectionResults.Count == 0)
+        {
+            Status = "没有检测结果可复制";
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("类别\t置信度\t位置X\t位置Y\t宽度\t高度");
+        foreach (var obj in DetectionResults)
+        {
+            sb.AppendLine($"{obj.ClassName}\t{obj.Confidence:P2}\t{obj.BoundingBox[0]:F1}\t{obj.BoundingBox[1]:F1}\t{obj.BoundingBox[2]:F1}\t{obj.BoundingBox[3]:F1}");
+        }
+        Clipboard.SetText(sb.ToString());
+        Status = $"已复制 {DetectionResults.Count} 条检测结果到剪贴板";
+    }
+
+    [RelayCommand]
+    public void ExportDetectionResults()
+    {
+        if (DetectionResults.Count == 0)
+        {
+            Status = "没有检测结果可导出";
+            return;
+        }
+
+        var saveFileDialog = new SaveFileDialog
+        {
+            Title = "导出检测结果",
+            Filter = "CSV文件 (*.csv)|*.csv|文本文件 (*.txt)|*.txt",
+            FileName = $"检测结果_{DateTime.Now:yyyyMMdd_HHmmss}.csv"
+        };
+
+        if (saveFileDialog.ShowDialog() == true)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine("类别,置信度,位置X,位置Y,宽度,高度");
+                foreach (var obj in DetectionResults)
+                {
+                    sb.AppendLine($"{obj.ClassName},{obj.Confidence:F4},{obj.BoundingBox[0]:F2},{obj.BoundingBox[1]:F2},{obj.BoundingBox[2]:F2},{obj.BoundingBox[3]:F2}");
+                }
+                File.WriteAllText(saveFileDialog.FileName, sb.ToString());
+                Status = $"检测结果已导出到: {saveFileDialog.FileName}";
+            }
+            catch (Exception ex)
+            {
+                Status = $"导出失败: {ex.Message}";
+            }
+        }
     }
 
     #endregion
@@ -943,6 +1023,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             CurrentFrameIndex = e.FrameIndex;
             DetectionResults = e.DetectionResult.Objects;
+            HighConfidenceCount = e.DetectionResult.Objects.Count(o => o.Confidence >= 0.5);
 
             // 计算FPS
             _frameCount++;

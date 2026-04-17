@@ -64,6 +64,11 @@
                     <Border Grid.Row="0" Background="#FAFAFA" Padding="15" CornerRadius="6,6,0,0">
                         <StackPanel>
                             <TextBlock Text="相机设备" FontWeight="Bold" Margin="0,0,0,10"/>
+                            <!-- 相机类型选择 -->
+                            <ComboBox x:Name="CameraTypeComboBox" Margin="0,0,0,10" SelectedIndex="0" SelectionChanged="CameraTypeComboBox_SelectionChanged">
+                                <ComboBoxItem Content="🎥 笔记本摄像头"/>
+                                <ComboBoxItem Content="📷 海康工业相机"/>
+                            </ComboBox>
                             <Button x:Name="EnumInterfaceButton" Content="🔍 搜索相机" Padding="15,2" Margin="0,0,0,10"
                                     Click="EnumInterfaceButton_Click"/>
                             <Button x:Name="EnumDeviceButton" Content="🔄 刷新列表" Padding="15,2" Margin="0,0,0,10"
