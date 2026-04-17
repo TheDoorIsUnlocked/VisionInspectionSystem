@@ -34,7 +34,27 @@ public partial class MainWindow : Window
         Title = $"视觉检测系统 - [{_userManager.CurrentUser?.DisplayName} ({_userManager.CurrentUser?.RoleDisplayName})]";
 
         Loaded += MainWindow_Loaded;
+        Closing += MainWindow_Closing;
         Closed += MainWindow_Closed;
+    }
+
+    /// <summary>
+    /// 窗口关闭前事件 - 异步关闭相机资源
+    /// </summary>
+    private async void MainWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        // 取消关闭事件，先执行清理
+        e.Cancel = true;
+        
+        // 释放ViewModel资源（异步执行，避免阻塞UI线程）
+        if (DataContext is MainViewModel viewModel)
+        {
+            await Task.Run(() => viewModel.Dispose());
+        }
+        
+        // 清理完成后关闭窗口
+        Closing -= MainWindow_Closing;
+        Close();
     }
 
     private void MainWindow_Closed(object? sender, EventArgs e)
@@ -157,6 +177,10 @@ public partial class MainWindow : Window
     /// </summary>
     private void CameraConfigMenuItem_Click(object sender, RoutedEventArgs e)
     {
+        // 创建相机配置窗口
+        // 注意：图像传输现在通过CameraManager单例处理
+        // MainViewModel已经订阅了CameraManager.ImageGrabbed事件
+        // 不需要再通过窗口间事件传递图像数据
         var cameraConfigWindow = new CameraConfigWindow();
         cameraConfigWindow.Owner = this;
         cameraConfigWindow.ShowDialog();

@@ -35,6 +35,11 @@ namespace VisionInspection.Core.Services
         event EventHandler<byte[]> ImageGrabbed;
 
         /// <summary>
+        /// 图像数据采集事件（包含完整图像信息）
+        /// </summary>
+        event EventHandler<CameraImageData> ImageDataGrabbed;
+
+        /// <summary>
         /// 错误事件
         /// </summary>
         event EventHandler<string> ErrorOccurred;
@@ -83,6 +88,16 @@ namespace VisionInspection.Core.Services
         /// 获取增益
         /// </summary>
         Task<float> GetGainAsync();
+
+        /// <summary>
+        /// 获取曝光时间范围
+        /// </summary>
+        Task<(float Min, float Max)> GetExposureTimeRangeAsync();
+
+        /// <summary>
+        /// 获取增益范围
+        /// </summary>
+        Task<(float Min, float Max)> GetGainRangeAsync();
     }
 
     /// <summary>
@@ -100,5 +115,17 @@ namespace VisionInspection.Core.Services
         public uint Type { get; set; }
         public string DisplayName { get; set; } = "";
         public object ExtInfo { get; set; }
+    }
+
+    /// <summary>
+    /// 图像数据
+    /// </summary>
+    public class CameraImageData
+    {
+        public byte[] Data { get; set; } = Array.Empty<byte>();
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public bool IsColor { get; set; }
+        public int Channels { get; set; }
     }
 }

@@ -38,6 +38,7 @@ public partial class ROIEditorControl : SKElement
     private const float MinZoom = 0.1f;
     private const float MaxZoom = 10.0f;
     private const float ZoomStep = 0.1f;
+    private bool _isInitialZoomSet = false; // 标记是否已设置初始缩放
 
     // 双击检测
     private DateTime _lastClickTime;
@@ -140,16 +141,36 @@ public partial class ROIEditorControl : SKElement
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        // 当CurrentImage改变时，重新计算居中偏移
+        // 当CurrentImage改变时，重新计算居中偏移和缩放比例
         if (e.PropertyName == nameof(ROIEditorViewModel.CurrentImage))
         {
             if (ViewModel?.CurrentImage != null && ActualWidth > 0 && ActualHeight > 0)
             {
-                // 计算图像居中偏移
-                float centerOffsetX = ((float)ActualWidth - ViewModel.CurrentImage.Width) / 2.0f;
-                float centerOffsetY = ((float)ActualHeight - ViewModel.CurrentImage.Height) / 2.0f;
-                _panOffset = new SKPoint(centerOffsetX, centerOffsetY);
-                _zoomScale = 1.0f;
+                // 只在首次加载图像时设置初始缩放，避免用户缩放后被重置
+                if (!_isInitialZoomSet)
+                {
+                    // 计算图像适应控件大小的缩放比例（UniformToFill模式 - 填充整个控件）
+                    float imageWidth = ViewModel.CurrentImage.Width;
+                    float imageHeight = ViewModel.CurrentImage.Height;
+                    float controlWidth = (float)ActualWidth;
+                    float controlHeight = (float)ActualHeight;
+                    
+                    float scaleX = controlWidth / imageWidth;
+                    float scaleY = controlHeight / imageHeight;
+                    
+                    // 使用较大的缩放比例，使图像填充整个控件（可能会裁剪部分图像）
+                    _zoomScale = Math.Max(scaleX, scaleY);
+                    
+                    // 计算居中偏移（相对于控件中心）
+                    _panOffset = new SKPoint(-imageWidth / 2, -imageHeight / 2);
+                    
+                    _isInitialZoomSet = true;
+                }
+            }
+            else if (ViewModel?.CurrentImage == null)
+            {
+                // 图像被清空时，重置初始缩放标志
+                _isInitialZoomSet = false;
             }
             InvalidateVisual();
         }
@@ -183,10 +204,10 @@ public partial class ROIEditorControl : SKElement
         var imageWidth = ViewModel.CurrentImage.Width;
         var imageHeight = ViewModel.CurrentImage.Height;
 
-        // 应用变换：先平移，然后缩放
-        // _panOffset已经包含了居中偏移，在设置图像时计算
-        canvas.Translate(_panOffset.X, _panOffset.Y);
-        canvas.Scale(_zoomScale);
+        // 应用变换：先平移到控件中心，然后缩放，最后平移使图像居中
+        canvas.Translate(info.Width / 2.0f, info.Height / 2.0f);  // 移到控件中心
+        canvas.Scale(_zoomScale);  // 应用缩放
+        canvas.Translate(_panOffset.X, _panOffset.Y);  // 平移使图像居中
 
         // 绘制图像（使用原始尺寸，缩放由canvas.Scale处理）
         var drawRect = new SKRect(0, 0, imageWidth, imageHeight);
@@ -523,6 +544,8 @@ public partial class ROIEditorControl : SKElement
         if (ViewModel?.CurrentImage == null) return;
 
         var mousePos = e.GetPosition(this);
+        var controlCenterX = ActualWidth / 2;
+        var controlCenterY = ActualHeight / 2;
 
         // 计算新的缩放比例
         float newScale;
@@ -535,11 +558,19 @@ public partial class ROIEditorControl : SKElement
             newScale = Math.Max(_zoomScale * 0.9f, MinZoom);
         }
 
-        // 以鼠标位置为中心缩放的算法
-        // 新的平移偏移 = 鼠标位置 - (鼠标位置 - 旧平移偏移) * 缩放比例
+        // 以鼠标位置为中心缩放的算法（基于控件中心坐标系）
+        // 1. 将鼠标位置转换为相对于控件中心的坐标
+        float mouseOffsetX = (float)(mousePos.X - controlCenterX);
+        float mouseOffsetY = (float)(mousePos.Y - controlCenterY);
+        
+        // 2. 计算缩放比例
         float scaleRatio = newScale / _zoomScale;
-        _panOffset.X = (float)mousePos.X - ((float)mousePos.X - _panOffset.X) * scaleRatio;
-        _panOffset.Y = (float)mousePos.Y - ((float)mousePos.Y - _panOffset.Y) * scaleRatio;
+        
+        // 3. 调整平移偏移，使鼠标位置保持不变
+        // 新的平移偏移 = 旧平移偏移 - (鼠标偏移 * (1 - 缩放比例))
+        _panOffset.X = _panOffset.X - mouseOffsetX * (1 - scaleRatio) / newScale;
+        _panOffset.Y = _panOffset.Y - mouseOffsetY * (1 - scaleRatio) / newScale;
+        
         _zoomScale = newScale;
 
         InvalidateVisual();
@@ -551,16 +582,30 @@ public partial class ROIEditorControl : SKElement
     /// </summary>
     public void ResetView()
     {
-        _zoomScale = 1.0f;
-        // 重新计算居中偏移
+        // 重置初始缩放标志，允许重新计算初始缩放
+        _isInitialZoomSet = false;
+        
         if (ViewModel?.CurrentImage != null && ActualWidth > 0 && ActualHeight > 0)
         {
-            float centerOffsetX = ((float)ActualWidth - ViewModel.CurrentImage.Width) / 2.0f;
-            float centerOffsetY = ((float)ActualHeight - ViewModel.CurrentImage.Height) / 2.0f;
-            _panOffset = new SKPoint(centerOffsetX, centerOffsetY);
+            float imageWidth = ViewModel.CurrentImage.Width;
+            float imageHeight = ViewModel.CurrentImage.Height;
+            float controlWidth = (float)ActualWidth;
+            float controlHeight = (float)ActualHeight;
+            
+            float scaleX = controlWidth / imageWidth;
+            float scaleY = controlHeight / imageHeight;
+            
+            // 使用较大的缩放比例，使图像填充整个控件
+            _zoomScale = Math.Max(scaleX, scaleY);
+            
+            // 计算居中偏移（相对于控件中心）
+            _panOffset = new SKPoint(-imageWidth / 2, -imageHeight / 2);
+            
+            _isInitialZoomSet = true;
         }
         else
         {
+            _zoomScale = 1.0f;
             _panOffset = new SKPoint(0, 0);
         }
         InvalidateVisual();
@@ -576,7 +621,7 @@ public partial class ROIEditorControl : SKElement
     }
 
     /// <summary>
-    /// 适应窗口大小
+    /// 适应窗口大小（完整显示图像）
     /// </summary>
     public void FitToWindow()
     {
@@ -587,17 +632,18 @@ public partial class ROIEditorControl : SKElement
 
         if (actualWidth <= 0 || actualHeight <= 0) return;
 
-        var imageRect = CalculateImageRect(ViewModel.CurrentImage, (int)actualWidth, (int)actualHeight);
-        
-        // 计算适应窗口的缩放比例
+        // 重置初始缩放标志
+        _isInitialZoomSet = false;
+
+        // 计算适应窗口的缩放比例（完整显示）
         var scaleX = actualWidth / ViewModel.CurrentImage.Width;
         var scaleY = actualHeight / ViewModel.CurrentImage.Height;
         _zoomScale = (float)Math.Min(scaleX, scaleY);
 
-        // 居中显示
-        _panOffset.X = (float)(actualWidth - ViewModel.CurrentImage.Width * _zoomScale) / 2;
-        _panOffset.Y = (float)(actualHeight - ViewModel.CurrentImage.Height * _zoomScale) / 2;
+        // 居中显示（相对于控件中心）
+        _panOffset = new SKPoint(-ViewModel.CurrentImage.Width / 2, -ViewModel.CurrentImage.Height / 2);
 
+        _isInitialZoomSet = true;
         InvalidateVisual();
     }
 }

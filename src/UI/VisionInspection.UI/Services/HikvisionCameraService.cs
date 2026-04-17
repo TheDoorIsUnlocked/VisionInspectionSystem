@@ -22,6 +22,7 @@ namespace VisionInspection.UI.Services
 
         private MyCamera.cbOutputExdelegate _imageCallback;
         private readonly object _lockObject = new object();
+        private GCHandle _bufferHandle;
 
         // 图像缓冲区
         private UInt32 _bufferSize = 5120 * 5120 * 3 + 2048;
@@ -40,6 +41,7 @@ namespace VisionInspection.UI.Services
         #region 事件
 
         public event EventHandler<byte[]> ImageGrabbed;
+        public event EventHandler<CameraImageData> ImageDataGrabbed;
         public event EventHandler<bool> ConnectionStatusChanged;
         public event EventHandler<string> ErrorOccurred;
 
@@ -48,6 +50,7 @@ namespace VisionInspection.UI.Services
         public HikvisionCameraService()
         {
             _buffer = new byte[_bufferSize];
+            _bufferHandle = GCHandle.Alloc(_buffer, GCHandleType.Pinned);
         }
 
         #region 相机枚举
@@ -162,12 +165,33 @@ namespace VisionInspection.UI.Services
         {
             try
             {
+                // 先停止采集
                 StopGrabbing();
 
-                if (_isConnected)
+                if (_isConnected && _camera != null)
                 {
-                    _camera.MV_CC_CloseDevice_NET();
-                    _camera.MV_CC_DestroyDevice_NET();
+                    // 关闭设备
+                    int nRet = _camera.MV_CC_CloseDevice_NET();
+                    if (nRet != MyCamera.MV_OK)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"关闭设备失败，错误码：0x{nRet:X}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("相机设备已关闭");
+                    }
+                    
+                    // 销毁设备
+                    nRet = _camera.MV_CC_DestroyDevice_NET();
+                    if (nRet != MyCamera.MV_OK)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"销毁设备失败，错误码：0x{nRet:X}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("相机设备已销毁");
+                    }
+                    
                     _isConnected = false;
                 }
 
@@ -185,8 +209,29 @@ namespace VisionInspection.UI.Services
         /// </summary>
         public void Dispose()
         {
-            Disconnect();
-            _camera = null;
+            try
+            {
+                System.Diagnostics.Debug.WriteLine("开始释放相机资源...");
+                
+                // 先断开连接（内部会停止采集）
+                Disconnect();
+                
+                // 释放缓冲区
+                if (_bufferHandle.IsAllocated)
+                {
+                    _bufferHandle.Free();
+                    System.Diagnostics.Debug.WriteLine("相机缓冲区已释放");
+                }
+                
+                // 清理相机对象
+                _camera = null;
+                
+                System.Diagnostics.Debug.WriteLine("相机资源已完全释放");
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"释放相机资源时发生异常: {ex.Message}");
+            }
         }
 
         #endregion
@@ -243,9 +288,30 @@ namespace VisionInspection.UI.Services
         {
             try
             {
-                if (_isGrabbing)
+                if (_isGrabbing && _camera != null)
                 {
-                    _camera.MV_CC_StopGrabbing_NET();
+                    // 停止抓图
+                    int nRet = _camera.MV_CC_StopGrabbing_NET();
+                    if (nRet != MyCamera.MV_OK)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"停止采集失败，错误码：0x{nRet:X}");
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("相机采集已停止");
+                    }
+                    
+                    // 注销图像回调
+                    if (_imageCallback != null)
+                    {
+                        nRet = _camera.MV_CC_RegisterImageCallBackEx_NET(null, IntPtr.Zero);
+                        if (nRet != MyCamera.MV_OK)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"注销回调失败，错误码：0x{nRet:X}");
+                        }
+                        _imageCallback = null;
+                    }
+                    
                     _isGrabbing = false;
                 }
             }
@@ -269,21 +335,31 @@ namespace VisionInspection.UI.Services
 
                 // 确定目标像素格式
                 MyCamera.MvGvspPixelType enDstPixelType;
+                int channels;
+                bool isColor;
+
                 if (IsMonoData(pFrameInfo.enPixelType))
                 {
                     enDstPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_Mono8;
+                    channels = 1;
+                    isColor = false;
                 }
                 else if (IsColorData(pFrameInfo.enPixelType))
                 {
                     enDstPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_RGB8_Packed;
+                    channels = 3;
+                    isColor = true;
                 }
                 else
                 {
-                    return;
+                    // 不支持的格式，尝试转为Mono8
+                    enDstPixelType = MyCamera.MvGvspPixelType.PixelType_Gvsp_Mono8;
+                    channels = 1;
+                    isColor = false;
                 }
 
                 // 像素格式转换
-                IntPtr pImage = Marshal.UnsafeAddrOfPinnedArrayElement(_buffer, 0);
+                IntPtr pImage = _bufferHandle.AddrOfPinnedObject();
 
                 MyCamera.MV_PIXEL_CONVERT_PARAM stConvertParam = new MyCamera.MV_PIXEL_CONVERT_PARAM();
                 stConvertParam.nWidth = pFrameInfo.nWidth;
@@ -298,18 +374,29 @@ namespace VisionInspection.UI.Services
                 int nRet = _camera.MV_CC_ConvertPixelType_NET(ref stConvertParam);
                 if (nRet != MyCamera.MV_OK)
                 {
+                    System.Diagnostics.Debug.WriteLine($"像素转换失败：0x{nRet:X}");
                     return;
                 }
 
                 // 计算输出数据大小
-                int dataSize = (int)(pFrameInfo.nWidth * pFrameInfo.nHeight *
-                    (enDstPixelType == MyCamera.MvGvspPixelType.PixelType_Gvsp_Mono8 ? 1 : 3));
+                int dataSize = (int)(pFrameInfo.nWidth * pFrameInfo.nHeight * channels);
 
                 // 复制数据
                 byte[] imageData = new byte[dataSize];
                 Marshal.Copy(pImage, imageData, 0, dataSize);
 
+                // 创建图像数据对象
+                var cameraImageData = new CameraImageData
+                {
+                    Data = imageData,
+                    Width = (int)pFrameInfo.nWidth,
+                    Height = (int)pFrameInfo.nHeight,
+                    IsColor = isColor,
+                    Channels = channels
+                };
+
                 // 触发事件
+                ImageDataGrabbed?.Invoke(this, cameraImageData);
                 ImageGrabbed?.Invoke(this, imageData);
             }
             catch (Exception ex)
@@ -437,6 +524,28 @@ namespace VisionInspection.UI.Services
         }
 
         /// <summary>
+        /// 获取曝光时间范围
+        /// </summary>
+        public Task<(float Min, float Max)> GetExposureTimeRangeAsync()
+        {
+            return Task.Run(() =>
+            {
+                if (!_isConnected) return (0f, 0f);
+
+                try
+                {
+                    MyCamera.MVCC_FLOATVALUE value = new MyCamera.MVCC_FLOATVALUE();
+                    _camera.MV_CC_GetFloatValue_NET("ExposureTime", ref value);
+                    return (value.fMin, value.fMax);
+                }
+                catch
+                {
+                    return (0f, 100000f);
+                }
+            });
+        }
+
+        /// <summary>
         /// 设置增益
         /// </summary>
         public Task<bool> SetGainAsync(float gain)
@@ -476,6 +585,28 @@ namespace VisionInspection.UI.Services
                 catch
                 {
                     return 0;
+                }
+            });
+        }
+
+        /// <summary>
+        /// 获取增益范围
+        /// </summary>
+        public Task<(float Min, float Max)> GetGainRangeAsync()
+        {
+            return Task.Run(() =>
+            {
+                if (!_isConnected) return (0f, 0f);
+
+                try
+                {
+                    MyCamera.MVCC_FLOATVALUE value = new MyCamera.MVCC_FLOATVALUE();
+                    _camera.MV_CC_GetFloatValue_NET("Gain", ref value);
+                    return (value.fMin, value.fMax);
+                }
+                catch
+                {
+                    return (0f, 20f);
                 }
             });
         }

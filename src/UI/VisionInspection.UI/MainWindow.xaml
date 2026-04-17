@@ -177,6 +177,42 @@
                 <TextBlock Text="{Binding CurrentFrameIndex, StringFormat='帧: {0}'}" 
                           VerticalAlignment="Center" Margin="5,0" Width="80"
                           Visibility="{Binding IsVideoPlaying, Converter={StaticResource Boolean2VisibilityConverter}}"/>
+                <Separator Margin="5,0"/>
+                
+                <!-- 实时相机检测组 -->
+                <Button Content="📷" ToolTip="开始实时检测" Command="{Binding StartRealTimeDetectionCommand}"
+                        Margin="2" Padding="8,4">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ButtonSuccess}">
+                            <Setter Property="IsEnabled" Value="False"/>
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding IsModelLoaded}" Value="True"/>
+                                        <Condition Binding="{Binding IsRealTimeDetecting}" Value="False"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <Button Content="🛑" ToolTip="停止实时检测" Command="{Binding StopRealTimeDetectionCommand}" 
+                        Margin="2" Padding="8,4">
+                    <Button.Style>
+                        <Style TargetType="Button" BasedOn="{StaticResource ButtonDanger}">
+                            <Setter Property="IsEnabled" Value="False"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsRealTimeDetecting}" Value="True">
+                                    <Setter Property="IsEnabled" Value="True"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+                <TextBlock Text="{Binding InferenceFps, StringFormat='推理FPS: {0:F1}'}" 
+                          VerticalAlignment="Center" Margin="5,0" Width="100"
+                          Visibility="{Binding IsRealTimeDetecting, Converter={StaticResource Boolean2VisibilityConverter}}"/>
             </ToolBar>
         </ToolBarTray>
 

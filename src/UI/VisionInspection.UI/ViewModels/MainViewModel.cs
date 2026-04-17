@@ -15,14 +15,15 @@ using VisionInspection.UI.Services;
 
 namespace VisionInspection.UI.ViewModels;
 
-public partial class MainViewModel : ViewModelBase
+public partial class MainViewModel : ViewModelBase, IDisposable
 {
     private readonly ROIManager _roiManager;
-    private readonly ICameraService _cameraService;
+    private readonly CameraManager _cameraManager;
     private readonly YoloDetectionService _detectionService;
     private readonly ModelManager _modelManager;
     private SOPModule? _sopModule;
     private ModelInfo? _loadedModel;
+    private bool _isDisposed = false;
 
     [ObservableProperty]
     private ROIEditorViewModel _roiEditorViewModel = null!;
@@ -69,20 +70,284 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     private double _fps = 0;
 
+    [ObservableProperty]
+    private bool _isCameraGrabbing = false;
+
+    [ObservableProperty]
+    private bool _isRealTimeDetecting = false;
+
+    [ObservableProperty]
+    private double _inferenceFps = 0;
+
     private string _lastDetectionError = "";
     private DateTime _lastFrameTime = DateTime.Now;
     private int _frameCount = 0;
+    private DateTime _lastInferenceTime = DateTime.Now;
+    private int _inferenceFrameCount = 0;
+    private bool _isProcessingFrame = false;
+    private readonly object _inferenceLock = new();
 
     public MainViewModel()
     {
         _roiManager = new ROIManager();
         RoiEditorViewModel = new ROIEditorViewModel(_roiManager);
-        _cameraService = new MockCameraService();
+        _cameraManager = CameraManager.Instance;
         _detectionService = new YoloDetectionService();
         _modelManager = new ModelManager();
 
         // 订阅检测错误事件
         _detectionService.DetectionError += OnDetectionError;
+        
+        // 订阅相机图像事件
+        _cameraManager.ImageGrabbed += OnCameraImageGrabbed;
+        _cameraManager.ConnectionStatusChanged += OnCameraConnectionStatusChanged;
+    }
+    
+    /// <summary>
+    /// 相机图像采集回调
+    /// </summary>
+    private async void OnCameraImageGrabbed(object? sender, CameraImageData e)
+    {
+        // 检查应用程序是否仍在运行
+        if (System.Windows.Application.Current == null || _isDisposed)
+            return;
+            
+        // 将相机图像转换为 SKBitmap 并显示
+        var skBitmap = ConvertCameraImageToSKBitmap(e);
+        if (skBitmap != null)
+        {
+            // 在UI线程更新图像
+            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            {
+                // 再次检查，防止在Invoke执行前程序已关闭
+                if (!_isDisposed && RoiEditorViewModel != null)
+                {
+                    RoiEditorViewModel.CurrentImage = skBitmap;
+                }
+            });
+            
+            // 如果启用了实时检测，执行YOLO推理
+            if (IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
+            {
+                await PerformRealTimeDetectionAsync(skBitmap);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// 执行实时检测
+    /// </summary>
+    private async Task PerformRealTimeDetectionAsync(SKBitmap bitmap)
+    {
+        // 使用锁防止并发处理
+        if (!Monitor.TryEnter(_inferenceLock))
+            return;
+            
+        try
+        {
+            _isProcessingFrame = true;
+            
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            
+            // 执行检测
+            var rois = RoiEditorViewModel.ROIs.Select(r => new ROIInfo
+            {
+                Name = r.ROIName,
+                X = r.GetBoundingBox().Left,
+                Y = r.GetBoundingBox().Top,
+                Width = r.GetBoundingBox().Width,
+                Height = r.GetBoundingBox().Height,
+                ShapeType = (Core.Services.ShapeType)(int)r.ShapeType
+            }).ToList();
+            
+            var result = await _detectionService.DetectAsync(bitmap, rois);
+            
+            stopwatch.Stop();
+            
+            // 更新UI
+            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            {
+                if (!_isDisposed)
+                {
+                    DetectionResults = result.Objects;
+                    
+                    // 绘制检测结果
+                    DrawDetectionResults(bitmap, result);
+                    
+                    // 计算推理FPS
+                    _inferenceFrameCount++;
+                    var elapsed = DateTime.Now - _lastInferenceTime;
+                    if (elapsed.TotalSeconds >= 1)
+                    {
+                        InferenceFps = _inferenceFrameCount / elapsed.TotalSeconds;
+                        _inferenceFrameCount = 0;
+                        _lastInferenceTime = DateTime.Now;
+                    }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"实时检测异常: {ex.Message}");
+        }
+        finally
+        {
+            _isProcessingFrame = false;
+            Monitor.Exit(_inferenceLock);
+        }
+    }
+    
+    /// <summary>
+    /// 绘制检测结果到图像
+    /// </summary>
+    private void DrawDetectionResults(SKBitmap sourceBitmap, DetectionResult result)
+    {
+        try
+        {
+            // 创建可变的bitmap副本
+            var resultBitmap = sourceBitmap.Copy();
+            
+            using (var canvas = new SKCanvas(resultBitmap))
+            {
+                var paint = new SKPaint
+                {
+                    Style = SKPaintStyle.Stroke,
+                    Color = SKColors.Red,
+                    StrokeWidth = 2,
+                    IsAntialias = true
+                };
+                
+                var textPaint = new SKPaint
+                {
+                    Color = SKColors.Yellow,
+                    TextSize = 14,
+                    IsAntialias = true
+                };
+                
+                foreach (var obj in result.Objects)
+                {
+                    // 绘制边界框
+                    var rect = new SKRect(
+                        obj.BoundingBox[0],
+                        obj.BoundingBox[1],
+                        obj.BoundingBox[0] + obj.BoundingBox[2],
+                        obj.BoundingBox[1] + obj.BoundingBox[3]);
+                    canvas.DrawRect(rect, paint);
+                    
+                    // 绘制标签
+                    var label = $"{obj.ClassName} {(obj.Confidence * 100):F1}%";
+                    canvas.DrawText(label, obj.BoundingBox[0], obj.BoundingBox[1] - 5, textPaint);
+                }
+            }
+            
+            // 更新检测结果图像
+            DetectionResultImage?.Dispose();
+            DetectionResultImage = resultBitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"绘制检测结果异常: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// 相机连接状态改变回调
+    /// </summary>
+    private void OnCameraConnectionStatusChanged(object? sender, bool isConnected)
+    {
+        // 检查应用程序是否仍在运行
+        if (System.Windows.Application.Current == null || _isDisposed)
+            return;
+            
+        System.Windows.Application.Current.Dispatcher.Invoke(() =>
+        {
+            if (!_isDisposed)
+            {
+                Status = isConnected ? "相机已连接" : "相机已断开";
+            }
+        });
+    }
+    
+    /// <summary>
+    /// 将相机图像数据转换为 SKBitmap
+    /// </summary>
+    private SKBitmap? ConvertCameraImageToSKBitmap(CameraImageData imageData)
+    {
+        try
+        {
+            if (imageData?.Data == null || imageData.Data.Length == 0)
+                return null;
+
+            var info = new SKImageInfo(
+                imageData.Width, 
+                imageData.Height, 
+                SKColorType.Bgra8888);
+            
+            var bitmap = new SKBitmap(info);
+            
+            if (imageData.IsColor && imageData.Channels == 3)
+            {
+                // RGB24 -> BGRA32 转换
+                ConvertRgb24ToBgra32(imageData.Data, bitmap, imageData.Width, imageData.Height);
+            }
+            else
+            {
+                // 灰度图像，需要转换为 BGRA
+                ConvertGray8ToBgra32(imageData.Data, bitmap, imageData.Width, imageData.Height);
+            }
+            
+            return bitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"转换图像到SKBitmap异常：{ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 将 RGB24 数据转换为 BGRA32
+    /// </summary>
+    private unsafe void ConvertRgb24ToBgra32(byte[] rgbData, SKBitmap bitmap, int width, int height)
+    {
+        byte* ptr = (byte*)bitmap.GetPixels().ToPointer();
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int srcIndex = (y * width + x) * 3;
+                int dstIndex = (y * width + x) * 4;
+                
+                // RGB -> BGRA
+                ptr[dstIndex] = rgbData[srcIndex + 2];     // B
+                ptr[dstIndex + 1] = rgbData[srcIndex + 1]; // G
+                ptr[dstIndex + 2] = rgbData[srcIndex];     // R
+                ptr[dstIndex + 3] = 255;                   // A
+            }
+        }
+    }
+
+    /// <summary>
+    /// 将 Gray8 数据转换为 BGRA32
+    /// </summary>
+    private unsafe void ConvertGray8ToBgra32(byte[] grayData, SKBitmap bitmap, int width, int height)
+    {
+        byte* ptr = (byte*)bitmap.GetPixels().ToPointer();
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                int srcIndex = y * width + x;
+                int dstIndex = srcIndex * 4;
+                byte gray = grayData[srcIndex];
+                
+                // Gray -> BGRA
+                ptr[dstIndex] = gray;     // B
+                ptr[dstIndex + 1] = gray; // G
+                ptr[dstIndex + 2] = gray; // R
+                ptr[dstIndex + 3] = 255;  // A
+            }
+        }
     }
 
     private void OnDetectionError(object? sender, string e)
@@ -105,7 +370,7 @@ public partial class MainViewModel : ViewModelBase
 
             // 初始化SOP模块
             _sopModule = new SOPModule();
-            await _sopModule.InitializeAsync(config, _cameraService);
+            await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
 
             SopStatus = "SOP模块初始化成功";
             Status = "SOP模块初始化完成";
@@ -136,7 +401,7 @@ public partial class MainViewModel : ViewModelBase
             }
 
             // 连接相机
-            await _cameraService.ConnectAsync(new CameraInfo { Id = "main_camera", Name = "主相机" });
+            await _cameraManager.ConnectAsync(new CameraInfo { Id = "main_camera", Name = "主相机" });
 
             // 捕获图像
             var frames = new Dictionary<string, CaptureFrame>();
@@ -684,6 +949,115 @@ public partial class MainViewModel : ViewModelBase
             _detectionService.VideoFrameDetected -= OnVideoFrameDetected;
             _detectionService.VideoInferenceCompleted -= OnVideoInferenceCompleted;
         });
+    }
+
+    #endregion
+
+    #region 实时相机检测
+
+    /// <summary>
+    /// 启动实时相机检测
+    /// </summary>
+    [RelayCommand]
+    public void StartRealTimeDetection()
+    {
+        try
+        {
+            if (!IsModelLoaded)
+            {
+                MessageBox.Show("请先加载模型", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!_cameraManager.IsConnected)
+            {
+                MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!_cameraManager.IsGrabbing)
+            {
+                MessageBox.Show("请先开始相机采集", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            IsRealTimeDetecting = true;
+            _inferenceFrameCount = 0;
+            _lastInferenceTime = DateTime.Now;
+            Status = "实时检测已启动";
+        }
+        catch (Exception ex)
+        {
+            Status = $"启动实时检测失败: {ex.Message}";
+            MessageBox.Show($"启动实时检测失败: {ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    /// <summary>
+    /// 停止实时相机检测
+    /// </summary>
+    [RelayCommand]
+    public void StopRealTimeDetection()
+    {
+        try
+        {
+            IsRealTimeDetecting = false;
+            InferenceFps = 0;
+            Status = "实时检测已停止";
+        }
+        catch (Exception ex)
+        {
+            Status = $"停止实时检测失败: {ex.Message}";
+        }
+    }
+
+    #endregion
+
+    #region IDisposable
+
+    /// <summary>
+    /// 释放资源 - 安全关闭相机和清理资源
+    /// </summary>
+    public void Dispose()
+    {
+        if (!_isDisposed)
+        {
+            _isDisposed = true;
+            
+            // 取消订阅相机事件（先取消订阅，避免在关闭过程中收到事件）
+            _cameraManager.ImageGrabbed -= OnCameraImageGrabbed;
+            _cameraManager.ConnectionStatusChanged -= OnCameraConnectionStatusChanged;
+            
+            // 取消订阅检测错误事件
+            _detectionService.DetectionError -= OnDetectionError;
+            
+            // 释放图像资源
+            CurrentImage?.Dispose();
+            DetectionResultImage?.Dispose();
+            
+            // 安全关闭相机
+            SafeShutdownCamera();
+        }
+    }
+    
+    /// <summary>
+    /// 安全关闭相机 - 确保相机正确停止并断开连接
+    /// </summary>
+    private void SafeShutdownCamera()
+    {
+        try
+        {
+            System.Diagnostics.Debug.WriteLine("开始安全关闭相机...");
+            
+            // 使用CameraManager的Shutdown方法进行完整关闭
+            _cameraManager.Shutdown();
+            
+            System.Diagnostics.Debug.WriteLine("相机已安全关闭");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"安全关闭相机时发生异常: {ex.Message}");
+        }
     }
 
     #endregion

@@ -23,6 +23,7 @@ namespace VisionInspection.Core.Services
 
         public event EventHandler<bool> ConnectionStatusChanged;
         public event EventHandler<byte[]> ImageGrabbed;
+        public event EventHandler<CameraImageData> ImageDataGrabbed;
         public event EventHandler<string> ErrorOccurred;
 
         public Task<List<CameraInfo>> EnumCamerasAsync()
@@ -90,6 +91,17 @@ namespace VisionInspection.Core.Services
             // 生成模拟图像数据（简单的测试图案）
             var imageData = GenerateTestPattern();
             ImageGrabbed?.Invoke(this, imageData);
+
+            // 同时触发新的图像数据事件
+            var cameraImageData = new CameraImageData
+            {
+                Data = imageData,
+                Width = 640,
+                Height = 480,
+                IsColor = true,
+                Channels = 3
+            };
+            ImageDataGrabbed?.Invoke(this, cameraImageData);
         }
 
         private byte[] GenerateTestPattern()
@@ -142,6 +154,18 @@ namespace VisionInspection.Core.Services
         public Task<float> GetGainAsync()
         {
             return Task.FromResult(_gain);
+        }
+
+        public Task<(float Min, float Max)> GetExposureTimeRangeAsync()
+        {
+            // 模拟曝光时间范围：10μs - 1000000μs
+            return Task.FromResult((10f, 1000000f));
+        }
+
+        public Task<(float Min, float Max)> GetGainRangeAsync()
+        {
+            // 模拟增益范围：0dB - 20dB
+            return Task.FromResult((0f, 20f));
         }
 
         public void Dispose()
