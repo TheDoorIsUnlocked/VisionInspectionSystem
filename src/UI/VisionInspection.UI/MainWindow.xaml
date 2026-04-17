@@ -215,7 +215,7 @@
                 <hc:Card Grid.Row="0" Header="ROI列表" Margin="0,0,0,10">
                     <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}" 
                             SelectedItem="{Binding RoiEditorViewModel.SelectedROI}"
-                            Height="150" BorderThickness="0">
+                            Height="50" BorderThickness="0">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">

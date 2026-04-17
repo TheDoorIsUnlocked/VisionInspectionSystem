@@ -59,7 +59,7 @@
                                 <ColumnDefinition Width="50"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="100"/>
                             </Grid.ColumnDefinitions>
                             <TextBlock Grid.Column="0" Text="序号" FontWeight="Bold" Foreground="#666"/>
                             <TextBlock Grid.Column="1" Text="步骤名称" FontWeight="Bold" Foreground="#666" Margin="10,0"/>
