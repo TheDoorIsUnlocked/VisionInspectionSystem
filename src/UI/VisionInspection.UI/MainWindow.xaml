@@ -210,9 +210,7 @@
                         </Style>
                     </Button.Style>
                 </Button>
-                <TextBlock Text="{Binding InferenceFps, StringFormat='推理FPS: {0:F1}'}" 
-                          VerticalAlignment="Center" Margin="5,0" Width="100"
-                          Visibility="{Binding IsRealTimeDetecting, Converter={StaticResource Boolean2VisibilityConverter}}"/>
+
             </ToolBar>
         </ToolBarTray>
 
@@ -278,7 +276,26 @@
             <StatusBarItem HorizontalAlignment="Right">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock Text="帧率: " Opacity="0.7" VerticalAlignment="Center"/>
-                    <TextBlock Text="{Binding Fps, StringFormat='{}{0:F1}'}" FontWeight="Bold" VerticalAlignment="Center" Width="40"/>
+                    <TextBlock FontWeight="Bold" VerticalAlignment="Center" Width="50">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0:F1}">
+                                <Binding Path="Fps" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                        <TextBlock.Visibility>
+                            <Binding Path="IsVideoPlaying" Converter="{StaticResource Boolean2VisibilityConverter}"/>
+                        </TextBlock.Visibility>
+                    </TextBlock>
+                    <TextBlock FontWeight="Bold" VerticalAlignment="Center" Width="50">
+                        <TextBlock.Text>
+                            <MultiBinding StringFormat="{}{0:F1}">
+                                <Binding Path="InferenceFps" />
+                            </MultiBinding>
+                        </TextBlock.Text>
+                        <TextBlock.Visibility>
+                            <Binding Path="IsRealTimeDetecting" Converter="{StaticResource Boolean2VisibilityConverter}"/>
+                        </TextBlock.Visibility>
+                    </TextBlock>
                     <TextBlock Text=" FPS" Opacity="0.5" VerticalAlignment="Center" Margin="0,0,10,0"/>
                     <TextBlock Text="就绪" Opacity="0.5" VerticalAlignment="Center"/>
                 </StackPanel>
