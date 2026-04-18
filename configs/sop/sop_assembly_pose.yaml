@@ -1,0 +1,133 @@
+sop:
+  name: "转向器装配SOP-姿态检测版"
+  version: "1.0"
+  
+  regions:
+    part_box:
+      x1: 50
+      y1: 200
+      x2: 250
+      y2: 400
+      name: "零件盒区域"
+    fixture:
+      x1: 300
+      y1: 250
+      x2: 500
+      y2: 450
+      name: "夹具区域"
+    tool_rack:
+      x1: 550
+      y1: 200
+      x2: 750
+      y2: 400
+      name: "工具架区域"
+    release_channel:
+      x1: 400
+      y1: 500
+      x2: 600
+      y2: 600
+      name: "放行通道"
+  
+  forbidden_zones:
+    danger_zone:
+      x1: 0
+      y1: 0
+      x2: 100
+      y2: 100
+      name: "危险区域"
+  
+  steps:
+    - id: "idle"
+      name: "等待"
+      timeout: 30
+      transitions: ["pick_part"]
+      description: "等待操作员开始作业"
+      
+    - id: "pick_part"
+      name: "取壳体"
+      timeout: 5
+      transitions: ["position"]
+      description: "从零件盒取壳体"
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "part_box"
+        min_confidence: 0.6
+        stable_frames: 3
+    
+    - id: "position"
+      name: "放入夹具"
+      timeout: 8
+      transitions: ["pick_bolt"]
+      description: "将壳体放入夹具定位"
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "fixture"
+        min_confidence: 0.6
+        stable_frames: 5
+        tolerance: 20
+    
+    - id: "pick_bolt"
+      name: "取螺栓"
+      timeout: 5
+      transitions: ["insert_bolt"]
+      description: "从料盒取螺栓"
+      detection:
+        method: "hand_in_region"
+        hand: "left"
+        region: "part_box"
+        min_confidence: 0.6
+        stable_frames: 3
+    
+    - id: "insert_bolt"
+      name: "穿入螺栓"
+      timeout: 10
+      transitions: ["fasten"]
+      description: "将螺栓穿入壳体孔位"
+      detection:
+        method: "hand_in_region"
+        hand: "left"
+        region: "fixture"
+        min_confidence: 0.6
+        stable_frames: 5
+        tolerance: 15
+    
+    - id: "fasten"
+      name: "扭矩扳手拧紧"
+      timeout: 15
+      transitions: ["check_torque"]
+      description: "使用扭矩扳手拧紧螺栓"
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "tool_rack"
+        min_confidence: 0.6
+        stable_frames: 10
+    
+    - id: "check_torque"
+      name: "扭矩值确认"
+      timeout: 5
+      transitions: ["release"]
+      description: "确认扭矩值在范围内"
+      detection:
+        method: "time_elapsed"
+        stable_frames: 2
+    
+    - id: "release"
+      name: "放行"
+      timeout: 5
+      transitions: ["complete"]
+      description: "将工件推入放行通道"
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "release_channel"
+        min_confidence: 0.6
+        stable_frames: 3
+    
+    - id: "complete"
+      name: "完成"
+      timeout: 2
+      transitions: ["idle"]
+      description: "作业完成"

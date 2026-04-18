@@ -1,0 +1,47 @@
+{
+  "SOPModule": {
+    "ModelPath": "yolo_models/yolov8s.onnx",
+    "UseGpu": false,
+    "ConfidenceThreshold": 0.6,
+    "IouThreshold": 0.45,
+    "PoseEstimation": {
+      "Enabled": true,
+      "ModelPath": "yolo_models/yolov8s-pose.onnx"
+    }
+  },
+  "RegionConfigPath": "configs/sop/regions/phone_usage_regions.json",
+  "WorkflowPath": "configs/sop/sop_phone_usage.yaml",
+  "DetectionMode": "PoseBased",
+  "Steps": [
+    {
+      "Id": "idle",
+      "Name": "等待",
+      "Description": "等待操作开始",
+      "Icon": "⏳"
+    },
+    {
+      "Id": "pickup_phone",
+      "Name": "拿起手机",
+      "Description": "检测手从桌面拿起手机动作",
+      "Icon": "📱"
+    },
+    {
+      "Id": "make_call",
+      "Name": "打电话",
+      "Description": "检测手举到耳边进行通话",
+      "Icon": "📞"
+    },
+    {
+      "Id": "put_down_phone",
+      "Name": "放下手机",
+      "Description": "检测手将手机放回桌面",
+      "Icon": "✋"
+    },
+    {
+      "Id": "complete",
+      "Name": "完成",
+      "Description": "SOP流程执行完成",
+      "Icon": "✅"
+    }
+  ]
+}

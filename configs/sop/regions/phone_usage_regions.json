@@ -1,0 +1,171 @@
+{
+  "name": "手机使用场景 - 区域定义",
+  "description": "定义拿起手机、打电话、放下手机场景中的关键区域",
+  "version": "1.0",
+  "imageSize": {
+    "width": 1280,
+    "height": 720
+  },
+  "regions": {
+    "phone_table": {
+      "id": "phone_table",
+      "name": "手机放置区",
+      "description": "手机放置的桌面区域",
+      "type": "rectangle",
+      "coordinates": {
+        "x1": 200,
+        "y1": 400,
+        "x2": 350,
+        "y2": 550
+      },
+      "color": "#4CAF50",
+      "allowedActions": ["放置手机", "拿起手机"]
+    },
+    "ear_region": {
+      "id": "ear_region",
+      "name": "耳边区域",
+      "description": "打电话时手机应该到达的耳边位置",
+      "type": "rectangle",
+      "coordinates": {
+        "x1": 450,
+        "y1": 150,
+        "x2": 550,
+        "y2": 250
+      },
+      "color": "#2196F3",
+      "allowedActions": ["打电话"]
+    },
+    "face_region": {
+      "id": "face_region",
+      "name": "面部区域",
+      "description": "检测人脸位置，用于判断打电话姿态",
+      "type": "rectangle",
+      "coordinates": {
+        "x1": 400,
+        "y1": 100,
+        "x2": 600,
+        "y2": 300
+      },
+      "color": "#FF9800",
+      "allowedActions": ["检测面部朝向"]
+    },
+    "work_area": {
+      "id": "work_area",
+      "name": "工作区域",
+      "description": "人员正常活动的区域范围",
+      "type": "rectangle",
+      "coordinates": {
+        "x1": 100,
+        "y1": 50,
+        "x2": 1180,
+        "y2": 670
+      },
+      "color": "#9E9E9E",
+      "allowedActions": ["人员活动范围"]
+    }
+  },
+  "keypoints": {
+    "left_hand": {
+      "id": "left_hand",
+      "name": "左手",
+      "keypointType": "LeftWrist",
+      "description": "左手腕位置，用于检测拿手机的手"
+    },
+    "right_hand": {
+      "id": "right_hand",
+      "name": "右手",
+      "keypointType": "RightWrist",
+      "description": "右手腕位置，用于检测拿手机的手"
+    },
+    "left_elbow": {
+      "id": "left_elbow",
+      "name": "左肘",
+      "keypointType": "LeftElbow",
+      "description": "左肘位置，用于判断手臂姿态"
+    },
+    "right_elbow": {
+      "id": "right_elbow",
+      "name": "右肘",
+      "keypointType": "RightElbow",
+      "description": "右肘位置，用于判断手臂姿态"
+    },
+    "nose": {
+      "id": "nose",
+      "name": "鼻子",
+      "keypointType": "Nose",
+      "description": "鼻子位置，用于判断头部朝向"
+    },
+    "left_ear": {
+      "id": "left_ear",
+      "name": "左耳",
+      "keypointType": "LeftEar",
+      "description": "左耳位置"
+    },
+    "right_ear": {
+      "id": "right_ear",
+      "name": "右耳",
+      "keypointType": "RightEar",
+      "description": "右耳位置"
+    }
+  },
+  "rules": {
+    "pickup_phone": {
+      "id": "pickup_phone",
+      "name": "拿起手机",
+      "description": "手从手机放置区移动到离开",
+      "conditions": [
+        {
+          "type": "hand_in_region",
+          "hand": "any",
+          "region": "phone_table",
+          "duration": 500,
+          "description": "手在手机放置区停留500ms"
+        },
+        {
+          "type": "hand_leave_region",
+          "hand": "any",
+          "region": "phone_table",
+          "description": "手离开手机放置区"
+        }
+      ]
+    },
+    "make_call": {
+      "id": "make_call",
+      "name": "打电话",
+      "description": "手机到达耳边区域并保持",
+      "conditions": [
+        {
+          "type": "hand_in_region",
+          "hand": "any",
+          "region": "ear_region",
+          "duration": 1000,
+          "description": "手在耳边区域停留1秒"
+        },
+        {
+          "type": "head_facing",
+          "direction": "front",
+          "description": "头部保持正面朝向"
+        }
+      ]
+    },
+    "put_down_phone": {
+      "id": "put_down_phone",
+      "name": "放下手机",
+      "description": "手从耳边区域返回到手机放置区",
+      "conditions": [
+        {
+          "type": "hand_in_region",
+          "hand": "any",
+          "region": "phone_table",
+          "duration": 500,
+          "description": "手在手机放置区停留500ms"
+        }
+      ]
+    }
+  },
+  "forbiddenZones": {},
+  "calibration": {
+    "note": "这些坐标基于1280x720分辨率的摄像头",
+    "adjustmentGuide": "如果实际摄像头分辨率不同，请按比例调整坐标"
+  }
+}

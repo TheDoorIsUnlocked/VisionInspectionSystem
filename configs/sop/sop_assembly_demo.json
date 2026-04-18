@@ -1,0 +1,164 @@
+{
+  "id": "demo-assembly-001",
+  "name": "转向器装配SOP",
+  "description": "汽车零部件转向器装配标准作业流程",
+  "version": "1.0.0",
+  "createdAt": "2026-04-18T10:00:00",
+  "updatedAt": "2026-04-18T10:00:00",
+  "steps": [
+    {
+      "stepId": 1,
+      "stepName": "取壳体",
+      "description": "从料盒取转向器壳体",
+      "expectedDurationSec": 3,
+      "timeoutSec": 10,
+      "passConditions": [
+        {
+          "type": 0,
+          "targetObject": "shell",
+          "minConfidence": 0.7,
+          "stableFrames": 3,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [],
+      "requiredPreviousSteps": []
+    },
+    {
+      "stepId": 2,
+      "stepName": "放入夹具",
+      "description": "将壳体放入夹具定位",
+      "expectedDurationSec": 5,
+      "timeoutSec": 15,
+      "passConditions": [
+        {
+          "type": 1,
+          "targetObject": "shell",
+          "zoneId": "fixture_zone",
+          "minConfidence": 0.7,
+          "stableFrames": 5,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [
+        {
+          "type": 4,
+          "description": "壳体被移除",
+          "severity": 2,
+          "parameters": {
+            "MustKeepClasses": ["shell"]
+          }
+        }
+      ],
+      "requiredPreviousSteps": [1]
+    },
+    {
+      "stepId": 3,
+      "stepName": "取螺栓",
+      "description": "从螺栓盒取2颗螺栓",
+      "expectedDurationSec": 8,
+      "timeoutSec": 20,
+      "passConditions": [
+        {
+          "type": 0,
+          "targetObject": "bolt",
+          "minConfidence": 0.7,
+          "stableFrames": 3,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [],
+      "requiredPreviousSteps": [2]
+    },
+    {
+      "stepId": 4,
+      "stepName": "穿入螺栓",
+      "description": "将螺栓穿入壳体孔位",
+      "expectedDurationSec": 10,
+      "timeoutSec": 25,
+      "passConditions": [
+        {
+          "type": 1,
+          "targetObject": "bolt",
+          "zoneId": "shell_hole_zone",
+          "minConfidence": 0.7,
+          "stableFrames": 5,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [],
+      "requiredPreviousSteps": [3]
+    },
+    {
+      "stepId": 5,
+      "stepName": "扭矩扳手拧紧",
+      "description": "用扭矩扳手拧紧螺栓",
+      "expectedDurationSec": 10,
+      "timeoutSec": 20,
+      "passConditions": [
+        {
+          "type": 0,
+          "targetObject": "torque_wrench",
+          "minConfidence": 0.7,
+          "stableFrames": 5,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [],
+      "requiredPreviousSteps": [4]
+    },
+    {
+      "stepId": 6,
+      "stepName": "扭矩值确认",
+      "description": "查看扭矩扳手显示值确认在范围内",
+      "expectedDurationSec": 3,
+      "timeoutSec": 10,
+      "passConditions": [
+        {
+          "type": 5,
+          "targetObject": "",
+          "minConfidence": 0.7,
+          "stableFrames": 5,
+          "parameters": {
+            "RequiredSeconds": 2.0
+          }
+        }
+      ],
+      "violationRules": [
+        {
+          "type": 0,
+          "description": "跳过扭矩确认",
+          "severity": 3,
+          "parameters": {}
+        }
+      ],
+      "requiredPreviousSteps": [5]
+    },
+    {
+      "stepId": 7,
+      "stepName": "放行",
+      "description": "将工件推入滑道放行",
+      "expectedDurationSec": 3,
+      "timeoutSec": 10,
+      "passConditions": [
+        {
+          "type": 3,
+          "targetObject": "shell",
+          "minConfidence": 0.5,
+          "stableFrames": 5,
+          "parameters": {}
+        }
+      ],
+      "violationRules": [],
+      "requiredPreviousSteps": [6]
+    }
+  ],
+  "settings": {
+    "enableSkipDetection": true,
+    "enableTimeoutDetection": true,
+    "stableFrameCount": 5,
+    "positionTolerance": 20.0,
+    "autoResetOnComplete": false,
+    "resetDelaySec": 5
+  }
+}

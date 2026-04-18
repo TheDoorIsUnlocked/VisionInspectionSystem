@@ -45,4 +45,17 @@
     </None>
   </ItemGroup>
 
+  <!-- SOP配置文件 -->
+  <ItemGroup>
+    <None Update="configs\sop_config.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="configs\sop\regions\phone_usage_regions.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="configs\sop\sop_phone_usage.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

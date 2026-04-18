@@ -420,14 +420,53 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             IsBusy = true;
             Status = "初始化SOP模块...";
 
-            // 创建配置
-            var config = new ConfigurationBuilder()
-                .AddJsonFile("configs/products/sample_product.json")
-                .Build();
+            // 检查配置文件是否存在
+            string configPath = "configs/sop_config.json";
+            if (!File.Exists(configPath))
+            {
+                // 尝试使用备选配置（内存配置）
+                Status = "使用默认配置初始化SOP模块...";
+                var defaultConfig = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["SOPModule:ModelPath"] = "yolo_models/yolov8s.onnx",
+                        ["SOPModule:UseGpu"] = "false",
+                        ["SOPModule:ConfidenceThreshold"] = "0.6",
+                        ["SOPModule:IouThreshold"] = "0.45",
+                        ["SOPModule:PoseEstimation:Enabled"] = "true",
+                        ["SOPModule:PoseEstimation:ModelPath"] = "yolo_models/yolov8s-pose.onnx"
+                    })
+                    .Build();
 
-            // 初始化SOP模块
-            _sopModule = new SOPModule();
-            await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
+                _sopModule = new SOPModule();
+                await _sopModule.InitializeAsync(defaultConfig, _cameraManager.CurrentCameraService!);
+            }
+            else
+            {
+                // 使用配置文件
+                var config = new ConfigurationBuilder()
+                    .AddJsonFile(configPath, optional: true)
+                    .Build();
+
+                _sopModule = new SOPModule();
+                await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
+            }
+
+            // 加载区域配置（如果存在）
+            string regionConfigPath = "configs/sop/regions/phone_usage_regions.json";
+            if (File.Exists(regionConfigPath))
+            {
+                Status = "加载区域配置...";
+                // 区域配置会在SOPDetectionStarter中加载，这里仅检查存在性
+            }
+
+            // 加载SOP流程配置（如果存在）
+            string workflowPath = "configs/sop/sop_phone_usage.yaml";
+            if (File.Exists(workflowPath))
+            {
+                Status = "加载SOP流程配置...";
+                _sopModule.StartWorkflowFromYaml(workflowPath);
+            }
 
             SopStatus = "SOP模块初始化成功";
             Status = "SOP模块初始化完成";

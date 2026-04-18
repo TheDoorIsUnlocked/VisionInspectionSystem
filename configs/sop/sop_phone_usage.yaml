@@ -1,0 +1,163 @@
+# 手机使用场景 SOP 配置
+# 场景：拿起手机 -> 打电话 -> 放下手机
+
+sop:
+  name: "手机使用场景SOP"
+  version: "1.0"
+  description: "检测人员拿起手机、打电话、放下手机的完整流程"
+  
+  # 全局设置
+  settings:
+    detectionMode: "pose_based"  # 使用姿态检测模式
+    confidenceThreshold: 0.6
+    stableFrames: 3
+    timeoutSeconds: 30
+  
+  # 区域定义
+  regions:
+    phone_table:
+      x1: 200
+      y1: 400
+      x2: 350
+      y2: 550
+      name: "手机放置区"
+      description: "手机放置的桌面区域"
+      color: "#4CAF50"
+      
+    ear_region:
+      x1: 450
+      y1: 150
+      x2: 550
+      y2: 250
+      name: "耳边区域"
+      description: "打电话时手机应该到达的耳边位置"
+      color: "#2196F3"
+      
+    face_region:
+      x1: 400
+      y1: 100
+      x2: 600
+      y2: 300
+      name: "面部区域"
+      description: "检测人脸位置"
+      color: "#FF9800"
+  
+  # 步骤定义
+  steps:
+    # 步骤1: 等待状态
+    - id: "idle"
+      name: "等待"
+      description: "等待人员开始操作"
+      timeout: 30
+      transitions: ["pickup_phone"]
+      detection:
+        method: "person_present"
+        min_confidence: 0.6
+        description: "检测到人员在场"
+    
+    # 步骤2: 拿起手机
+    - id: "pickup_phone"
+      name: "拿起手机"
+      description: "从桌面拿起手机"
+      timeout: 5
+      transitions: ["make_call"]
+      detection:
+        method: "hand_action"
+        action: "pickup"
+        hand: "any"
+        from_region: "phone_table"
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手从手机放置区拿起手机"
+      violation_rules:
+        - type: "wrong_hand"
+          description: "使用了不允许的手"
+    
+    # 步骤3: 打电话
+    - id: "make_call"
+      name: "打电话"
+      description: "将手机放到耳边打电话"
+      timeout: 10
+      transitions: ["put_down_phone"]
+      detection:
+        method: "hand_in_region"
+        hand: "any"
+        region: "ear_region"
+        min_confidence: 0.6
+        stable_frames: 5
+        duration_ms: 1000
+        description: "手在耳边区域停留1秒"
+      violation_rules:
+        - type: "hand_leave_early"
+          description: "手过早离开耳边"
+        - type: "wrong_posture"
+          description: "打电话姿势不正确"
+    
+    # 步骤4: 放下手机
+    - id: "put_down_phone"
+      name: "放下手机"
+      description: "将手机放回桌面"
+      timeout: 5
+      transitions: ["complete"]
+      detection:
+        method: "hand_action"
+        action: "putdown"
+        hand: "any"
+        to_region: "phone_table"
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手将手机放回放置区"
+      violation_rules:
+        - type: "wrong_location"
+          description: "手机放错位置"
+    
+    # 步骤5: 完成
+    - id: "complete"
+      name: "完成"
+      description: "手机使用流程完成"
+      timeout: 2
+      transitions: ["idle"]
+      detection:
+        method: "time_elapsed"
+        duration_ms: 1000
+        description: "等待1秒后回到初始状态"
+  
+  # 违规检测规则
+  violations:
+    - id: "phone_not_picked"
+      name: "未拿起手机"
+      description: "在规定时间内没有拿起手机"
+      severity: "warning"
+      
+    - id: "call_too_short"
+      name: "通话时间过短"
+      description: "通话时间少于1秒"
+      severity: "warning"
+      
+    - id: "phone_not_returned"
+      name: "未放回手机"
+      description: "没有将手机放回指定位置"
+      severity: "error"
+      
+    - id: "wrong_hand_usage"
+      name: "错误的手"
+      description: "使用了不允许的手操作"
+      severity: "warning"
+  
+  # 关键点配置
+  keypoints:
+    required:
+      - "LeftWrist"
+      - "RightWrist"
+      - "Nose"
+      - "LeftEar"
+      - "RightEar"
+    
+  # 可视化配置
+  visualization:
+    show_regions: true
+    show_keypoints: true
+    show_skeleton: true
+    show_tracking_id: true
+    region_alpha: 0.3
+    keypoint_radius: 5
