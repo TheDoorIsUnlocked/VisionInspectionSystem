@@ -33,6 +33,11 @@ public class SOPModule : IDetectionModule
     private IPoseEstimationService? _poseService;
     private PoseConditionEvaluator? _poseEvaluator;
     private PoseViolationDetector? _poseViolationDetector;
+    
+    // ⭐ 手部姿态估计相关
+    private IHandPoseEstimationService? _handPoseService;
+    private HandPoseEstimationResult? _lastHandPoseResult;
+    
     private SOPDetectionMode _detectionMode = SOPDetectionMode.ObjectBased;
 
     public string Name => "SOPModule";
@@ -179,8 +184,41 @@ public class SOPModule : IDetectionModule
         _poseEvaluator = new PoseConditionEvaluator();
         _poseViolationDetector = new PoseViolationDetector();
 
+        // ⭐ 初始化手部姿态估计服务
+        await InitializeHandPoseEstimationAsync();
+
         // 设置默认区域（实际应从配置加载）
         SetupDefaultRegions();
+    }
+
+    /// <summary>
+    /// 初始化手部姿态估计服务
+    /// </summary>
+    private async Task InitializeHandPoseEstimationAsync()
+    {
+        // 根据配置选择使用哪种手部检测方案
+        var handConfig = new HandPoseEstimationConfig
+        {
+            ModelPath = _config.HandPoseEstimation?.ModelPath ?? "",
+            ConfidenceThreshold = _config.HandPoseEstimation?.ConfidenceThreshold ?? 0.5f,
+            MaxNumHands = _config.HandPoseEstimation?.MaxNumHands ?? 2,
+            UseGpu = _config.HandPoseEstimation?.UseGpu ?? true
+        };
+
+        if (!string.IsNullOrEmpty(handConfig.ModelPath) && File.Exists(handConfig.ModelPath))
+        {
+            // 使用YOLO方案（如果有模型）
+            _handPoseService = new YoloHandPoseEstimationService();
+            await _handPoseService.InitializeAsync(handConfig);
+            Console.WriteLine("[SOP] 手部姿态估计服务初始化完成（YOLO方案）");
+        }
+        else
+        {
+            // 使用MediaPipe方案（默认）
+            _handPoseService = new MediaPipeHandPoseEstimationService();
+            await _handPoseService.InitializeAsync(handConfig);
+            Console.WriteLine("[SOP] 手部姿态估计服务初始化完成（MediaPipe方案）");
+        }
     }
 
     private void SetupDefaultRegions()
@@ -420,6 +458,28 @@ public class SOPModule : IDetectionModule
 
         result.Detections = detections.ToList();
 
+        // ⭐ 如果启用了手部姿态估计，进行手部检测
+        if (_handPoseService != null && _handPoseService.IsInitialized)
+        {
+            try
+            {
+                var handResult = _handPoseService.DetectHandsAsync(frame.Image).Result;
+                _lastHandPoseResult = handResult;
+                
+                if (handResult.Hands.Count > 0)
+                {
+                    Console.WriteLine($"[SOP] 检测到手部: {handResult.Hands.Count}只, 耗时: {handResult.ProcessingTimeMs}ms");
+                    
+                    // 触发手部检测事件
+                    OnHandPoseDetected(handResult, timestamp);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SOP] 手部姿态估计失败: {ex.Message}");
+            }
+        }
+
         // 如果启用了姿态估计，也进行姿态检测
         if (_poseService != null && _poseEvaluator != null)
         {
@@ -479,6 +539,19 @@ public class SOPModule : IDetectionModule
             // 姿态服务未初始化，仅使用物体检测
             _stateMachine.ProcessFrame(detections.ToList(), timestamp);
         }
+    }
+
+    /// <summary>
+    /// 手部姿态检测事件
+    /// </summary>
+    public event EventHandler<HandPoseDetectedEventArgs>? HandPoseDetected;
+
+    /// <summary>
+    /// 触发手部姿态检测事件
+    /// </summary>
+    private void OnHandPoseDetected(HandPoseEstimationResult result, DateTime timestamp)
+    {
+        HandPoseDetected?.Invoke(this, new HandPoseDetectedEventArgs(result, timestamp));
     }
 
     public void StartWorkflow(SOPWorkflow workflow)
@@ -641,6 +714,11 @@ public class SOPModuleConfig
     public float ConfidenceThreshold { get; set; } = 0.6f;
     public float IouThreshold { get; set; } = 0.45f;
     public PoseEstimationConfig? PoseEstimation { get; set; }
+    
+    /// <summary>
+    /// 手部姿态估计配置
+    /// </summary>
+    public HandPoseEstimationConfig? HandPoseEstimation { get; set; }
 }
 
 /// <summary>

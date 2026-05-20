@@ -9,9 +9,9 @@ namespace SOPTest;
 /// <summary>
 /// SOP Bug修复测试 - 专门测试修复的功能
 /// </summary>
-class SOPFixTest
+public static class SOPFixTest
 {
-    static void Main(string[] args)
+    public static void RunAllTests()
     {
         Console.WriteLine("========================================");
         Console.WriteLine("    SOP Bug修复验证测试");
@@ -40,9 +40,6 @@ class SOPFixTest
             Console.WriteLine($"\n✗ 测试失败: {ex.Message}");
             Console.WriteLine($"堆栈: {ex.StackTrace}");
         }
-
-        Console.WriteLine("\n按任意键退出...");
-        Console.ReadKey();
     }
 
     /// <summary>

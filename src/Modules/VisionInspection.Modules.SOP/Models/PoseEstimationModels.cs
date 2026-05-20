@@ -282,5 +282,32 @@ public enum SOPDetectionMode
     /// <summary>
     /// 混合模式（物体+姿态）
     /// </summary>
-    Hybrid
+    Hybrid,
+
+    /// <summary>
+    /// 手部姿态模式（MediaPipe 21点手部检测）
+    /// </summary>
+    HandPoseBased
+}
+
+/// <summary>
+/// 手部姿态检测事件参数
+/// </summary>
+public class HandPoseDetectedEventArgs : EventArgs
+{
+    /// <summary>
+    /// 手部姿态估计结果
+    /// </summary>
+    public HandPoseEstimationResult Result { get; }
+
+    /// <summary>
+    /// 检测时间戳
+    /// </summary>
+    public DateTime Timestamp { get; }
+
+    public HandPoseDetectedEventArgs(HandPoseEstimationResult result, DateTime timestamp)
+    {
+        Result = result;
+        Timestamp = timestamp;
+    }
 }

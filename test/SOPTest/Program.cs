@@ -18,6 +18,38 @@ class Program
         Console.WriteLine("    SOP检测系统 - 测试程序");
         Console.WriteLine("========================================\n");
 
+        // 显示菜单
+        Console.WriteLine("请选择测试类型:");
+        Console.WriteLine("  1. SOP完整流程测试");
+        Console.WriteLine("  2. 手部姿态估计测试");
+        Console.WriteLine("  3. 运行所有测试\n");
+        Console.Write("输入选项 (1/2/3) [默认: 2]: ");
+
+        var input = Console.ReadLine();
+        var choice = string.IsNullOrWhiteSpace(input) ? "2" : input.Trim();
+        Console.WriteLine($"选择了选项: {choice}");
+
+        switch (choice)
+        {
+            case "2":
+                HandPoseEstimationTest.RunAllTests();
+                Console.WriteLine("\n按任意键退出...");
+                Console.ReadKey();
+                return;
+            case "3":
+                // 运行所有测试
+                SOPFixTest.RunAllTests();
+                Console.WriteLine("\n");
+                HandPoseEstimationTest.RunAllTests();
+                Console.WriteLine("\n按任意键继续SOP完整流程测试...");
+                Console.ReadKey();
+                Console.WriteLine();
+                break;
+            default:
+                // 选项1: 直接运行SOP完整流程测试
+                break;
+        }
+
         // 创建SOP检测启动器
         var starter = new SOPDetectionStarter();
 
