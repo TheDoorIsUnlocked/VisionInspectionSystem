@@ -26,6 +26,9 @@ public class SOPModule : IDetectionModule
     private SOPWorkflow? _currentWorkflow;
     private readonly object _lockObject = new();
 
+    // ⭐ 模型动态加载相关
+    private string _lastLoadedModelPath = "";
+
     // 姿态估计相关
     private IPoseEstimationService? _poseService;
     private PoseConditionEvaluator? _poseEvaluator;
@@ -102,27 +105,63 @@ public class SOPModule : IDetectionModule
         }
     }
 
+    /// <summary>
+    /// 初始化 YOLO（启动时调用一次）
+    /// </summary>
     private async Task InitializeYoloAsync()
     {
-        if (!File.Exists(_config.ModelPath))
+        await LoadYoloAsync(_config.ModelPath, _config.UseGpu, "0");
+    }
+
+    /// <summary>
+    /// 按指定路径加载/切换 YOLO 模型
+    /// </summary>
+    private async Task LoadYoloAsync(string modelPath, bool useGpu, string? gpuDevice = null)
+    {
+        // 如果路径没变且模型已加载，跳过
+        if (_yolo != null && modelPath == _lastLoadedModelPath)
         {
-            // 模型文件不存在，使用模拟模式
-            _yolo = null;
+            Console.WriteLine($"[SOP] 模型未变化，跳过重载: {modelPath}");
             return;
         }
 
         await Task.Run(() =>
         {
-            var options = new YoloOptions
+            try
             {
-                ExecutionProvider = _config.UseGpu
-                    ? new CudaExecutionProvider(_config.ModelPath, 0)
-                    : new CpuExecutionProvider(_config.ModelPath),
-                ImageResize = ImageResize.Proportional,
-                SamplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None)
-            };
+                lock (_lockObject)
+                {
+                    // 释放旧模型
+                    _yolo?.Dispose();
+                    _yolo = null;
 
-            _yolo = new Yolo(options);
+                    if (!File.Exists(modelPath))
+                    {
+                        Console.WriteLine($"[SOP] 警告: 模型文件不存在: {modelPath}");
+                        _lastLoadedModelPath = "";
+                        return;
+                    }
+
+                    var options = new YoloOptions
+                    {
+                        ExecutionProvider = useGpu
+                            ? new CudaExecutionProvider(modelPath, int.Parse(gpuDevice ?? "0"))
+                            : new CpuExecutionProvider(modelPath),
+                        ImageResize = ImageResize.Proportional,
+                        SamplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None)
+                    };
+
+                    _yolo = new Yolo(options);
+                    _lastLoadedModelPath = modelPath;
+                    Console.WriteLine($"[SOP] 模型加载成功: {Path.GetFileName(modelPath)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[SOP] 模型加载失败: {ex.Message}");
+                _yolo = null;
+                _lastLoadedModelPath = "";
+            }
         });
     }
 
@@ -294,12 +333,23 @@ public class SOPModule : IDetectionModule
     /// </summary>
     private void ProcessObjectDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
     {
-        if (_yolo == null || _stateMachine == null) return;
+        if (_stateMachine == null) return;
+
+        // 如果 YOLO 还没加载好（刚切换工作流，模型在后台加载中），用空结果
+        if (_yolo == null)
+        {
+            Console.WriteLine("[SOP] 模型加载中，本帧跳过检测");
+            return;
+        }
+
+        // 使用当前工作流覆盖的阈值，否则用全局配置
+        float confidence = _currentWorkflow?.Model?.Confidence ?? _config.ConfidenceThreshold;
+        float iou = _currentWorkflow?.Model?.Iou ?? _config.IouThreshold;
 
         var detections = _yolo.RunObjectDetection(
             frame.Image,
-            confidence: _config.ConfidenceThreshold,
-            iou: _config.IouThreshold);
+            confidence: confidence,
+            iou: iou);
 
         _stateMachine.ProcessFrame(detections.ToList(), timestamp);
 
@@ -436,7 +486,60 @@ public class SOPModule : IDetectionModule
         if (_stateMachine == null)
             throw new InvalidOperationException("状态机未初始化");
 
+        var previousWorkflow = _currentWorkflow;
         _currentWorkflow = workflow;
+
+        // ⭐ 注入区域定义（已有）
+        if (workflow.Regions != null && workflow.Regions.Count > 0)
+        {
+            _stateMachine.UpdateZones(workflow.Regions);
+            Console.WriteLine($"[SOP] 已加载 {workflow.Regions.Count} 个区域定义");
+        }
+        else
+        {
+            Console.WriteLine("[SOP] 警告: 工作流中没有区域定义，object_in_zone 条件将无法工作");
+        }
+
+        // ⭐ 检查并切换 YOLO 模型
+        if (workflow.Model != null && !string.IsNullOrWhiteSpace(workflow.Model.Path))
+        {
+            var modelPath = workflow.Model.Path;
+
+            // 支持相对路径：相对于项目根目录下 yolo_models/ 目录
+            if (!Path.IsPathRooted(modelPath))
+            {
+                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+                var projectRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
+                var candidate1 = Path.Combine(projectRoot, "yolo_models", modelPath);
+                var candidate2 = Path.Combine(projectRoot, modelPath);
+
+                if (File.Exists(candidate1))
+                    modelPath = candidate1;
+                else if (File.Exists(modelPath))
+                { /* 相对路径指的就是当前模型路径，保持不变 */ }
+                else if (File.Exists(candidate2))
+                    modelPath = candidate2;
+            }
+
+            if (modelPath != _lastLoadedModelPath)
+            {
+                Console.WriteLine($"[SOP] 切换模型: {_lastLoadedModelPath} → {modelPath}");
+                Console.WriteLine($"[SOP] 模型配置: confidence={workflow.Model.Confidence}, iou={workflow.Model.Iou}, gpu={workflow.Model.UseGpu}");
+
+                // 同步更新运行时置信度/IoU（本地生效，非配置文件）
+                _config.ConfidenceThreshold = workflow.Model.Confidence;
+                _config.IouThreshold = workflow.Model.Iou;
+
+                // 后台加载新模型（不影响当前帧处理）
+                _ = Task.Run(() => LoadYoloAsync(modelPath, workflow.Model.UseGpu, workflow.Model.GpuId.ToString()));
+                Console.WriteLine($"[SOP] 模型正在后台加载... 当前帧仍使用前一个模型");
+            }
+            else
+            {
+                Console.WriteLine($"[SOP] 模型未变化，跳过: {Path.GetFileName(modelPath)}");
+            }
+        }
+
         _stateMachine.Start(workflow);
     }
 

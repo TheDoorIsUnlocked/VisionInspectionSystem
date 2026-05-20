@@ -11,10 +11,24 @@ public class ViolationDetector
 {
     private readonly SOPStateMachine _stateMachine;
     private readonly Dictionary<string, DateTime> _violationCooldown = new();
+    private readonly Dictionary<string, ZoneDefinition> _zones;
 
-    public ViolationDetector(SOPStateMachine stateMachine)
+    public ViolationDetector(SOPStateMachine stateMachine, IReadOnlyList<ZoneDefinition>? zones = null)
     {
         _stateMachine = stateMachine;
+        _zones = (zones ?? new List<ZoneDefinition>()).ToDictionary(z => z.ZoneId, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 动态更新区域定义
+    /// </summary>
+    public void UpdateZones(IReadOnlyList<ZoneDefinition> zones)
+    {
+        _zones.Clear();
+        foreach (var zone in zones)
+        {
+            _zones[zone.ZoneId] = zone;
+        }
     }
 
     /// <summary>
@@ -304,15 +318,13 @@ public class ViolationDetector
 
     private ZoneDefinition? GetZoneDefinition(string zoneId)
     {
-        return new ZoneDefinition
+        if (_zones.TryGetValue(zoneId, out var zone))
         {
-            ZoneId = zoneId,
-            Name = zoneId,
-            X = 0.2f,
-            Y = 0.2f,
-            Width = 0.3f,
-            Height = 0.3f
-        };
+            return zone;
+        }
+
+        Console.WriteLine($"[SOP] 警告: 违规检测器未找到区域定义 '{zoneId}'");
+        return null;
     }
 
     private bool IsInZone(SKRect objectBox, ZoneDefinition zone)

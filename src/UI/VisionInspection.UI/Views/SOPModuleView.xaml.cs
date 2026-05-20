@@ -4,7 +4,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 using VisionInspection.Core.Models;
+using VisionInspection.UI.ViewModels;
 
 namespace VisionInspection.UI.Views
 {
@@ -16,10 +18,97 @@ namespace VisionInspection.UI.Views
         private List<SOPStepItem> _steps = new();
         private int _currentStepIndex = -1;
 
+        // 计时器相关
+        private DispatcherTimer? _timer;
+        private DateTime _timerStartTime;
+        private bool _isTimerRunning = false;
+
         public SOPModuleView()
         {
             InitializeComponent();
             InitializeSampleSteps();
+            InitializeTimer();
+        }
+
+        /// <summary>
+        /// 初始化计时器
+        /// </summary>
+        private void InitializeTimer()
+        {
+            _timer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(100) // 100ms更新一次
+            };
+            _timer.Tick += Timer_Tick;
+        }
+
+        /// <summary>
+        /// 计时器Tick事件
+        /// </summary>
+        private void Timer_Tick(object? sender, EventArgs e)
+        {
+            if (_isTimerRunning)
+            {
+                var elapsed = DateTime.Now - _timerStartTime;
+                TimerTextBlock.Text = FormatTimeSpan(elapsed);
+            }
+        }
+
+        /// <summary>
+        /// 格式化时间显示
+        /// </summary>
+        private static string FormatTimeSpan(TimeSpan time)
+        {
+            if (time.TotalHours >= 1)
+                return $"{time.Hours:D2}:{time.Minutes:D2}:{time.Seconds:D2}";
+            else
+                return $"{time.Minutes:D2}:{time.Seconds:D2}";
+        }
+
+        /// <summary>
+        /// 开始计时
+        /// </summary>
+        public void StartTimer()
+        {
+            _timerStartTime = DateTime.Now;
+            _isTimerRunning = true;
+            _timer?.Start();
+            TimerTextBlock.Text = "00:00";
+            TimerTextBlock.Foreground = new SolidColorBrush(Color.FromRgb(250, 140, 22));
+        }
+
+        /// <summary>
+        /// 停止计时
+        /// </summary>
+        public void StopTimer()
+        {
+            _isTimerRunning = false;
+            _timer?.Stop();
+        }
+
+        /// <summary>
+        /// 重置计时器
+        /// </summary>
+        public void ResetTimer()
+        {
+            _isTimerRunning = false;
+            _timer?.Stop();
+            TimerTextBlock.Text = "00:00";
+            TimerTextBlock.Foreground = new SolidColorBrush(Colors.Gray);
+        }
+
+        /// <summary>
+        /// 获取主视图模型
+        /// </summary>
+        private MainViewModel? GetMainViewModel()
+        {
+            if (DataContext is MainViewModel vm)
+                return vm;
+            // 尝试从父窗口获取
+            var window = Window.GetWindow(this);
+            if (window?.DataContext is MainViewModel mainVm)
+                return mainVm;
+            return null;
         }
 
         /// <summary>
@@ -68,7 +157,7 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 创建步骤控件
+        /// 创建步骤控件 - 水平列表样式
         /// </summary>
         private Border CreateStepControl(SOPStepItem step, bool isLast)
         {
@@ -78,39 +167,43 @@ namespace VisionInspection.UI.Views
                 BorderBrush = GetStepBorderBrush(step.Status),
                 BorderThickness = new Thickness(1),
                 CornerRadius = new CornerRadius(6),
-                Margin = new Thickness(0, 0, 0, isLast ? 0 : 10),
-                Padding = new Thickness(15),
+                Margin = new Thickness(0, 0, 0, isLast ? 0 : 8),
+                Padding = new Thickness(12, 10, 12, 10),
                 Cursor = System.Windows.Input.Cursors.Hand
             };
 
             var grid = new Grid();
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });      // 编号
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }); // 名称
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });      // 状态
 
-            // 图标和步骤号
-            var iconPanel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
-            var iconText = new TextBlock
+            // 左侧：步骤编号圆形背景
+            var numberBorder = new Border
             {
-                Text = step.Icon,
-                FontSize = 24,
-                HorizontalAlignment = HorizontalAlignment.Center
+                Background = GetStepNumberBackground(step.Status),
+                Width = 28,
+                Height = 28,
+                CornerRadius = new CornerRadius(14),
+                Child = new TextBlock
+                {
+                    Text = step.StepNumber,
+                    FontSize = 13,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = GetStepNumberForeground(step.Status),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                VerticalAlignment = VerticalAlignment.Center
             };
-            var numberText = new TextBlock
-            {
-                Text = $"步骤 {step.StepNumber}",
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Colors.Gray),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 5, 0, 0)
-            };
-            iconPanel.Children.Add(iconText);
-            iconPanel.Children.Add(numberText);
-            Grid.SetColumn(iconPanel, 0);
-            grid.Children.Add(iconPanel);
+            Grid.SetColumn(numberBorder, 0);
+            grid.Children.Add(numberBorder);
 
-            // 名称和描述
-            var contentPanel = new StackPanel { Margin = new Thickness(15, 0, 0, 0) };
+            // 中间：步骤名称和描述
+            var contentPanel = new StackPanel 
+            { 
+                Margin = new Thickness(12, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
             var nameText = new TextBlock
             {
                 Text = step.Name,
@@ -123,21 +216,159 @@ namespace VisionInspection.UI.Views
                 Text = step.Description,
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Colors.Gray),
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 5, 0, 0)
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 2, 0, 0)
             };
             contentPanel.Children.Add(nameText);
             contentPanel.Children.Add(descText);
             Grid.SetColumn(contentPanel, 1);
             grid.Children.Add(contentPanel);
 
-            // 状态指示器
-            var statusIndicator = CreateStatusIndicator(step.Status);
+            // 右侧：状态指示器
+            var statusIndicator = CreateHorizontalStatusIndicator(step.Status);
             Grid.SetColumn(statusIndicator, 2);
             grid.Children.Add(statusIndicator);
 
             border.Child = grid;
             return border;
+        }
+
+        /// <summary>
+        /// 创建水平状态指示器
+        /// </summary>
+        private UIElement CreateHorizontalStatusIndicator(StepStatus status)
+        {
+            var panel = new StackPanel 
+            { 
+                Orientation = Orientation.Horizontal,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            switch (status)
+            {
+                case StepStatus.Completed:
+                    panel.Children.Add(new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(82, 196, 26)),
+                        CornerRadius = new CornerRadius(10),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        Child = new TextBlock
+                        {
+                            Text = "OK",
+                            FontSize = 11,
+                            Foreground = new SolidColorBrush(Colors.White),
+                            FontWeight = FontWeights.Bold
+                        }
+                    });
+                    break;
+                case StepStatus.Running:
+                    panel.Children.Add(new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(24, 144, 255)),
+                        CornerRadius = new CornerRadius(10),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        Child = new TextBlock
+                        {
+                            Text = "进行中",
+                            FontSize = 11,
+                            Foreground = new SolidColorBrush(Colors.White),
+                            FontWeight = FontWeights.Bold
+                        }
+                    });
+                    break;
+                case StepStatus.Failed:
+                    panel.Children.Add(new Border
+                    {
+                        Background = new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+                        CornerRadius = new CornerRadius(10),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        Child = new TextBlock
+                        {
+                            Text = "NG",
+                            FontSize = 11,
+                            Foreground = new SolidColorBrush(Colors.White),
+                            FontWeight = FontWeights.Bold
+                        }
+                    });
+                    break;
+                default:
+                    panel.Children.Add(new TextBlock
+                    {
+                        Text = "待执行",
+                        FontSize = 11,
+                        Foreground = new SolidColorBrush(Colors.Gray),
+                        VerticalAlignment = VerticalAlignment.Center
+                    });
+                    break;
+            }
+
+            return panel;
+        }
+
+        /// <summary>
+        /// 获取步骤编号背景色
+        /// </summary>
+        private Brush GetStepNumberBackground(StepStatus status)
+        {
+            return status switch
+            {
+                StepStatus.Completed => new SolidColorBrush(Color.FromRgb(82, 196, 26)),
+                StepStatus.Running => new SolidColorBrush(Color.FromRgb(24, 144, 255)),
+                StepStatus.Failed => new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+                _ => new SolidColorBrush(Color.FromRgb(217, 217, 217))
+            };
+        }
+
+        /// <summary>
+        /// 获取步骤编号前景色
+        /// </summary>
+        private Brush GetStepNumberForeground(StepStatus status)
+        {
+            return status switch
+            {
+                StepStatus.Pending => new SolidColorBrush(Colors.Gray),
+                _ => new SolidColorBrush(Colors.White)
+            };
+        }
+
+        /// <summary>
+        /// 创建紧凑状态指示器
+        /// </summary>
+        private UIElement CreateCompactStatusIndicator(StepStatus status)
+        {
+            return status switch
+            {
+                StepStatus.Completed => new TextBlock
+                {
+                    Text = "OK",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(82, 196, 26)),
+                    FontWeight = FontWeights.Bold,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                StepStatus.Running => new Border
+                {
+                    Width = 8,
+                    Height = 8,
+                    Background = new SolidColorBrush(Color.FromRgb(24, 144, 255)),
+                    CornerRadius = new CornerRadius(4)
+                },
+                StepStatus.Failed => new TextBlock
+                {
+                    Text = "NG",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+                    FontWeight = FontWeights.Bold,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                _ => new TextBlock
+                {
+                    Text = "待",
+                    FontSize = 11,
+                    Foreground = new SolidColorBrush(Colors.Gray),
+                    VerticalAlignment = VerticalAlignment.Center
+                }
+            };
         }
 
         /// <summary>
@@ -154,13 +385,7 @@ namespace VisionInspection.UI.Views
                     Foreground = new SolidColorBrush(Colors.Green),
                     FontWeight = FontWeights.Bold
                 },
-                StepStatus.Running => new ProgressBar
-                {
-                    Width = 40,
-                    Height = 40,
-                    IsIndeterminate = true,
-                    Style = (Style)FindResource("ProgressBarRing")
-                },
+                StepStatus.Running => CreateProgressRing(),
                 StepStatus.Failed => new TextBlock
                 {
                     Text = "✗",
@@ -175,6 +400,48 @@ namespace VisionInspection.UI.Views
                     Foreground = new SolidColorBrush(Colors.LightGray)
                 }
             };
+        }
+
+        /// <summary>
+        /// 创建进度环
+        /// </summary>
+        private UIElement CreateProgressRing()
+        {
+            // 使用简单的旋转动画替代ProgressBarRing样式
+            var grid = new Grid
+            {
+                Width = 40,
+                Height = 40
+            };
+
+            // 外圈
+            var ellipse = new System.Windows.Shapes.Ellipse
+            {
+                Width = 32,
+                Height = 32,
+                Stroke = new SolidColorBrush(Color.FromRgb(24, 144, 255)),
+                StrokeThickness = 3,
+                StrokeDashArray = new DoubleCollection { 10, 5 },
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+
+            // 旋转动画
+            var rotateTransform = new RotateTransform(0, 16, 16);
+            ellipse.RenderTransform = rotateTransform;
+
+            var animation = new System.Windows.Media.Animation.DoubleAnimation
+            {
+                From = 0,
+                To = 360,
+                Duration = TimeSpan.FromSeconds(1),
+                RepeatBehavior = System.Windows.Media.Animation.RepeatBehavior.Forever
+            };
+
+            rotateTransform.BeginAnimation(RotateTransform.AngleProperty, animation);
+
+            grid.Children.Add(ellipse);
+            return grid;
         }
 
         /// <summary>
@@ -324,10 +591,141 @@ namespace VisionInspection.UI.Views
         /// <summary>
         /// 运行按钮点击
         /// </summary>
-        private void RunButton_Click(object sender, RoutedEventArgs e)
+        private async void RunButton_Click(object sender, RoutedEventArgs e)
         {
-            // 模拟运行SOP检测
-            RunSimulation();
+            // 连接到主视图的 SOP 实时检测
+            var viewModel = GetMainViewModel();
+            if (viewModel == null)
+            {
+                MessageBox.Show("无法获取主视图模型", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // 如果已经在运行，则停止
+            if (viewModel.IsSOPDetecting)
+            {
+                viewModel.StopSOPDetectionCommand.Execute(null);
+                SetStatus("检测已停止", new SolidColorBrush(Colors.Gray));
+                SetResult("--", new SolidColorBrush(Colors.Gray));
+                StopTimer();
+                AddLog("SOP 实时检测已停止");
+                return;
+            }
+
+            // 检查相机状态
+            if (!viewModel.IsCameraConnected)
+            {
+                MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (!viewModel.IsCameraGrabbing)
+            {
+                MessageBox.Show("请先开始相机采集", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            // 启动 SOP 实时检测
+            SetStatus("启动中...", new SolidColorBrush(Color.FromRgb(24, 144, 255)));
+            AddLog("正在启动 SOP 实时检测...");
+
+            await viewModel.StartSOPDetectionCommand.ExecuteAsync(null);
+
+            // 更新 UI 状态
+            if (viewModel.IsSOPDetecting)
+            {
+                SetStatus("实时检测中", new SolidColorBrush(Color.FromRgb(82, 196, 26)));
+                SetResult("检测中...", new SolidColorBrush(Colors.Gray));
+                ClearTimeline();
+                StartTimer();
+                AddLog($"SOP 实时检测已启动 | 工作流: {System.IO.Path.GetFileName(viewModel.SopWorkflowPath)}");
+            }
+            else
+            {
+                SetStatus("启动失败", new SolidColorBrush(Colors.Red));
+                SetResult("NG", new SolidColorBrush(Colors.Red));
+                AddLog("SOP 实时检测启动失败");
+            }
+
+            // 订阅 SOP 事件以更新结果
+            SubscribeToSOPEvents(viewModel);
+        }
+
+        /// <summary>
+        /// 订阅 SOP 事件
+        /// </summary>
+        private void SubscribeToSOPEvents(MainViewModel viewModel)
+        {
+            if (viewModel.SOPModuleInstance == null) return;
+
+            // 取消旧订阅
+            UnsubscribeFromSOPEvents(viewModel);
+
+            // 订阅新事件
+            viewModel.SOPModuleInstance.WorkflowCompleted += OnSOPWorkflowCompleted;
+            viewModel.SOPModuleInstance.ViolationDetected += OnSOPViolationDetected;
+            viewModel.SOPModuleInstance.StepChanged += OnSOPStepChanged;
+        }
+
+        /// <summary>
+        /// 取消 SOP 事件订阅
+        /// </summary>
+        private void UnsubscribeFromSOPEvents(MainViewModel viewModel)
+        {
+            if (viewModel.SOPModuleInstance == null) return;
+
+            viewModel.SOPModuleInstance.WorkflowCompleted -= OnSOPWorkflowCompleted;
+            viewModel.SOPModuleInstance.ViolationDetected -= OnSOPViolationDetected;
+            viewModel.SOPModuleInstance.StepChanged -= OnSOPStepChanged;
+        }
+
+        /// <summary>
+        /// SOP 工作流完成事件处理
+        /// </summary>
+        private void OnSOPWorkflowCompleted(object? sender, VisionInspection.Modules.SOP.Models.SOPCompletedEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                StopTimer();
+                UpdateTimeline(e.StepHistory);
+                var isPass = !e.HasViolations;
+                if (isPass)
+                {
+                    SetResult("PASS", new SolidColorBrush(Color.FromRgb(82, 196, 26)));
+                    SetStatus("检测完成", new SolidColorBrush(Color.FromRgb(82, 196, 26)));
+                    AddLog($"✅ SOP 检测全部通过 | 总耗时: {TimerTextBlock.Text}");
+                }
+                else
+                {
+                    SetResult("FAIL", new SolidColorBrush(Colors.Red));
+                    SetStatus("检测失败", new SolidColorBrush(Colors.Red));
+                    AddLog($"❌ SOP 检测不通过，违规数: {e.Violations.Count} | 总耗时: {TimerTextBlock.Text}");
+                }
+            });
+        }
+
+        /// <summary>
+        /// SOP 违规检测事件处理
+        /// </summary>
+        private void OnSOPViolationDetected(object? sender, VisionInspection.Modules.SOP.Models.ViolationEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SetResult("NG", new SolidColorBrush(Colors.Red));
+                AddLog($"⚠ 违规: [{e.Violation.Type}] {e.Violation.Description}");
+            });
+        }
+
+        /// <summary>
+        /// SOP 步骤变化事件处理
+        /// </summary>
+        private void OnSOPStepChanged(object? sender, VisionInspection.Modules.SOP.Models.StepChangedEventArgs e)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                SetCurrentStep(e.CurrentStepId - 1); // 转换为0-based索引
+                AddLog($"步骤推进: {e.PreviousStepId} → {e.CurrentStepId} ({e.StepName})");
+            });
         }
 
         /// <summary>
@@ -368,6 +766,183 @@ namespace VisionInspection.UI.Views
             SetResult("OK", new SolidColorBrush(Color.FromRgb(82, 196, 26)));
             AddLog("SOP检测流程完成，结果: OK");
         }
+
+        #region 时间轴功能
+
+        /// <summary>
+        /// 更新步骤时间轴显示
+        /// </summary>
+        public void UpdateTimeline(IReadOnlyList<VisionInspection.Modules.SOP.Models.StepExecutionRecord>? stepHistory)
+        {
+            TimelinePanel.Children.Clear();
+
+            if (stepHistory == null || stepHistory.Count == 0)
+            {
+                // 显示空状态
+                var emptyText = new TextBlock
+                {
+                    Text = "暂无步骤记录",
+                    Foreground = new SolidColorBrush(Colors.Gray),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(20, 0, 0, 0)
+                };
+                TimelinePanel.Children.Add(emptyText);
+                return;
+            }
+
+            for (int i = 0; i < stepHistory.Count; i++)
+            {
+                var record = stepHistory[i];
+                var timelineItem = CreateTimelineItem(record, i == stepHistory.Count - 1);
+                TimelinePanel.Children.Add(timelineItem);
+            }
+        }
+
+        /// <summary>
+        /// 创建时间轴项
+        /// </summary>
+        private Border CreateTimelineItem(VisionInspection.Modules.SOP.Models.StepExecutionRecord record, bool isLast)
+        {
+            var panel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, isLast ? 0 : 5, 0)
+            };
+
+            // 步骤编号和连接线
+            var numberPanel = new Grid { Height = 30 };
+            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            // 左侧连接线
+            if (!isLast)
+            {
+                var rightLine = new Border
+                {
+                    Background = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
+                    Height = 2,
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Margin = new Thickness(5, 0, 0, 0)
+                };
+                Grid.SetColumn(rightLine, 2);
+                numberPanel.Children.Add(rightLine);
+            }
+
+            // 步骤编号圆圈
+            var circle = new Border
+            {
+                Width = 24,
+                Height = 24,
+                CornerRadius = new CornerRadius(12),
+                Background = record.IsPass
+                    ? new SolidColorBrush(Color.FromRgb(82, 196, 26))
+                    : new SolidColorBrush(Color.FromRgb(255, 77, 79)),
+                Child = new TextBlock
+                {
+                    Text = record.StepId.ToString(),
+                    Foreground = new SolidColorBrush(Colors.White),
+                    FontSize = 11,
+                    FontWeight = FontWeights.Bold,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center
+                },
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(circle, 1);
+            numberPanel.Children.Add(circle);
+
+            panel.Children.Add(numberPanel);
+
+            // 步骤名称
+            var nameText = new TextBlock
+            {
+                Text = record.StepName,
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Colors.DarkGray),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                MaxWidth = 60,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 5, 0, 0)
+            };
+            panel.Children.Add(nameText);
+
+            // 耗时
+            var durationText = new TextBlock
+            {
+                Text = $"{record.Duration.TotalSeconds:F1}s",
+                FontSize = 9,
+                Foreground = new SolidColorBrush(Colors.Gray),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 2, 0, 0)
+            };
+            panel.Children.Add(durationText);
+
+            var border = new Border
+            {
+                Child = panel,
+                Padding = new Thickness(5),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = $"步骤 {record.StepId}: {record.StepName}\n开始: {record.StartTime:HH:mm:ss}\n结束: {record.EndTime:HH:mm:ss}\n耗时: {record.Duration.TotalSeconds:F1}秒\n结果: {(record.IsPass ? "通过" : "失败")}"
+            };
+
+            return border;
+        }
+
+        /// <summary>
+        /// 添加时间轴项（实时添加）
+        /// </summary>
+        public void AddTimelineItem(VisionInspection.Modules.SOP.Models.StepExecutionRecord record)
+        {
+            // 移除"暂无步骤记录"提示
+            if (TimelinePanel.Children.Count == 1 &&
+                TimelinePanel.Children[0] is TextBlock textBlock &&
+                textBlock.Text == "暂无步骤记录")
+            {
+                TimelinePanel.Children.Clear();
+            }
+
+            var timelineItem = CreateTimelineItem(record, true);
+
+            // 更新前一个项的连接线
+            if (TimelinePanel.Children.Count > 0)
+            {
+                var lastItem = TimelinePanel.Children[TimelinePanel.Children.Count - 1] as Border;
+                if (lastItem != null)
+                {
+                    // 重新创建前一个项（添加右侧连接线）
+                    var lastRecord = (lastItem.Tag as VisionInspection.Modules.SOP.Models.StepExecutionRecord);
+                    if (lastRecord != null)
+                    {
+                        var newLastItem = CreateTimelineItem(lastRecord, false);
+                        newLastItem.Tag = lastRecord;
+                        TimelinePanel.Children[TimelinePanel.Children.Count - 1] = newLastItem;
+                    }
+                }
+            }
+
+            timelineItem.Tag = record;
+            TimelinePanel.Children.Add(timelineItem);
+        }
+
+        /// <summary>
+        /// 清空时间轴
+        /// </summary>
+        public void ClearTimeline()
+        {
+            TimelinePanel.Children.Clear();
+            var emptyText = new TextBlock
+            {
+                Text = "暂无步骤记录",
+                Foreground = new SolidColorBrush(Colors.Gray),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(20, 0, 0, 0)
+            };
+            TimelinePanel.Children.Add(emptyText);
+        }
+
+        #endregion
     }
 
     /// <summary>

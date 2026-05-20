@@ -43,6 +43,10 @@ public class SopyamlSop
 
     [YamlMember(Alias = "visualization")]
     public SopyamlVisualization? Visualization { get; set; }
+
+    // ⭐ 新增：SOP模型配置
+    [YamlMember(Alias = "model")]
+    public SopyamlModel? Model { get; set; }
 }
 
 public class SopyamlStep
@@ -67,6 +71,18 @@ public class SopyamlStep
 
     [YamlMember(Alias = "violation_rules")]
     public List<SopyamlViolationRule>? ViolationRules { get; set; }
+
+    /// <summary>
+    /// 该步骤中禁止出现的YOLO检测类别（防跳步）
+    /// </summary>
+    [YamlMember(Alias = "forbidden_objects")]
+    public List<string>? ForbiddenObjects { get; set; }
+
+    /// <summary>
+    /// 该步骤中必须保持存在的YOLO检测类别（防零件被移除）
+    /// </summary>
+    [YamlMember(Alias = "must_keep")]
+    public List<string>? MustKeep { get; set; }
 }
 
 public class SopyamlSettings
@@ -82,6 +98,12 @@ public class SopyamlSettings
 
     [YamlMember(Alias = "timeoutSeconds")]
     public int TimeoutSeconds { get; set; } = 30;
+
+    [YamlMember(Alias = "enableSkipDetection")]
+    public bool EnableSkipDetection { get; set; } = true;
+
+    [YamlMember(Alias = "enableTimeoutDetection")]
+    public bool EnableTimeoutDetection { get; set; } = true;
 }
 
 public class SopyamlDetection
@@ -199,6 +221,54 @@ public class SopyamlVisualization
 }
 
 /// <summary>
+/// SOP模型配置
+/// </summary>
+public class SopyamlModel
+{
+    /// <summary>
+    /// ONNX模型文件的绝对路径或相对路径（相对于yolo_models目录）
+    /// </summary>
+    [YamlMember(Alias = "path")]
+    public string Path { get; set; } = "yolo_models/sop_yolov8n.onnx";
+
+    /// <summary>
+    /// 模型类型: ObjectDetection / Segmentation / PoseEstimation / OBBDetection
+    /// </summary>
+    [YamlMember(Alias = "type")]
+    public string Type { get; set; } = "ObjectDetection";
+
+    /// <summary>
+    /// 检测置信度阈值 (0-1)
+    /// </summary>
+    [YamlMember(Alias = "confidence")]
+    public float Confidence { get; set; } = 0.6f;
+
+    /// <summary>
+    /// NMS IoU阈值 (0-1)
+    /// </summary>
+    [YamlMember(Alias = "iou")]
+    public float Iou { get; set; } = 0.45f;
+
+    /// <summary>
+    /// 是否使用GPU
+    /// </summary>
+    [YamlMember(Alias = "use_gpu")]
+    public bool UseGpu { get; set; } = true;
+
+    /// <summary>
+    /// GPU设备ID
+    /// </summary>
+    [YamlMember(Alias = "gpu_id")]
+    public int GpuId { get; set; } = 0;
+
+    /// <summary>
+    /// 该模型可检测的类别名称列表
+    /// </summary>
+    [YamlMember(Alias = "classes")]
+    public List<string> Classes { get; set; } = new();
+}
+
+/// <summary>
 /// YAML配置转换器
 /// </summary>
 public static class SOPYamlConverter
@@ -250,7 +320,7 @@ public static class SOPYamlConverter
             UpdatedAt = DateTime.Now,
             Steps = new List<SOPStep>(),
             Regions = new List<ZoneDefinition>(),
-            GlobalSettings = new SOPGlobalSettings()
+            Settings = new SOPGlobalSettings()
         };
 
         // 转换区域定义
@@ -280,7 +350,7 @@ public static class SOPYamlConverter
                 StepName = yamlStep.Name,
                 Description = yamlStep.Description ?? $"步骤 {stepOrder}",
                 Order = stepOrder++,
-                TimeoutSeconds = yamlStep.Timeout,
+                TimeoutSec = yamlStep.Timeout,
                 PassConditions = new List<StepCondition>(),
                 ViolationRules = new List<ViolationRule>()
             };
@@ -295,7 +365,61 @@ public static class SOPYamlConverter
                 }
             }
 
+            // 转换 forbidden_objects → ViolationRule
+            if (yamlStep.ForbiddenObjects != null && yamlStep.ForbiddenObjects.Count > 0)
+            {
+                step.ViolationRules.Add(new ViolationRule
+                {
+                    Type = ViolationType.ForbiddenObject,
+                    Description = $"禁止出现: {string.Join(", ", yamlStep.ForbiddenObjects)}",
+                    Severity = 2,
+                    Parameters = new Dictionary<string, object>
+                    {
+                        ["ForbiddenClasses"] = yamlStep.ForbiddenObjects
+                    }
+                });
+            }
+
+            // 转换 must_keep → ViolationRule
+            if (yamlStep.MustKeep != null && yamlStep.MustKeep.Count > 0)
+            {
+                step.ViolationRules.Add(new ViolationRule
+                {
+                    Type = ViolationType.ObjectRemoved,
+                    Description = $"必须保持: {string.Join(", ", yamlStep.MustKeep)}",
+                    Severity = 3,
+                    Parameters = new Dictionary<string, object>
+                    {
+                        ["MustKeepClasses"] = yamlStep.MustKeep
+                    }
+                });
+            }
+
             workflow.Steps.Add(step);
+        }
+
+        // ⭐ 转换模型配置
+        if (yamlSop.Model != null && !string.IsNullOrEmpty(yamlSop.Model.Path))
+        {
+            workflow.Model = new SOPModelConfig
+            {
+                Path = yamlSop.Model.Path,
+                Type = yamlSop.Model.Type,
+                Confidence = yamlSop.Model.Confidence,
+                Iou = yamlSop.Model.Iou,
+                UseGpu = yamlSop.Model.UseGpu,
+                GpuId = yamlSop.Model.GpuId,
+                Classes = yamlSop.Model.Classes
+            };
+
+            if (string.IsNullOrEmpty(workflow.Description))
+            {
+                workflow.Description = $"模型: {System.IO.Path.GetFileName(yamlSop.Model.Path)}";
+            }
+            else
+            {
+                workflow.Description += $" | 模型: {System.IO.Path.GetFileName(yamlSop.Model.Path)}";
+            }
         }
 
         return workflow;
@@ -398,7 +522,7 @@ public static class SOPYamlConverter
             {
                 Id = $"step_{step.StepId}",
                 Name = step.StepName,
-                Timeout = step.TimeoutSeconds,
+                Timeout = step.TimeoutSec,
                 Description = step.Description,
                 Transitions = step.NextSteps?.ToList() ?? new List<string>()
             };

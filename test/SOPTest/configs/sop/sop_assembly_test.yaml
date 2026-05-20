@@ -1,0 +1,149 @@
+# 装配流程 SOP 配置 - 用于测试修复后的功能
+# 场景：零件装配流程，测试 object_in_zone、forbidden_objects、must_keep 等功能
+
+sop:
+  name: "零件装配流程SOP"
+  version: "1.0"
+  description: "测试修复后的 SOP 功能：区域检测、禁止对象、必须保持对象"
+
+  # 全局设置
+  settings:
+    detectionMode: "object_based"
+    confidenceThreshold: 0.6
+    stableFrames: 3
+    timeoutSeconds: 30
+
+  # 区域定义 - 用于测试修复2：真实区域数据注入
+  regions:
+    part_box:
+      x1: 0.1
+      y1: 0.1
+      x2: 0.3
+      y2: 0.4
+      name: "零件盒区域"
+      description: "放置零件的盒子区域"
+      color: "#4CAF50"
+
+    fixture:
+      x1: 0.4
+      y1: 0.3
+      x2: 0.6
+      y2: 0.6
+      name: "夹具区域"
+      description: "装配夹具工作区域"
+      color: "#2196F3"
+
+    tool_rack:
+      x1: 0.7
+      y1: 0.1
+      x2: 0.9
+      y2: 0.4
+      name: "工具架区域"
+      description: "放置工具的区域"
+      color: "#FF9800"
+
+    quality_check:
+      x1: 0.35
+      y1: 0.7
+      x2: 0.65
+      y2: 0.9
+      name: "质检区域"
+      description: "质量检查区域"
+      color: "#9C27B0"
+
+  # 步骤定义
+  steps:
+    # 步骤1: 准备 - 从零件盒取零件
+    - id: "step1_prepare"
+      name: "准备零件"
+      description: "从零件盒中取出零件"
+      timeout: 10
+      transitions: ["step2_assemble"]
+      detection:
+        method: "object_in_zone"
+        target_object: "hand"
+        region: "part_box"
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手进入零件盒区域取零件"
+      # 测试 forbidden_objects：此步骤禁止出现工具
+      forbidden_objects:
+        - "screwdriver"
+        - "wrench"
+      # 测试 must_keep：此步骤必须保持零件盒在位
+      must_keep:
+        - "part_box"
+
+    # 步骤2: 装配 - 将零件放入夹具
+    - id: "step2_assemble"
+      name: "装配零件"
+      description: "将零件放入夹具进行装配"
+      timeout: 15
+      transitions: ["step3_check"]
+      detection:
+        method: "object_in_zone"
+        target_object: "part"
+        region: "fixture"
+        min_confidence: 0.7
+        stable_frames: 5
+        description: "零件在夹具区域稳定放置"
+      # 测试 forbidden_objects：装配时禁止手在夹具内
+      forbidden_objects:
+        - "hand"
+      # 测试 must_keep：装配时必须保持零件在位
+      must_keep:
+        - "part"
+
+    # 步骤3: 质检 - 检查装配质量
+    - id: "step3_check"
+      name: "质量检查"
+      description: "检查装配质量"
+      timeout: 10
+      transitions: ["step4_complete"]
+      detection:
+        method: "object_in_zone"
+        target_object: "qc_tool"
+        region: "quality_check"
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "质检工具进入质检区域"
+      # 测试 must_keep：质检时必须保持装配好的零件
+      must_keep:
+        - "part"
+        - "fixture"
+
+    # 步骤4: 完成 - 等待流程结束
+    - id: "step4_complete"
+      name: "完成"
+      description: "装配流程完成"
+      timeout: 5
+      transitions: ["step1_prepare"]
+      detection:
+        method: "time_elapsed"
+        duration_ms: 2000
+        description: "等待2秒后回到初始状态"
+
+  # 违规检测规则
+  violations:
+    - id: "wrong_tool"
+      name: "使用错误工具"
+      description: "在错误的步骤使用了工具"
+      severity: "error"
+
+    - id: "part_missing"
+      name: "零件缺失"
+      description: "装配过程中零件被移除"
+      severity: "critical"
+
+    - id: "timeout"
+      name: "步骤超时"
+      description: "步骤执行时间超过限制"
+      severity: "warning"
+
+  # 可视化配置
+  visualization:
+    show_regions: true
+    show_keypoints: false
+    show_skeleton: false
+    show_tracking_id: true
+    region_alpha: 0.3

@@ -371,7 +371,7 @@ namespace VisionInspection.UI.Views
         {
             var dialog = new OpenFileDialog
             {
-                Filter = "JSON文件|*.json|所有文件|*.*",
+                Filter = "SOP配置文件|*.json;*.yaml;*.yml|JSON文件|*.json|YAML文件|*.yaml;*.yml|所有文件|*.*",
                 Title = "加载SOP配置"
             };
 
@@ -379,8 +379,28 @@ namespace VisionInspection.UI.Views
             {
                 try
                 {
-                    var json = File.ReadAllText(dialog.FileName);
-                    var steps = JsonSerializer.Deserialize<List<SOPConfigStep>>(json);
+                    var filePath = dialog.FileName;
+                    var extension = Path.GetExtension(filePath).ToLowerInvariant();
+                    List<SOPConfigStep> steps;
+
+                    if (extension == ".json")
+                    {
+                        // JSON格式
+                        var json = File.ReadAllText(filePath);
+                        steps = JsonSerializer.Deserialize<List<SOPConfigStep>>(json);
+                    }
+                    else if (extension == ".yaml" || extension == ".yml")
+                    {
+                        // YAML格式 - 使用SOPYamlConverter解析
+                        var workflow = VisionInspection.Modules.SOP.Models.SOPYamlConverter.LoadFromYaml(filePath);
+                        steps = ConvertWorkflowToSteps(workflow);
+                    }
+                    else
+                    {
+                        MessageBox.Show($"不支持的文件格式：{extension}\n请使用 .json 或 .yaml/.yml 文件", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+
                     if (steps != null)
                     {
                         _steps = steps;
@@ -394,6 +414,61 @@ namespace VisionInspection.UI.Views
                     MessageBox.Show($"加载配置失败：{ex.Message}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
+        }
+
+        /// <summary>
+        /// 将SOPWorkflow转换为SOPConfigStep列表
+        /// </summary>
+        private List<SOPConfigStep> ConvertWorkflowToSteps(VisionInspection.Modules.SOP.Models.SOPWorkflow workflow)
+        {
+            var steps = new List<SOPConfigStep>();
+
+            foreach (var step in workflow.Steps)
+            {
+                var configStep = new SOPConfigStep
+                {
+                    Name = step.StepName,
+                    Description = step.Description ?? "",
+                    DetectionType = "物体检测",
+                    ModelName = "默认YOLOv8模型",
+                    Icon = GetIconForStep(step.StepName)
+                };
+
+                // 根据条件类型设置检测类型
+                if (step.PassConditions.Count > 0)
+                {
+                    var condition = step.PassConditions[0];
+                    configStep.DetectionType = condition.Type switch
+                    {
+                        VisionInspection.Modules.SOP.Models.ConditionType.ObjectPresent => "物体检测",
+                        VisionInspection.Modules.SOP.Models.ConditionType.ObjectInZone => "区域检测",
+                        VisionInspection.Modules.SOP.Models.ConditionType.ObjectStable => "稳定检测",
+                        VisionInspection.Modules.SOP.Models.ConditionType.ObjectAbsent => "缺失检测",
+                        VisionInspection.Modules.SOP.Models.ConditionType.TimeElapsed => "时间检测",
+                        _ => "物体检测"
+                    };
+                }
+
+                steps.Add(configStep);
+            }
+
+            return steps;
+        }
+
+        /// <summary>
+        /// 根据步骤名称获取图标
+        /// </summary>
+        private string GetIconForStep(string stepName)
+        {
+            if (stepName.Contains("车")) return "🚗";
+            if (stepName.Contains("牌")) return "📋";
+            if (stepName.Contains("安全")) return "✓";
+            if (stepName.Contains("PLC")) return "🔌";
+            if (stepName.Contains("零件") || stepName.Contains("准备")) return "📦";
+            if (stepName.Contains("装配")) return "🔧";
+            if (stepName.Contains("质检") || stepName.Contains("检查")) return "🔍";
+            if (stepName.Contains("完成")) return "✅";
+            return "🔍";
         }
 
         /// <summary>

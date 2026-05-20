@@ -235,4 +235,24 @@ public partial class MainWindow : Window
             }
         }
     }
+
+    /// <summary>
+    /// 显示/隐藏ROI列表面板
+    /// </summary>
+    private void ShowROIPanelMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem menuItem)
+        {
+            if (ROIPanel != null && ROISplitter != null)
+            {
+                bool isVisible = menuItem.IsChecked;
+                
+                // 显示/隐藏ROI面板
+                ROIPanel.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+                
+                // 显示/隐藏分隔条
+                ROISplitter.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+    }
 }

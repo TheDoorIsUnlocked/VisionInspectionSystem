@@ -10,10 +10,24 @@ namespace VisionInspection.Modules.SOP.Services;
 public class StepConditionEvaluator
 {
     private readonly SOPStateMachine _stateMachine;
+    private readonly Dictionary<string, ZoneDefinition> _zones;
 
-    public StepConditionEvaluator(SOPStateMachine stateMachine)
+    public StepConditionEvaluator(SOPStateMachine stateMachine, IReadOnlyList<ZoneDefinition>? zones = null)
     {
         _stateMachine = stateMachine;
+        _zones = (zones ?? new List<ZoneDefinition>()).ToDictionary(z => z.ZoneId, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// 动态更新区域定义（用于热切换配置）
+    /// </summary>
+    public void UpdateZones(IReadOnlyList<ZoneDefinition> zones)
+    {
+        _zones.Clear();
+        foreach (var zone in zones)
+        {
+            _zones[zone.ZoneId] = zone;
+        }
     }
 
     /// <summary>
@@ -265,17 +279,13 @@ public class StepConditionEvaluator
 
     private ZoneDefinition? GetZoneDefinition(string zoneId)
     {
-        // TODO: 从配置中读取区域定义
-        // 这里返回模拟数据
-        return new ZoneDefinition
+        if (_zones.TryGetValue(zoneId, out var zone))
         {
-            ZoneId = zoneId,
-            Name = zoneId,
-            X = 0.2f,
-            Y = 0.2f,
-            Width = 0.3f,
-            Height = 0.3f
-        };
+            return zone;
+        }
+
+        Console.WriteLine($"[SOP] 警告: 未找到区域定义 '{zoneId}'，请检查 YAML 配置中的 regions 字段");
+        return null;
     }
 
     private bool IsInZone(SKRect objectBox, ZoneDefinition zone)
@@ -313,15 +323,4 @@ public class ConditionCheckResult
     public List<HumanPose> MatchedPoses { get; set; } = new();
 }
 
-/// <summary>
-/// 区域定义
-/// </summary>
-public class ZoneDefinition
-{
-    public string ZoneId { get; set; } = "";
-    public string Name { get; set; } = "";
-    public float X { get; set; }
-    public float Y { get; set; }
-    public float Width { get; set; }
-    public float Height { get; set; }
-}
+

@@ -31,10 +31,19 @@ public class SOPStateMachine
     public event EventHandler<SOPCompletedEventArgs>? WorkflowCompleted;
     public event EventHandler<StateChangedEventArgs>? StateChanged;
 
-    public SOPStateMachine()
+    public SOPStateMachine(IReadOnlyList<ZoneDefinition>? zones = null)
     {
-        _conditionEvaluator = new StepConditionEvaluator(this);
-        _violationDetector = new ViolationDetector(this);
+        _conditionEvaluator = new StepConditionEvaluator(this, zones);
+        _violationDetector = new ViolationDetector(this, zones);
+    }
+
+    /// <summary>
+    /// 更新区域定义（配置热切换时调用）
+    /// </summary>
+    public void UpdateZones(IReadOnlyList<ZoneDefinition> zones)
+    {
+        _conditionEvaluator.UpdateZones(zones);
+        _violationDetector.UpdateZones(zones);
     }
 
     public void Start(SOPWorkflow workflow)
@@ -121,28 +130,86 @@ public class SOPStateMachine
         }
     }
 
+    private int _nextTrackId = 0;
+
     private void UpdateTrackedObjects(List<ObjectDetection> detections, DateTime timestamp)
     {
-        foreach (var detection in detections)
+        var matchedKeys = new HashSet<string>();
+        var matchedDetections = new HashSet<int>();
+
+        // 第一轮：用 IOU 匹配已有跟踪对象
+        for (int i = 0; i < detections.Count; i++)
         {
+            var detection = detections[i];
             var labelName = detection.Label?.Name ?? "unknown";
-            var key = $"{labelName}_{detection.BoundingBox.GetHashCode()}";
-            if (_trackedObjects.TryGetValue(key, out var tracked))
+
+            string? bestKey = null;
+            float bestIOU = 0.3f; // IOU 阈值，低于此值视为新对象
+
+            foreach (var (key, tracked) in _trackedObjects)
             {
-                tracked.Update(detection.BoundingBox, timestamp);
+                if (matchedKeys.Contains(key)) continue;
+                if (!tracked.ClassName.Equals(labelName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                float iou = CalculateIOU(tracked.BoundingBox, detection.BoundingBox);
+                if (iou > bestIOU)
+                {
+                    bestIOU = iou;
+                    bestKey = key;
+                }
             }
-            else
+
+            if (bestKey != null)
             {
-                _trackedObjects[key] = new TrackedObject(labelName, detection.BoundingBox, timestamp);
+                // 匹配成功，更新位置
+                _trackedObjects[bestKey].Update(detection.BoundingBox, timestamp);
+                matchedKeys.Add(bestKey);
+                matchedDetections.Add(i);
             }
         }
 
-        // 清理过期跟踪
-        var expired = _trackedObjects.Where(kv => (timestamp - kv.Value.LastUpdate).TotalSeconds > 2).Select(kv => kv.Key).ToList();
+        // 第二轮：未匹配的检测结果创建新跟踪
+        for (int i = 0; i < detections.Count; i++)
+        {
+            if (matchedDetections.Contains(i)) continue;
+
+            var detection = detections[i];
+            var labelName = detection.Label?.Name ?? "unknown";
+            var newKey = $"{labelName}_{_nextTrackId++}";
+            _trackedObjects[newKey] = new TrackedObject(labelName, detection.BoundingBox, timestamp);
+        }
+
+        // 清理过期跟踪（2秒未更新的对象视为离开画面）
+        var expired = _trackedObjects
+            .Where(kv => (timestamp - kv.Value.LastUpdate).TotalSeconds > 2)
+            .Select(kv => kv.Key)
+            .ToList();
+
         foreach (var key in expired)
         {
             _trackedObjects.Remove(key);
         }
+    }
+
+    /// <summary>
+    /// 计算两个矩形的 IOU（交并比）
+    /// </summary>
+    private static float CalculateIOU(SKRect a, SKRect b)
+    {
+        float intersectLeft = Math.Max(a.Left, b.Left);
+        float intersectTop = Math.Max(a.Top, b.Top);
+        float intersectRight = Math.Min(a.Right, b.Right);
+        float intersectBottom = Math.Min(a.Bottom, b.Bottom);
+
+        if (intersectRight <= intersectLeft || intersectBottom <= intersectTop)
+            return 0f;
+
+        float intersectArea = (intersectRight - intersectLeft) * (intersectBottom - intersectTop);
+        float areaA = a.Width * a.Height;
+        float areaB = b.Width * b.Height;
+        float unionArea = areaA + areaB - intersectArea;
+
+        return unionArea > 0 ? intersectArea / unionArea : 0f;
     }
 
     private void CompleteCurrentStep(DateTime timestamp)

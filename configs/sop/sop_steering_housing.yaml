@@ -1,0 +1,129 @@
+sop:
+  name: "转向器壳体总装SOP"
+  version: "1.2"
+  description: "转向器壳体装配，共6步。使用自训练SOP模型检测工业零件。"
+
+  # ⭐ 模型节点：指定这个产品要用的自训练模型
+  model:
+    path: "yolo_models/sop_steering_housing.onnx"
+    type: "ObjectDetection"
+    confidence: 0.6          # 工业场景建议0.5-0.7，太高漏检太低误报
+    iou: 0.45
+    use_gpu: true
+    gpu_id: 0
+    classes:
+      - "hand"           # 人手
+      - "screwdriver"    # 螺丝刀
+      - "torque_wrench"  # 扭矩扳手
+      - "part_base"      # 转向器壳体（底座）
+      - "part_cover"     # 盖板
+      - "part_screw"     # 螺栓
+      - "part_gasket"    # O型密封圈
+      - "assembly_ok"    # 装配完成标记
+
+  settings:
+    confidenceThreshold: 0.6
+    stableFrames: 10
+    timeoutSeconds: 30
+
+  regions:
+    fixture_zone:
+      x1: 300,  y1: 250,  x2: 500,  y2: 450
+      name: "夹具定位区"
+    seal_zone:
+      x1: 350,  y1: 300,  x2: 500,  y2: 380
+      name: "密封面区域"
+    tool_zone:
+      x1: 550,  y1: 200,  x2: 750,  y2: 400
+      name: "工具架区域"
+
+  forbidden_zones:
+    danger_left:
+      x1: 0,    y1: 0,    x2: 100,  y2: 1000
+      name: "左侧危险区"
+
+  steps:
+    - id: "step_1"
+      name: "取壳体放入夹具"
+      timeout: 30
+      transitions: ["step_2"]
+      detection:
+        method: "object_in_zone"
+        target_object: "part_base"
+        region: "fixture_zone"
+        min_confidence: 0.7
+        stable_frames: 10
+      forbidden_objects: ["screwdriver", "torque_wrench"]
+
+    - id: "step_2"
+      name: "装密封垫片"
+      timeout: 30
+      transitions: ["step_3"]
+      detection:
+        method: "object_in_zone"
+        target_object: "part_gasket"
+        region: "seal_zone"
+        min_confidence: 0.65
+        stable_frames: 10
+      must_keep:
+        - "part_base"
+
+    - id: "step_3"
+      name: "装盖板"
+      timeout: 30
+      transitions: ["step_4"]
+      detection:
+        method: "object_in_zone"
+        target_object: "part_cover"
+        region: "fixture_zone"
+        min_confidence: 0.7
+        stable_frames: 10
+      must_keep:
+        - "part_base"
+        - "part_gasket"
+
+    - id: "step_4"
+      name: "穿螺栓"
+      timeout: 45
+      transitions: ["step_5"]
+      detection:
+        method: "object_in_zone"
+        target_object: "part_screw"
+        region: "fixture_zone"
+        min_confidence: 0.65
+        stable_frames: 8
+      must_keep:
+        - "part_base"
+        - "part_gasket"
+        - "part_cover"
+
+    - id: "step_5"
+      name: "扭矩扳手拧紧"
+      timeout: 60
+      transitions: ["step_6"]
+      detection:
+        method: "object_in_zone"
+        target_object: "torque_wrench"
+        region: "fixture_zone"
+        min_confidence: 0.7
+        stable_frames: 15
+      must_keep:
+        - "part_base"
+        - "part_gasket"
+        - "part_cover"
+        - "part_screw"
+
+    - id: "step_6"
+      name: "质检确认"
+      timeout: 30
+      transitions: []
+      detection:
+        method: "object_present"
+        target_object: "assembly_ok"
+        min_confidence: 0.75
+        stable_frames: 5
+      must_keep:
+        - "part_base"
+        - "part_gasket"
+        - "part_cover"
+        - "part_screw"

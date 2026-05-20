@@ -72,8 +72,15 @@
             </MenuItem>
             
             <MenuItem Header="SOP">
-                <MenuItem Header="⚙️ 初始化SOP" Command="{Binding InitializeSOPModuleCommand}"/>
-                <MenuItem Header="▶️ 运行检测" Command="{Binding RunSOPDetectionCommand}"/>
+                <MenuItem Header="▶️ 启动SOP实时检测" Command="{Binding StartSOPDetectionCommand}"/>
+                <MenuItem Header="⏹️ 停止SOP检测" Command="{Binding StopSOPDetectionCommand}"/>
+                <MenuItem Header="🔄 重置SOP工作流" Command="{Binding ResetSOPWorkflowCommand}"/>
+                <MenuItem Header="📂 切换SOP工作流" Command="{Binding SwitchSOPWorkflowCommand}"/>
+            </MenuItem>
+            
+            <MenuItem Header="视图">
+                <MenuItem Header="📋 ROI列表" IsCheckable="True" IsChecked="True" 
+                         x:Name="ShowROIPanelMenuItem" Click="ShowROIPanelMenuItem_Click"/>
             </MenuItem>
             
             <MenuItem Header="配置">
@@ -217,8 +224,9 @@
         <!-- 主内容区 -->
         <Grid Grid.Row="3" Margin="10">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="*" MinWidth="400" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="300" MinWidth="200" MaxWidth="500" />
             </Grid.ColumnDefinitions>
 
             <!-- 图像显示区 -->
@@ -238,19 +246,48 @@
                 </Grid>
             </Border>
 
-            <!-- 右侧面板 -->
-            <Grid Grid.Column="1" Margin="10,0,0,0">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
+            <!-- 拖动分隔条 -->
+            <GridSplitter Grid.Column="1" 
+                          Width="6" 
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Stretch"
+                          Background="Transparent"
+                          ShowsPreview="False">
+                <GridSplitter.Template>
+                    <ControlTemplate TargetType="GridSplitter">
+                        <Border Background="{TemplateBinding Background}" 
+                                Width="6"
+                                Cursor="SizeWE">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal"/>
+                                    <VisualState x:Name="MouseOver">
+                                        <Storyboard>
+                                            <ColorAnimation Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                          To="#2196F3" Duration="0:0:0.2"/>
+                                        </Storyboard>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <Rectangle Width="2" 
+                                      Height="40" 
+                                      Fill="#CCCCCC" 
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      RadiusX="1"
+                                      RadiusY="1"/>
+                        </Border>
+                    </ControlTemplate>
+                </GridSplitter.Template>
+            </GridSplitter>
 
-                <!-- ROI列表 -->
-                <hc:Card Grid.Row="0" Header="ROI列表" Margin="0,0,0,10">
+            <!-- 右侧面板 -->
+            <DockPanel x:Name="RightPanel" Grid.Column="2" Margin="5,0,0,0" LastChildFill="True">
+                <!-- ROI列表 - 停靠在顶部 -->
+                <hc:Card x:Name="ROIPanel" DockPanel.Dock="Top" Header="ROI列表" Margin="0,0,0,5" Height="120">
                     <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}"
                             SelectedItem="{Binding RoiEditorViewModel.SelectedROI}"
-                            Height="30" BorderThickness="0">
+                            BorderThickness="0">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Orientation="Horizontal">
@@ -264,56 +301,46 @@
                     </ListBox>
                 </hc:Card>
 
-                <!-- 检测结果列表 -->
-                <hc:Card Grid.Row="1" Header="检测结果" Margin="0,0,0,10">
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="200"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
+                <!-- 分隔条: ROI列表和SOP模块之间 -->
+                <GridSplitter x:Name="ROISplitter" DockPanel.Dock="Top" 
+                              Height="6"
+                              HorizontalAlignment="Stretch"
+                              VerticalAlignment="Center"
+                              Background="Transparent"
+                              ShowsPreview="False">
+                    <GridSplitter.Template>
+                        <ControlTemplate TargetType="GridSplitter">
+                            <Border Background="{TemplateBinding Background}" 
+                                    Height="6"
+                                    Cursor="SizeNS">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="MouseOver">
+                                            <Storyboard>
+                                                <ColorAnimation Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
+                                                              To="#2196F3" Duration="0:0:0.2"/>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Rectangle Width="40" 
+                                          Height="2" 
+                                          Fill="#CCCCCC" 
+                                          HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          RadiusX="1"
+                                          RadiusY="1"/>
+                            </Border>
+                        </ControlTemplate>
+                    </GridSplitter.Template>
+                </GridSplitter>
 
-                        <!-- 统计信息 -->
-                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,5">
-                            <TextBlock Text="总计: " FontWeight="Bold"/>
-                            <TextBlock Text="{Binding DetectionResults.Count}" Margin="0,0,15,0"/>
-                            <TextBlock Text="置信度≥0.5: " FontWeight="Bold" Foreground="Green"/>
-                            <TextBlock Text="{Binding HighConfidenceCount}" Foreground="Green"/>
-                        </StackPanel>
+                <!-- SOP流程显示 - 填充剩余空间 -->
+                <views:SOPModuleView x:Name="SOPModule" Margin="0,0,0,5"/>
 
-                        <!-- 结果列表 -->
-                        <DataGrid Grid.Row="1" ItemsSource="{Binding DetectionResults}"
-                                  SelectedItem="{Binding SelectedDetectionResult}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  GridLinesVisibility="Horizontal"
-                                  BorderThickness="0"
-                                  HeadersVisibility="Column">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="类别" Binding="{Binding ClassName}" Width="*"/>
-                                <DataGridTextColumn Header="置信度" Binding="{Binding Confidence, StringFormat={}{0:P1}}" Width="70"/>
-                                <DataGridTextColumn Header="位置" Width="80">
-                                    <DataGridTextColumn.Binding>
-                                        <MultiBinding StringFormat="{}{0:F0},{1:F0}">
-                                            <Binding Path="BoundingBox[0]"/>
-                                            <Binding Path="BoundingBox[1]"/>
-                                        </MultiBinding>
-                                    </DataGridTextColumn.Binding>
-                                </DataGridTextColumn>
-                            </DataGrid.Columns>
-                        </DataGrid>
 
-                        <!-- 操作按钮 -->
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0">
-                            <Button Content="📋 复制" Command="{Binding CopyDetectionResultsCommand}" Margin="0,0,5,0" Padding="10,2"/>
-                            <Button Content="💾 导出" Command="{Binding ExportDetectionResultsCommand}" Padding="10,2"/>
-                        </StackPanel>
-                    </Grid>
-                </hc:Card>
-
-                <!-- SOP流程显示 -->
-                <views:SOPModuleView Grid.Row="2" x:Name="SOPModule"/>
-            </Grid>
+            </DockPanel>
         </Grid>
 
         <!-- 状态栏 -->
