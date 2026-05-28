@@ -18,11 +18,35 @@ namespace VisionInspection.UI.Views
         private List<SOPConfigStep> _steps = new();
         private int _editingIndex = -1;
         private string _selectedIcon = "🔍";
+        
+        // 手部检测高级参数
+        public int HandInferenceInterval { get; private set; } = 2;
+        public int HandSmoothWindowSize { get; private set; } = 5;
+        public float HandSmoothAlpha { get; private set; } = 0.7f;
+        public float HandSkeletonThreshold { get; private set; } = 0.3f;
 
         public SOPConfigWindow()
         {
             InitializeComponent();
+            InitializeDefaultConfig();
             UpdateStepsList();
+        }
+
+        /// <summary>
+        /// 初始化默认配置
+        /// </summary>
+        private void InitializeDefaultConfig()
+        {
+            // 统一检测模式下，默认启用手部检测
+            EnableHandPoseCheckBox.IsChecked = true;
+            EnableHandPoseCheckBox.IsEnabled = true;
+
+            // 默认最大手数为2（支持双手检测）
+            MaxHandsComboBox.SelectedIndex = 1;  // 选择 "2"
+            MaxHandsComboBox.IsEnabled = true;   // 启用手部检测时启用
+
+            // 默认启用GPU
+            UseGpuCheckBox.IsChecked = true;
         }
 
         /// <summary>
@@ -296,6 +320,7 @@ namespace VisionInspection.UI.Views
 
             var step = new SOPConfigStep
             {
+                Id = $"step_{_steps.Count + 1}",
                 Name = StepNameTextBox.Text.Trim(),
                 Description = StepDescriptionTextBox.Text.Trim(),
                 DetectionType = (DetectionTypeComboBox.SelectedItem as ComboBoxItem)?.Content.ToString() ?? "物体检测",
@@ -427,6 +452,7 @@ namespace VisionInspection.UI.Views
             {
                 var configStep = new SOPConfigStep
                 {
+                    Id = step.StepId.ToString(),
                     Name = step.StepName,
                     Description = step.Description ?? "",
                     DetectionType = "物体检测",
@@ -528,6 +554,106 @@ namespace VisionInspection.UI.Views
                 ClearForm();
             }
         }
+
+        // 检测模式选择变化 - 已移除（统一检测模式下不再需要）
+
+        /// <summary>
+        /// 启用手部检测勾选
+        /// </summary>
+        private void EnableHandPoseCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            if (MaxHandsComboBox != null)
+                MaxHandsComboBox.IsEnabled = true;
+        }
+
+        /// <summary>
+        /// 禁用手部检测勾选
+        /// </summary>
+        private void EnableHandPoseCheckBox_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (MaxHandsComboBox != null)
+                MaxHandsComboBox.IsEnabled = false;
+        }
+
+        /// <summary>
+        /// 获取检测模式配置
+        /// </summary>
+        public SOPDetectionModeConfig GetDetectionModeConfig()
+        {
+            // 统一检测模式下，始终使用 UnifiedDetection
+            return new SOPDetectionModeConfig
+            {
+                DetectionMode = "UnifiedDetection",
+                EnableHandPoseEstimation = EnableHandPoseCheckBox.IsChecked ?? true,
+                MaxNumHands = int.TryParse((MaxHandsComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out var maxHands) ? maxHands : 2,
+                UseGpu = UseGpuCheckBox.IsChecked ?? true
+            };
+        }
+
+        /// <summary>
+        /// 设置检测模式配置
+        /// </summary>
+        public void SetDetectionModeConfig(SOPDetectionModeConfig config)
+        {
+            // 统一检测模式下，检测模式固定为 UnifiedDetection，无需设置下拉框
+
+            // 设置手部检测
+            EnableHandPoseCheckBox.IsChecked = config.EnableHandPoseEstimation;
+            EnableHandPoseCheckBox.IsEnabled = true;
+            
+            // 设置最大手数
+            foreach (ComboBoxItem item in MaxHandsComboBox.Items)
+            {
+                if (item.Content?.ToString() == config.MaxNumHands.ToString())
+                {
+                    MaxHandsComboBox.SelectedItem = item;
+                    break;
+                }
+            }
+
+            // 设置GPU
+            UseGpuCheckBox.IsChecked = config.UseGpu;
+        }
+
+        /// <summary>
+        /// 高级参数按钮点击
+        /// </summary>
+        private void AdvancedParamsButton_Click(object sender, RoutedEventArgs e)
+        {
+            var paramsWindow = new HandDetectionParamsWindow(
+                HandInferenceInterval,
+                HandSmoothWindowSize,
+                HandSmoothAlpha,
+                HandSkeletonThreshold);
+            
+            paramsWindow.Owner = this;
+            
+            if (paramsWindow.ShowDialog() == true)
+            {
+                // 保存参数
+                HandInferenceInterval = paramsWindow.InferenceInterval;
+                HandSmoothWindowSize = paramsWindow.SmoothWindowSize;
+                HandSmoothAlpha = paramsWindow.SmoothAlpha;
+                HandSkeletonThreshold = paramsWindow.SkeletonConfidenceThreshold;
+                
+                System.Diagnostics.Debug.WriteLine($"[SOPConfig] 高级参数已更新: " +
+                    $"InferenceInterval={HandInferenceInterval}, " +
+                    $"SmoothWindow={HandSmoothWindowSize}, " +
+                    $"SmoothAlpha={HandSmoothAlpha:F2}, " +
+                    $"SkeletonThreshold={HandSkeletonThreshold:F2}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// SOP检测模式配置
+    /// </summary>
+    public class SOPDetectionModeConfig
+    {
+        public string DetectionMode { get; set; } = "ObjectBased";
+        public bool EnableHandPoseEstimation { get; set; } = false;
+        public int MaxNumHands { get; set; } = 1;
+        public bool UseGpu { get; set; } = true;
     }
 
     /// <summary>
@@ -535,10 +661,22 @@ namespace VisionInspection.UI.Views
     /// </summary>
     public class SOPConfigStep
     {
+        [System.Text.Json.Serialization.JsonPropertyName("Id")]
+        public string Id { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("Name")]
         public string Name { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("Description")]
         public string Description { get; set; } = "";
-        public string DetectionType { get; set; } = "";
-        public string ModelName { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("DetectionType")]
+        public string DetectionType { get; set; } = "物体检测";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("ModelName")]
+        public string ModelName { get; set; } = "默认YOLOv8模型";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("Icon")]
         public string Icon { get; set; } = "🔍";
     }
 }

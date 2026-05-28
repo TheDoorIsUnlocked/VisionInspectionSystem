@@ -292,17 +292,32 @@ public static class SOPYamlConverter
     /// </summary>
     public static SOPWorkflow ParseYaml(string yaml, string sourcePath = "")
     {
-        var deserializer = new DeserializerBuilder()
-            .Build();
-
-        var config = deserializer.Deserialize<SOPYamlConfig>(yaml);
-
-        if (config?.Sop == null)
+        try
         {
-            throw new InvalidOperationException("YAML配置格式错误：缺少'sop'根节点");
-        }
+            var deserializer = new DeserializerBuilder()
+                .Build();
 
-        return ConvertToWorkflow(config.Sop, sourcePath);
+            var config = deserializer.Deserialize<SOPYamlConfig>(yaml);
+
+            if (config?.Sop == null)
+            {
+                throw new InvalidOperationException("YAML配置格式错误：缺少'sop'根节点");
+            }
+
+            return ConvertToWorkflow(config.Sop, sourcePath);
+        }
+        catch (KeyNotFoundException knfEx)
+        {
+            Console.WriteLine($"[YAML ERROR] KeyNotFoundException during YAML parsing: {knfEx.Message}");
+            Console.WriteLine($"[YAML ERROR] StackTrace: {knfEx.StackTrace}");
+            throw new InvalidOperationException($"YAML解析失败 - 键未找到: {knfEx.Message}. 请检查YAML文件格式。", knfEx);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[YAML ERROR] Exception during YAML parsing: {ex.Message}");
+            Console.WriteLine($"[YAML ERROR] StackTrace: {ex.StackTrace}");
+            throw new InvalidOperationException($"YAML解析失败: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -310,18 +325,20 @@ public static class SOPYamlConverter
     /// </summary>
     private static SOPWorkflow ConvertToWorkflow(SopyamlSop yamlSop, string sourcePath)
     {
-        var workflow = new SOPWorkflow
+        try
         {
-            Id = Guid.NewGuid().ToString("N")[..8],
-            Name = yamlSop.Name,
-            Description = $"从YAML加载: {Path.GetFileName(sourcePath)}",
-            Version = yamlSop.Version,
-            CreatedAt = DateTime.Now,
-            UpdatedAt = DateTime.Now,
-            Steps = new List<SOPStep>(),
-            Regions = new List<ZoneDefinition>(),
-            Settings = new SOPGlobalSettings()
-        };
+            var workflow = new SOPWorkflow
+            {
+                Id = Guid.NewGuid().ToString("N")[..8],
+                Name = yamlSop.Name,
+                Description = $"从YAML加载: {Path.GetFileName(sourcePath)}",
+                Version = yamlSop.Version,
+                CreatedAt = DateTime.Now,
+                UpdatedAt = DateTime.Now,
+                Steps = new List<SOPStep>(),
+                Regions = new List<ZoneDefinition>(),
+                Settings = new SOPGlobalSettings()
+            };
 
         // 转换区域定义
         if (yamlSop.Regions != null)
@@ -344,9 +361,14 @@ public static class SOPYamlConverter
         int stepOrder = 1;
         foreach (var yamlStep in yamlSop.Steps)
         {
+            // 使用yamlStep.Id作为StepId，如果Id为空则使用stepOrder
+            int stepId = !string.IsNullOrEmpty(yamlStep.Id) 
+                ? (int.TryParse(yamlStep.Id, out var parsedId) ? parsedId : stepOrder)
+                : stepOrder;
+            
             var step = new SOPStep
             {
-                StepId = stepOrder,
+                StepId = stepId,
                 StepName = yamlStep.Name,
                 Description = yamlStep.Description ?? $"步骤 {stepOrder}",
                 Order = stepOrder++,
@@ -398,6 +420,20 @@ public static class SOPYamlConverter
             workflow.Steps.Add(step);
         }
 
+        // ⭐ 转换全局设置
+        if (yamlSop.Settings != null)
+        {
+            workflow.Settings = new SOPGlobalSettings
+            {
+                EnableSkipDetection = yamlSop.Settings.EnableSkipDetection,
+                EnableTimeoutDetection = yamlSop.Settings.EnableTimeoutDetection,
+                StableFrameCount = yamlSop.Settings.StableFrames,
+                PositionTolerance = 20f, // 默认值
+                AutoResetOnComplete = false, // 默认值
+                ResetDelaySec = 5 // 默认值
+            };
+        }
+
         // ⭐ 转换模型配置
         if (yamlSop.Model != null && !string.IsNullOrEmpty(yamlSop.Model.Path))
         {
@@ -422,7 +458,38 @@ public static class SOPYamlConverter
             }
         }
 
+        // ⭐ 转换违规定义（如果有）
+        if (yamlSop.Violations != null)
+        {
+            Console.WriteLine($"[SOP] 加载了 {yamlSop.Violations.Count} 个违规定义");
+        }
+
+        // ⭐ 转换关键点配置（如果有）
+        if (yamlSop.Keypoints != null)
+        {
+            Console.WriteLine($"[SOP] 加载了关键点配置: {yamlSop.Keypoints.Required?.Count ?? 0} 个必需关键点");
+        }
+
+        // ⭐ 转换可视化配置（如果有）
+        if (yamlSop.Visualization != null)
+        {
+            Console.WriteLine($"[SOP] 加载了可视化配置");
+        }
+
         return workflow;
+        }
+        catch (KeyNotFoundException knfEx)
+        {
+            Console.WriteLine($"[CONVERT ERROR] KeyNotFoundException during workflow conversion: {knfEx.Message}");
+            Console.WriteLine($"[CONVERT ERROR] StackTrace: {knfEx.StackTrace}");
+            throw new InvalidOperationException($"工作流转换失败 - 键未找到: {knfEx.Message}", knfEx);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[CONVERT ERROR] Exception during workflow conversion: {ex.Message}");
+            Console.WriteLine($"[CONVERT ERROR] StackTrace: {ex.StackTrace}");
+            throw new InvalidOperationException($"工作流转换失败: {ex.Message}", ex);
+        }
     }
 
     /// <summary>

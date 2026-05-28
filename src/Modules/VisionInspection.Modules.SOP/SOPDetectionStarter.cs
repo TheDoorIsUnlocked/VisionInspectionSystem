@@ -22,7 +22,7 @@ public class SOPDetectionStarter : IDisposable
     /// </summary>
     public SOPDetectionMode DetectionMode
     {
-        get => _sopModule?.DetectionMode ?? SOPDetectionMode.ObjectBased;
+        get => _sopModule?.DetectionMode ?? SOPDetectionMode.UnifiedDetection;
         set
         {
             if (_sopModule != null)

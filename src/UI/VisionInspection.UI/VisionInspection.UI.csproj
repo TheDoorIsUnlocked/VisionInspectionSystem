@@ -58,4 +58,26 @@
     </None>
   </ItemGroup>
 
+  <!-- MediaPipe手部检测模型文件 -->
+  <ItemGroup>
+    <None Update="models\palm_detection_full_Nx3x192x192_post.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="models\hand_landmark_sparse_Nx3x224x224.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- YOLOv8-pose模型文件（用于手部检测） -->
+  <ItemGroup>
+    <None Include="..\..\..\..\Models\yolov8s-pose.onnx">
+      <Link>Models\yolov8s-pose.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\..\..\Models\yolov11s-pose.onnx">
+      <Link>Models\yolov11s-pose.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

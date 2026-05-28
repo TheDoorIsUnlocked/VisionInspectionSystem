@@ -36,37 +36,42 @@ public interface IHandPoseEstimationService
 public class MediaPipeHandPoseEstimationService : IHandPoseEstimationService
 {
     private HandPoseEstimationConfig _config = new();
-    private bool _isInitialized = false;
+    private MediaPipeHandDetector? _detector;
     private readonly object _lockObject = new();
 
-    public bool IsInitialized => _isInitialized;
+    public bool IsInitialized => _detector?.IsInitialized ?? false;
 
     public async Task InitializeAsync(HandPoseEstimationConfig config)
     {
         _config = config;
         
-        // TODO: 初始化MediaPipe手部检测模型
-        // 由于MediaPipe.NET可能需要额外的依赖，这里先提供一个框架实现
-        // 实际实现需要引用 MediaPipe.NET 或类似的库
-        
         await Task.Run(() =>
         {
             lock (_lockObject)
             {
-                // 模拟初始化过程
+                // 创建检测器（支持ONNX模型或模拟模式）
+                _detector = new MediaPipeHandDetector(
+                    config.PalmModelPath,
+                    config.LandmarkModelPath,
+                    config.ConfidenceThreshold,
+                    config.MaxNumHands
+                );
+                
+                _detector.Initialize();
+                
                 Console.WriteLine($"[HandPose] 初始化手部姿态估计服务");
-                Console.WriteLine($"[HandPose] 模型路径: {config.ModelPath}");
+                Console.WriteLine($"[HandPose] 手掌检测模型: {config.PalmModelPath}");
+                Console.WriteLine($"[HandPose] 关键点检测模型: {config.LandmarkModelPath}");
                 Console.WriteLine($"[HandPose] 置信度阈值: {config.ConfidenceThreshold}");
                 Console.WriteLine($"[HandPose] 最大手数: {config.MaxNumHands}");
-                
-                _isInitialized = true;
+                Console.WriteLine($"[HandPose] 使用GPU: {config.UseGpu}");
             }
         });
     }
 
     public async Task<HandPoseEstimationResult> DetectHandsAsync(SKBitmap image)
     {
-        if (!_isInitialized)
+        if (_detector == null)
         {
             throw new InvalidOperationException("手部姿态估计服务未初始化");
         }
@@ -78,22 +83,17 @@ public class MediaPipeHandPoseEstimationService : IHandPoseEstimationService
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        // TODO: 实际的MediaPipe手部检测逻辑
-        // 这里提供一个模拟实现，实际使用时需要替换为真实的MediaPipe调用
-        await Task.Run(() =>
-        {
-            lock (_lockObject)
-            {
-                // 模拟检测延迟
-                System.Threading.Thread.Sleep(10);
-                
-                // 模拟检测结果（实际应从MediaPipe获取）
-                // 这里返回空结果，表示没有检测到手
-            }
-        });
+        // 执行手部检测
+        var hands = await Task.Run(() => _detector.DetectHands(image));
+        result.Hands.AddRange(hands);
 
         stopwatch.Stop();
         result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+        if (hands.Count > 0)
+        {
+            Console.WriteLine($"[HandPose] 检测到 {hands.Count} 只手，处理时间: {result.ProcessingTimeMs}ms");
+        }
 
         return result;
     }
@@ -102,7 +102,8 @@ public class MediaPipeHandPoseEstimationService : IHandPoseEstimationService
     {
         lock (_lockObject)
         {
-            _isInitialized = false;
+            _detector?.Dispose();
+            _detector = null;
             Console.WriteLine("[HandPose] 手部姿态估计服务已关闭");
         }
         return Task.CompletedTask;
@@ -220,6 +221,107 @@ public class YoloHandPoseEstimationService : IHandPoseEstimationService
         _yolo?.Dispose();
         _yolo = null;
         Console.WriteLine("[HandPose] YOLO手部检测服务已关闭");
+        return Task.CompletedTask;
+    }
+}
+
+/// <summary>
+/// 基于DWPose的手部姿态估计服务
+/// 使用DWPose进行全身姿态检测，提取手部关键点
+/// 支持双手同时检测，检测更稳定
+/// </summary>
+public class DWPoseHandEstimationService : IHandPoseEstimationService
+{
+    private HandPoseEstimationConfig _config = new();
+    private DWPoseHandDetector? _detector;
+    private readonly object _lockObject = new();
+
+    public bool IsInitialized => _detector?.IsInitialized ?? false;
+
+    public async Task InitializeAsync(HandPoseEstimationConfig config)
+    {
+        _config = config;
+
+        await Task.Run(() =>
+        {
+            lock (_lockObject)
+            {
+                // DWPose使用两个模型：检测模型和姿态模型
+                string modelDir = config.PalmModelPath;
+                string detModelPath = config.PalmModelPath;
+                string poseModelPath = config.LandmarkModelPath;
+
+                // 如果路径是DWPose模型目录，使用默认模型名称
+                if (Directory.Exists(modelDir))
+                {
+                    detModelPath = Path.Combine(modelDir, "yolox_l.onnx");
+                    poseModelPath = Path.Combine(modelDir, "dw-ll_ucoco_384.onnx");
+                }
+
+                Console.WriteLine($"[HandPose] 正在初始化DWPose手部姿态估计服务...");
+                Console.WriteLine($"[HandPose] 检测模型路径: {detModelPath}");
+                Console.WriteLine($"[HandPose] 姿态模型路径: {poseModelPath}");
+
+                _detector = new DWPoseHandDetector(
+                    detModelPath,
+                    poseModelPath,
+                    config.ConfidenceThreshold,
+                    config.MaxNumHands
+                );
+
+                _detector.Initialize();
+
+                if (!_detector.IsInitialized)
+                {
+                    throw new InvalidOperationException("DWPose检测器初始化失败，请检查模型文件是否存在");
+                }
+
+                Console.WriteLine($"[HandPose] DWPose手部姿态估计服务初始化成功");
+                Console.WriteLine($"[HandPose] 检测模型: {detModelPath}");
+                Console.WriteLine($"[HandPose] 姿态模型: {poseModelPath}");
+                Console.WriteLine($"[HandPose] 置信度阈值: {config.ConfidenceThreshold}");
+                Console.WriteLine($"[HandPose] 最大手数: {config.MaxNumHands}");
+            }
+        });
+    }
+
+    public async Task<HandPoseEstimationResult> DetectHandsAsync(SKBitmap image)
+    {
+        if (_detector == null)
+        {
+            throw new InvalidOperationException("DWPose手部姿态估计服务未初始化");
+        }
+
+        var result = new HandPoseEstimationResult
+        {
+            Timestamp = DateTime.Now
+        };
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        // 执行手部检测
+        var hands = await Task.Run(() => _detector.DetectHands(image));
+        result.Hands.AddRange(hands);
+
+        stopwatch.Stop();
+        result.ProcessingTimeMs = stopwatch.ElapsedMilliseconds;
+
+        if (hands.Count > 0)
+        {
+            Console.WriteLine($"[HandPose] DWPose检测到 {hands.Count} 只手，处理时间: {result.ProcessingTimeMs}ms");
+        }
+
+        return result;
+    }
+
+    public Task ShutdownAsync()
+    {
+        lock (_lockObject)
+        {
+            _detector?.Dispose();
+            _detector = null;
+            Console.WriteLine("[HandPose] DWPose手部姿态估计服务已关闭");
+        }
         return Task.CompletedTask;
     }
 }

@@ -6,7 +6,10 @@ using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using VisionInspection.Core.Models;
+using VisionInspection.Core.Services;
 using VisionInspection.UI.ViewModels;
+using VisionInspection.Modules.SOP;
+using VisionInspection.Modules.SOP.Models;
 
 namespace VisionInspection.UI.Views
 {
@@ -22,6 +25,15 @@ namespace VisionInspection.UI.Views
         private DispatcherTimer? _timer;
         private DateTime _timerStartTime;
         private bool _isTimerRunning = false;
+
+        // SOP检测模式配置 - 默认启用手部检测，最大手数为2
+        private SOPDetectionModeConfig _detectionModeConfig = new()
+        {
+            DetectionMode = "UnifiedDetection",
+            EnableHandPoseEstimation = true,
+            MaxNumHands = 2,
+            UseGpu = true
+        };
 
         public SOPModuleView()
         {
@@ -117,10 +129,10 @@ namespace VisionInspection.UI.Views
         private void InitializeSampleSteps()
         {
             // 添加示例SOP步骤
-            AddStep("1", "检测车辆", "使用YOLO模型检测画面中是否存在车辆", "🔍");
-            AddStep("2", "车牌识别", "检测到车辆后，识别车牌号码", "📄");
-            AddStep("3", "安全验证", "验证车牌是否在白名单中", "✓");
-            AddStep("4", "触发PLC", "验证通过，触发PLC开门", "🔌");
+            AddStep("1", "检测车辆", "使用YOLO模型检测画面中是否存在车辆", "🔍", "detect_vehicle");
+            AddStep("2", "车牌识别", "检测到车辆后，识别车牌号码", "📄", "recognize_plate");
+            AddStep("3", "安全验证", "验证车牌是否在白名单中", "✓", "safety_verify");
+            AddStep("4", "触发PLC", "验证通过，触发PLC开门", "🔌", "trigger_plc");
 
             UpdateStepDisplay();
         }
@@ -128,10 +140,11 @@ namespace VisionInspection.UI.Views
         /// <summary>
         /// 添加步骤
         /// </summary>
-        public void AddStep(string stepNumber, string name, string description, string icon)
+        public void AddStep(string stepNumber, string name, string description, string icon, string? id = null)
         {
             var stepItem = new SOPStepItem
             {
+                Id = id ?? stepNumber,
                 StepNumber = stepNumber,
                 Name = name,
                 Description = description,
@@ -559,32 +572,85 @@ namespace VisionInspection.UI.Views
         {
             var configWindow = new SOPConfigWindow();
             configWindow.Owner = Window.GetWindow(this);
-            
+
             // 传递当前步骤配置
             var configSteps = _steps.Select(s => new SOPConfigStep
             {
+                Id = s.Id,
                 Name = s.Name,
                 Description = s.Description,
                 Icon = s.Icon,
                 DetectionType = "物体检测",
                 ModelName = "默认YOLOv8模型"
             }).ToList();
-            
+
             configWindow.SetSteps(configSteps);
-            
+
+            // 传递当前检测模式配置
+            configWindow.SetDetectionModeConfig(_detectionModeConfig);
+
             if (configWindow.ShowDialog() == true)
             {
                 // 应用新配置
                 var newSteps = configWindow.GetSteps();
                 _steps.Clear();
-                
+
                 for (int i = 0; i < newSteps.Count; i++)
                 {
-                    AddStep((i + 1).ToString(), newSteps[i].Name, newSteps[i].Description, newSteps[i].Icon);
+                    AddStep((i + 1).ToString(), newSteps[i].Name, newSteps[i].Description, newSteps[i].Icon, newSteps[i].Id);
                 }
-                
+
+                // 保存检测模式配置
+                _detectionModeConfig = configWindow.GetDetectionModeConfig();
+
+                // 更新SOP模块的检测模式
+                UpdateSOPDetectionMode();
+
                 UpdateStepDisplay();
-                AddLog("SOP配置已更新");
+                AddLog($"SOP配置已更新 | 模式: {_detectionModeConfig.DetectionMode} | 手部检测: {_detectionModeConfig.EnableHandPoseEstimation}");
+            }
+        }
+
+        /// <summary>
+        /// 更新SOP模块检测模式
+        /// </summary>
+        private void UpdateSOPDetectionMode()
+        {
+            var viewModel = GetMainViewModel();
+
+            // 统一检测模式：所有配置都映射到 UnifiedDetection
+            var mode = SOPDetectionMode.UnifiedDetection;
+
+            // 重要：无论 SOPModule 是否已创建，都要保存配置到 MainViewModel
+            // 这样当 SOPModule 稍后被创建时可以应用正确的模式
+            if (viewModel != null)
+            {
+                Console.WriteLine($"[SOPModuleView] 保存检测配置到MainViewModel: {_detectionModeConfig.DetectionMode}, 手部检测={_detectionModeConfig.EnableHandPoseEstimation}");
+                viewModel.SaveSOPDetectionConfig(
+                    _detectionModeConfig.DetectionMode,
+                    _detectionModeConfig.EnableHandPoseEstimation,
+                    _detectionModeConfig.MaxNumHands
+                );
+            }
+
+            // 如果 SOPModule 已创建，立即更新它的配置
+            if (viewModel?.SOPModuleInstance != null)
+            {
+                Console.WriteLine($"[SOPModuleView] 更新已存在的SOPModule实例: {mode}");
+
+                // 更新SOP模块配置
+                viewModel.SOPModuleInstance.UpdateDetectionMode(mode, _detectionModeConfig.EnableHandPoseEstimation);
+
+                // 如果启用手部检测，更新手部检测配置
+                if (_detectionModeConfig.EnableHandPoseEstimation)
+                {
+                    viewModel.SOPModuleInstance.UpdateHandPoseConfig(new VisionInspection.Modules.SOP.Models.HandPoseEstimationConfig
+                    {
+                        MaxNumHands = _detectionModeConfig.MaxNumHands,
+                        UseGpu = _detectionModeConfig.UseGpu,
+                        ConfidenceThreshold = 0.5f
+                    });
+                }
             }
         }
 
@@ -604,22 +670,24 @@ namespace VisionInspection.UI.Views
             // 如果已经在运行，则停止
             if (viewModel.IsSOPDetecting)
             {
-                viewModel.StopSOPDetectionCommand.Execute(null);
+                _ = viewModel.StopSOPDetectionAsync();
                 SetStatus("检测已停止", new SolidColorBrush(Colors.Gray));
                 SetResult("--", new SolidColorBrush(Colors.Gray));
                 StopTimer();
+                UpdateRunButtonState(false);
                 AddLog("SOP 实时检测已停止");
                 return;
             }
 
-            // 检查相机状态
-            if (!viewModel.IsCameraConnected)
+            // 检查相机状态 - 直接使用 CameraManager 单例
+            var cameraManager = CameraManager.Instance;
+            if (!cameraManager.IsConnected)
             {
                 MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            if (!viewModel.IsCameraGrabbing)
+            if (!cameraManager.IsGrabbing)
             {
                 MessageBox.Show("请先开始相机采集", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
@@ -638,12 +706,14 @@ namespace VisionInspection.UI.Views
                 SetResult("检测中...", new SolidColorBrush(Colors.Gray));
                 ClearTimeline();
                 StartTimer();
-                AddLog($"SOP 实时检测已启动 | 工作流: {System.IO.Path.GetFileName(viewModel.SopWorkflowPath)}");
+                UpdateRunButtonState(true);
+                AddLog($"SOP 实时检测已启动 | 模式: {viewModel.SOPModuleInstance?.DetectionMode}");
             }
             else
             {
                 SetStatus("启动失败", new SolidColorBrush(Colors.Red));
                 SetResult("NG", new SolidColorBrush(Colors.Red));
+                UpdateRunButtonState(false);
                 AddLog("SOP 实时检测启动失败");
             }
 
@@ -677,6 +747,23 @@ namespace VisionInspection.UI.Views
             viewModel.SOPModuleInstance.WorkflowCompleted -= OnSOPWorkflowCompleted;
             viewModel.SOPModuleInstance.ViolationDetected -= OnSOPViolationDetected;
             viewModel.SOPModuleInstance.StepChanged -= OnSOPStepChanged;
+        }
+
+        /// <summary>
+        /// 更新运行按钮状态
+        /// </summary>
+        private void UpdateRunButtonState(bool isRunning)
+        {
+            if (isRunning)
+            {
+                RunButton.Content = "⏹️ 停止";
+                RunButton.Background = new SolidColorBrush(Color.FromRgb(255, 77, 79)); // 红色
+            }
+            else
+            {
+                RunButton.Content = "▶️ 运行";
+                RunButton.Background = new SolidColorBrush(Color.FromRgb(82, 196, 26)); // 绿色
+            }
         }
 
         /// <summary>
@@ -950,6 +1037,7 @@ namespace VisionInspection.UI.Views
     /// </summary>
     public class SOPStepItem
     {
+        public string Id { get; set; } = "";
         public string StepNumber { get; set; } = "";
         public string Name { get; set; } = "";
         public string Description { get; set; } = "";

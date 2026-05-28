@@ -265,29 +265,15 @@ public class PoseEstimationConfig
 }
 
 /// <summary>
-/// SOP检测模式
+/// SOP检测模式 - 已简化为统一检测模式
+/// 默认同时启用：物体检测 + 手部姿态检测
 /// </summary>
 public enum SOPDetectionMode
 {
     /// <summary>
-    /// 基于物体检测（当前实现）
+    /// 统一检测模式（物体检测 + 手部姿态检测）
     /// </summary>
-    ObjectBased,
-
-    /// <summary>
-    /// 基于姿态估计（实战指南方案）
-    /// </summary>
-    PoseBased,
-
-    /// <summary>
-    /// 混合模式（物体+姿态）
-    /// </summary>
-    Hybrid,
-
-    /// <summary>
-    /// 手部姿态模式（MediaPipe 21点手部检测）
-    /// </summary>
-    HandPoseBased
+    UnifiedDetection
 }
 
 /// <summary>

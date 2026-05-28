@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using SkiaSharp;
+using System.Diagnostics;
 using VisionInspection.Core.Interfaces;
 using VisionInspection.Core.Models;
 using VisionInspection.Core.Services;
@@ -15,7 +16,7 @@ using YoloDotNet.Models;
 namespace VisionInspection.Modules.SOP;
 
 /// <summary>
-/// SOP检测模块 - 支持物体检测和姿态估计双模式
+/// SOP检测测模式?- 支持物体检测测和姿态估计计双模式式
 /// </summary>
 public class SOPModule : IDetectionModule
 {
@@ -26,19 +27,46 @@ public class SOPModule : IDetectionModule
     private SOPWorkflow? _currentWorkflow;
     private readonly object _lockObject = new();
 
-    // ⭐ 模型动态加载相关
+    // 静态锁，确保手部姿态估计服务只初始化一次
+    private static readonly object _handPoseInitLock = new();
+    private static bool _isHandPoseInitializing = false;
+
+    // 模型动态加载相关
     private string _lastLoadedModelPath = "";
 
     // 姿态估计相关
     private IPoseEstimationService? _poseService;
     private PoseConditionEvaluator? _poseEvaluator;
     private PoseViolationDetector? _poseViolationDetector;
-    
-    // ⭐ 手部姿态估计相关
+
+    // 手部姿态估计相关
     private IHandPoseEstimationService? _handPoseService;
     private HandPoseEstimationResult? _lastHandPoseResult;
+
+    // 文件日志记录器
+    private static readonly object _sopLogLock = new();
+    private const string _sopDebugLogPath = "sop_module_debug.log";
+
+    private void DebugLog(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var logLine = $"[{timestamp}] [SOPModule] {message}";
+
+        Console.WriteLine(logLine);
+        Debug.WriteLine(logLine);
+
+        lock (_sopLogLock)
+        {
+            try
+            {
+                File.AppendAllText(_sopDebugLogPath, logLine + Environment.NewLine);
+            }
+            catch { }
+        }
+    }
     
-    private SOPDetectionMode _detectionMode = SOPDetectionMode.ObjectBased;
+    private SOPDetectionMode _detectionMode = SOPDetectionMode.UnifiedDetection;
+    private const string LOG_FILE = "sop_module_debug.log";
 
     public string Name => "SOPModule";
     public ModuleState State { get; private set; } = ModuleState.Uninitialized;
@@ -46,7 +74,32 @@ public class SOPModule : IDetectionModule
     public SOPWorkflow? CurrentWorkflow => _currentWorkflow;
 
     /// <summary>
-    /// 当前检测模式
+    /// 统一日志输出方法（同时输出到 Console、Debug 和文件）
+    /// </summary>
+    private void Log(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var logLine = $"[{timestamp}] [SOP] {message}";
+        
+        // 1. 输出到 Console
+        Console.WriteLine(logLine);
+
+        // 2. 输出到 Debug（可在 Visual Studio 输出窗口查看）
+        Debug.WriteLine(logLine);
+
+        // 3. 写入文件（确保不丢失）
+        try
+        {
+            File.AppendAllText(LOG_FILE, logLine + Environment.NewLine);
+        }
+        catch
+        {
+            // 忽略文件写入错误
+        }
+    }
+
+    /// <summary>
+    /// 当前检测测模式式
     /// </summary>
     public SOPDetectionMode DetectionMode
     {
@@ -59,14 +112,14 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 是否启用了姿态估计
+    /// 是否启用了姿态估计计
     /// </summary>
-    public bool IsPoseEnabled => _detectionMode is SOPDetectionMode.PoseBased or SOPDetectionMode.Hybrid;
+    public bool IsPoseEnabled => false; // 统一检测模式下，姿态估计默认不启用
 
     public ModuleMetadata Metadata { get; } = new()
     {
-        DisplayName = "SOP合规检测",
-        Description = "检测作业员是否遵守标准作业流程（支持物体检测和姿态估计双模式）",
+        DisplayName = "SOP合规检测测",
+        Description = "检测测作业员是否遵守标准作业流程（支持物体检测测和姿态估计计双模式式）",
         Version = "2.1.0",
         Author = "Vision Inspection Team",
         RequiredCameras = new List<string> { "main_camera" }
@@ -84,10 +137,52 @@ public class SOPModule : IDetectionModule
         State = ModuleState.Initializing;
         _cameraService = cameraService;
 
-        _config = config.GetSection("SOPModule").Get<SOPModuleConfig>() ?? new SOPModuleConfig();
-
         try
         {
+            // 手动读取配置，避免配置绑定问题
+            var sopSection = config.GetSection("SOPModule");
+            
+            // 调试：输出所有配置键值对
+            Log("开始加载配置...");
+            foreach (var child in sopSection.GetChildren())
+            {
+                Log($"Config key: {child.Key} = {child.Value}");
+            }
+
+            _config = new SOPModuleConfig
+            {
+                ModelPath = sopSection["ModelPath"] ?? "yolo_models/yolov8s.onnx",
+                UseGpu = bool.TryParse(sopSection["UseGpu"], out var useGpu) ? useGpu : true,
+                ConfidenceThreshold = float.TryParse(sopSection["ConfidenceThreshold"], out var conf) ? conf : 0.6f,
+                IouThreshold = float.TryParse(sopSection["IouThreshold"], out var iou) ? iou : 0.45f
+            };
+
+            // 读取姿态估计配置
+            var poseSection = sopSection.GetSection("PoseEstimation");
+            if (poseSection.Exists())
+            {
+                _config.PoseEstimation = new PoseEstimationConfig
+                {
+                    Enabled = bool.TryParse(poseSection["Enabled"], out var poseEnabled) ? poseEnabled : false,
+                    ModelPath = poseSection["ModelPath"] ?? "yolo_models/yolov8s-pose.onnx"
+                };
+            }
+
+            // 读取手部姿态估计配置
+            var handPoseSection = sopSection.GetSection("HandPoseEstimation");
+            if (handPoseSection.Exists())
+            {
+                _config.HandPoseEstimation = new HandPoseEstimationConfig
+                {
+                    ModelPath = handPoseSection["ModelPath"] ?? "models",
+                    ConfidenceThreshold = float.TryParse(handPoseSection["ConfidenceThreshold"], out var handConf) ? handConf : 0.5f,
+                    MaxNumHands = int.TryParse(handPoseSection["MaxNumHands"], out var maxHands) ? maxHands : 2,
+                    UseGpu = bool.TryParse(handPoseSection["UseGpu"], out var handGpu) ? handGpu : true
+                };
+            }
+
+            Console.WriteLine($"[SOP] 配置加载完成: ModelPath={_config.ModelPath}, UseGpu={_config.UseGpu}");
+
             // 初始化物体检测
             await InitializeYoloAsync();
 
@@ -97,21 +192,34 @@ public class SOPModule : IDetectionModule
                 await InitializePoseEstimationAsync();
             }
 
-            // 初始化状态机
+            // 初始化状态机（先初始化状态机，确保核心功能可用）
             _stateMachine = new SOPStateMachine();
             SubscribeToStateMachineEvents();
 
             State = ModuleState.Ready;
+            
+            // 手部姿态估计服务改为延迟初始化，在第一次需要时初始化
+            // 避免启动时卡住
+            Log("手部姿态估计服务将在需要时延迟初始化");
+        }
+        catch (KeyNotFoundException knfEx)
+        {
+            State = ModuleState.Error;
+            Console.WriteLine($"[SOP ERROR] KeyNotFoundException: {knfEx.Message}");
+            Console.WriteLine($"[SOP ERROR] StackTrace: {knfEx.StackTrace}");
+            throw new Exception($"SOP模式块初始化失?- 键未找到: {knfEx.Message}. 堆栈: {knfEx.StackTrace}", knfEx);
         }
         catch (Exception ex)
         {
             State = ModuleState.Error;
-            throw new Exception($"SOP模块初始化失败: {ex.Message}");
+            Console.WriteLine($"[SOP ERROR] Exception: {ex.Message}");
+            Console.WriteLine($"[SOP ERROR] StackTrace: {ex.StackTrace}");
+            throw new Exception($"SOP模式块初始化失? {ex.Message}", ex);
         }
     }
 
     /// <summary>
-    /// 初始化 YOLO（启动时调用一次）
+    /// 初始?YOLO（启动时调用一次）
     /// </summary>
     private async Task InitializeYoloAsync()
     {
@@ -119,10 +227,12 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 按指定路径加载/切换 YOLO 模型
+    /// 按指定路径加载?切换 YOLO 模式型
     /// </summary>
     private async Task LoadYoloAsync(string modelPath, bool useGpu, string? gpuDevice = null)
     {
+        Console.WriteLine($"[SOP LoadYoloAsync] 开始加载模型: modelPath={modelPath}, useGpu={useGpu}");
+
         // 如果路径没变且模型已加载，跳过
         if (_yolo != null && modelPath == _lastLoadedModelPath)
         {
@@ -140,25 +250,30 @@ public class SOPModule : IDetectionModule
                     _yolo?.Dispose();
                     _yolo = null;
 
-                    if (!File.Exists(modelPath))
+                    // Resolve the model path by searching multiple possible locations
+                    var resolvedPath = ResolveModelPath(modelPath);
+                    if (resolvedPath == null)
                     {
                         Console.WriteLine($"[SOP] 警告: 模型文件不存在: {modelPath}");
                         _lastLoadedModelPath = "";
                         return;
                     }
 
+                    Console.WriteLine($"[SOP] 加载模型: {resolvedPath}");
+                    Console.WriteLine($"[SOP] 模型文件: {Path.GetFileName(resolvedPath)}");
+
                     var options = new YoloOptions
                     {
                         ExecutionProvider = useGpu
-                            ? new CudaExecutionProvider(modelPath, int.Parse(gpuDevice ?? "0"))
-                            : new CpuExecutionProvider(modelPath),
+                            ? new CudaExecutionProvider(resolvedPath, int.Parse(gpuDevice ?? "0"))
+                            : new CpuExecutionProvider(resolvedPath),
                         ImageResize = ImageResize.Proportional,
                         SamplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None)
                     };
 
                     _yolo = new Yolo(options);
                     _lastLoadedModelPath = modelPath;
-                    Console.WriteLine($"[SOP] 模型加载成功: {Path.GetFileName(modelPath)}");
+                    Console.WriteLine($"[SOP] 模型加载成功: {Path.GetFileName(resolvedPath)}");
                 }
             }
             catch (Exception ex)
@@ -168,6 +283,73 @@ public class SOPModule : IDetectionModule
                 _lastLoadedModelPath = "";
             }
         });
+    }
+
+    /// <summary>
+    /// Resolves a relative model path to an absolute path by searching common locations.
+    /// </summary>
+    private static string? ResolveModelPath(string modelPath)
+    {
+        Console.WriteLine($"[SOP ResolveModelPath] 开始始解? {modelPath}");
+        
+        // If already rooted and exists, use as-is
+        if (Path.IsPathRooted(modelPath))
+        {
+            var fileExists = File.Exists(modelPath);
+            var dirExists = Directory.Exists(modelPath);
+            Console.WriteLine($"[SOP ResolveModelPath] 绝对路径: {modelPath}, 文件存在: {fileExists}, 目录存在: {dirExists}");
+            return (fileExists || dirExists) ? modelPath : null;
+        }
+
+        // 1. Try relative to current working directory
+        var cwdPath = Path.GetFullPath(modelPath);
+        if (File.Exists(cwdPath) || Directory.Exists(cwdPath))
+        {
+            Console.WriteLine($"[SOP ResolveModelPath] 当前工作作目录找到: {cwdPath}");
+            return cwdPath;
+        }
+
+        // 2. Try relative to the assembly directory (bin/Debug/net8.0-windows/)
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        var candidate = Path.Combine(baseDir, modelPath);
+        if (File.Exists(candidate) || Directory.Exists(candidate))
+        {
+            Console.WriteLine($"[SOP ResolveModelPath] 程序集目录找? {candidate}");
+            return candidate;
+        }
+
+        // 3. Walk up from assembly dir to find the project/solution root that has yolo_models/
+        var dir = baseDir;
+        for (int i = 0; i < 6; i++)
+        {
+            dir = Path.GetFullPath(Path.Combine(dir, ".."));
+            candidate = Path.Combine(dir, modelPath);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+            {
+                Console.WriteLine($"[SOP ResolveModelPath] 向上第{i + 1}层找? {candidate}");
+                return candidate;
+            }
+
+            // Also try yolo_models/<modelPath> in case modelPath doesn't include the directory
+            var fileName = Path.GetFileName(modelPath);
+            candidate = Path.Combine(dir, "yolo_models", fileName);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+            {
+                Console.WriteLine($"[SOP ResolveModelPath] yolo_models目录找到: {candidate}");
+                return candidate;
+            }
+
+            // In src/yolo_models/
+            candidate = Path.Combine(dir, "src", "yolo_models", fileName);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+            {
+                Console.WriteLine($"[SOP ResolveModelPath] src/yolo_models目录找到: {candidate}");
+                return candidate;
+            }
+        }
+
+        Console.WriteLine($"[SOP ResolveModelPath] 未找到模式型文?目录: {modelPath}");
+        return null;
     }
 
     private async Task InitializePoseEstimationAsync()
@@ -184,8 +366,8 @@ public class SOPModule : IDetectionModule
         _poseEvaluator = new PoseConditionEvaluator();
         _poseViolationDetector = new PoseViolationDetector();
 
-        // ⭐ 初始化手部姿态估计服务
-        await InitializeHandPoseEstimationAsync();
+        // 注意：手部姿态估计服务改为延迟初始化，在第一次需要时初始化
+        // 避免启动时卡住
 
         // 设置默认区域（实际应从配置加载）
         SetupDefaultRegions();
@@ -196,39 +378,158 @@ public class SOPModule : IDetectionModule
     /// </summary>
     private async Task InitializeHandPoseEstimationAsync()
     {
-        // 根据配置选择使用哪种手部检测方案
-        var handConfig = new HandPoseEstimationConfig
+        // 快速检查：如果已初始化，直接返回
+        if (_handPoseService != null && _handPoseService.IsInitialized)
         {
-            ModelPath = _config.HandPoseEstimation?.ModelPath ?? "",
-            ConfidenceThreshold = _config.HandPoseEstimation?.ConfidenceThreshold ?? 0.5f,
-            MaxNumHands = _config.HandPoseEstimation?.MaxNumHands ?? 2,
-            UseGpu = _config.HandPoseEstimation?.UseGpu ?? true
-        };
-
-        if (!string.IsNullOrEmpty(handConfig.ModelPath) && File.Exists(handConfig.ModelPath))
-        {
-            // 使用YOLO方案（如果有模型）
-            _handPoseService = new YoloHandPoseEstimationService();
-            await _handPoseService.InitializeAsync(handConfig);
-            Console.WriteLine("[SOP] 手部姿态估计服务初始化完成（YOLO方案）");
+            Log("手部姿态估计已初始化，跳过");
+            return;
         }
-        else
+
+        // 使用简单锁确保只初始化一次
+        lock (_handPoseInitLock)
         {
-            // 使用MediaPipe方案（默认）
-            _handPoseService = new MediaPipeHandPoseEstimationService();
-            await _handPoseService.InitializeAsync(handConfig);
-            Console.WriteLine("[SOP] 手部姿态估计服务初始化完成（MediaPipe方案）");
+            // 双重检查：锁内再次检查
+            if (_handPoseService != null && _handPoseService.IsInitialized)
+            {
+                Log("手部姿态估计已初始化（锁内检查），跳过");
+                return;
+            }
+
+            // 如果正在初始化，跳过（由另一个线程完成）
+            if (_isHandPoseInitializing)
+            {
+                Log("手部姿态估计正在初始化中，跳过");
+                return;
+            }
+
+            // 标记正在初始化
+            _isHandPoseInitializing = true;
+        }
+
+        try
+        {
+            var rawModelPath = _config.HandPoseEstimation?.ModelPath ?? "";
+
+            Log($"开始初始化手部姿态估计，原始路径: '{rawModelPath}'");
+
+            // 如果路径为空，尝试使用默认目录
+            if (string.IsNullOrEmpty(rawModelPath))
+            {
+                rawModelPath = "models";
+                Log($"路径为空，使用默认目录: {rawModelPath}");
+            }
+
+            var resolvedModelDir = ResolveModelPath(rawModelPath);
+            var actualModelPath = resolvedModelDir ?? rawModelPath;
+
+            Log($"解析后路径: {actualModelPath}, 是否目录: {Directory.Exists(actualModelPath)}, 是否文件: {File.Exists(actualModelPath)}");
+
+            var handConfig = new HandPoseEstimationConfig
+            {
+                ModelPath = actualModelPath,
+                ConfidenceThreshold = _config.HandPoseEstimation?.ConfidenceThreshold ?? 0.5f,
+                MaxNumHands = _config.HandPoseEstimation?.MaxNumHands ?? 2,
+                UseGpu = _config.HandPoseEstimation?.UseGpu ?? true
+            };
+
+            Log($"PalmModelPath: '{handConfig.PalmModelPath}', LandmarkModelPath: '{handConfig.LandmarkModelPath}'");
+            Log($"Palm模型存在: {File.Exists(handConfig.PalmModelPath)}, Landmark模型存在: {File.Exists(handConfig.LandmarkModelPath)}");
+
+            // 先释放旧的服务实例
+            if (_handPoseService is IDisposable oldService)
+            {
+                try { oldService.Dispose(); } catch { }
+                _handPoseService = null;
+            }
+
+            // 选择手部检测方案
+            // 方案1: YOLOv8-hand - 直接检测手部，速度快，适合工业场景
+            // 方案2: DWPose - 全身姿态检测后提取手部，支持关键点但速度慢
+            bool useYoloHand = true;  // 切换到YOLOv8-hand方案
+
+            if (useYoloHand)
+            {
+                // 使用YOLOv8-hand专用手部检测模型
+                string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx";
+                
+                if (!File.Exists(yoloHandModelPath))
+                {
+                    // 尝试其他路径 - 包括专用手部模型和通用YOLOv8模型
+                    var possiblePaths = new[]
+                    {
+                        // YOLO11n-pose 手部关键点检测模型（推荐）
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolo11n-pose-hands.onnx",
+                        // YOLOv8-hand 专用手部检测模型
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-hand.onnx",
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8m-hand.onnx",
+                        // 通用YOLOv8模型
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s.onnx",
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n.onnx",
+                        // 程序目录下的模型
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolo11n-pose-hands.onnx"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8n-hand.onnx"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s-hand.onnx"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s.onnx"),
+                    };
+                    yoloHandModelPath = possiblePaths.FirstOrDefault(File.Exists) ?? "";
+                }
+
+                if (!string.IsNullOrEmpty(yoloHandModelPath))
+                {
+                    handConfig.PalmModelPath = yoloHandModelPath;
+                    _handPoseService = new YoloHandDetectionService();
+                    await _handPoseService.InitializeAsync(handConfig);
+                    Log($"手部姿态估计初始化成功（YOLOv8-hand方案）, 模型: {yoloHandModelPath}, IsInitialized={_handPoseService.IsInitialized}");
+                }
+                else
+                {
+                    Log("警告: 未找到YOLOv8-hand模型，回退到DWPose方案");
+                    useYoloHand = false;
+                }
+            }
+
+            if (!useYoloHand)
+            {
+                // 使用DWPose进行手部检测（全身姿态检测，提取手部关键点，支持双手）
+                // DWPose模型路径: e:\yolo\YoloDotNet-master\DWPose-onnx\models\
+                string dwposeModelDir = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
+
+                // 更新配置使用DWPose模型
+                handConfig.PalmModelPath = dwposeModelDir;  // 检测模型目录
+                handConfig.LandmarkModelPath = dwposeModelDir;  // 姿态模型目录
+
+                _handPoseService = new DWPoseHandEstimationService();
+                await _handPoseService.InitializeAsync(handConfig);
+
+                Log($"手部姿态估计初始化成功（DWPose方案）, IsInitialized={_handPoseService.IsInitialized}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"手部姿态估计初始化失败: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                Log($"内部异常: {ex.InnerException.Message}");
+            }
+            _handPoseService = null;
+        }
+        finally
+        {
+            lock (_handPoseInitLock)
+            {
+                _isHandPoseInitializing = false;
+            }
         }
     }
 
     private void SetupDefaultRegions()
     {
-        // 默认区域定义，实际应从配置文件加载
+        // 默认区域域定义，实际应从配置文件加载载
         var regions = new Dictionary<string, SKRect>
         {
-            ["part_box"] = new SKRect(50, 200, 250, 400),      // 零件盒区域
-            ["fixture"] = new SKRect(300, 250, 500, 450),       // 夹具区域
-            ["tool_rack"] = new SKRect(550, 200, 750, 400),     // 工具架区域
+            ["part_box"] = new SKRect(50, 200, 250, 400),      // 零件盒区域域
+            ["fixture"] = new SKRect(300, 250, 500, 450),       // 夹具区域域
+            ["tool_rack"] = new SKRect(550, 200, 750, 400),     // 工作具架区域域
             ["release_channel"] = new SKRect(400, 500, 600, 600) // 放行通道
         };
 
@@ -280,7 +581,7 @@ public class SOPModule : IDetectionModule
             if (_stateMachine?.CurrentState != SOPExecutionState.Running)
             {
                 result.Success = true;
-                result.ErrorMessage = "SOP未在运行状态";
+                result.ErrorMessage = "SOP未在运行状态态";
                 result.Level = DefectLevel.Good;
                 return Task.FromResult<ModuleResult>(result);
             }
@@ -329,23 +630,10 @@ public class SOPModule : IDetectionModule
     {
         var timestamp = DateTime.Now;
 
-        // 根据检测模式处理
-        switch (_detectionMode)
-        {
-            case SOPDetectionMode.ObjectBased:
-                ProcessObjectDetection(frame, result, timestamp);
-                break;
+        // 统一检测模式：同时进行物体检测和手部姿态检测
+        ProcessUnifiedDetection(frame, result, timestamp);
 
-            case SOPDetectionMode.PoseBased:
-                ProcessPoseDetection(frame, result, timestamp);
-                break;
-
-            case SOPDetectionMode.Hybrid:
-                ProcessHybridDetection(frame, result, timestamp);
-                break;
-        }
-
-        // 更新结果
+        // 更新结果果
         if (_stateMachine != null)
         {
             result.CurrentStepId = _stateMachine.CurrentStepId;
@@ -359,7 +647,7 @@ public class SOPModule : IDetectionModule
             var currentStep = _currentWorkflow?.Steps.FirstOrDefault(s => s.StepId == _stateMachine.CurrentStepId);
             result.StepResults = new StepResults
             {
-                Message = currentStep?.StepName ?? "等待开始",
+                Message = currentStep?.StepName ?? "等待开始始",
                 CurrentStep = _stateMachine.CurrentStepId,
                 TotalSteps = _currentWorkflow?.Steps.Count ?? 0
             };
@@ -367,20 +655,20 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 物体检测模式处理
+    /// 物体检测测模式式处理理
     /// </summary>
     private void ProcessObjectDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
     {
         if (_stateMachine == null) return;
 
-        // 如果 YOLO 还没加载好（刚切换工作流，模型在后台加载中），用空结果
+        // 如果 YOLO 还没加载载好（刚切换工作作流，模式型在后台加载载中），用空结果果
         if (_yolo == null)
         {
             Console.WriteLine("[SOP] 模型加载中，本帧跳过检测");
             return;
         }
 
-        // 使用当前工作流覆盖的阈值，否则用全局配置
+        // 使用当前工作作流覆盖的阈值，否则用全局配置
         float confidence = _currentWorkflow?.Model?.Confidence ?? _config.ConfidenceThreshold;
         float iou = _currentWorkflow?.Model?.Iou ?? _config.IouThreshold;
 
@@ -429,8 +717,7 @@ public class SOPModule : IDetectionModule
                 }
             }
 
-            // 检测违规
-            if (_poseViolationDetector != null)
+            // 检测测违?            if (_poseViolationDetector != null)
             {
                 var violations = _poseViolationDetector.DetectViolations(poses, currentStep, timestamp);
                 foreach (var violation in violations)
@@ -444,8 +731,7 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 混合检测模式处理
-    /// </summary>
+    /// 混合检测测模式式处理?    /// </summary>
     private void ProcessHybridDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
     {
         if (_yolo == null || _stateMachine == null) return;
@@ -458,7 +744,7 @@ public class SOPModule : IDetectionModule
 
         result.Detections = detections.ToList();
 
-        // ⭐ 如果启用了手部姿态估计，进行手部检测
+        // 如果启用了手部姿态估计，进行手部检测
         if (_handPoseService != null && _handPoseService.IsInitialized)
         {
             try
@@ -468,7 +754,7 @@ public class SOPModule : IDetectionModule
                 
                 if (handResult.Hands.Count > 0)
                 {
-                    Console.WriteLine($"[SOP] 检测到手部: {handResult.Hands.Count}只, 耗时: {handResult.ProcessingTimeMs}ms");
+                    Console.WriteLine($"[SOP] 检测到手部: {handResult.Hands.Count}, 耗时: {handResult.ProcessingTimeMs}ms");
                     
                     // 触发手部检测事件
                     OnHandPoseDetected(handResult, timestamp);
@@ -519,8 +805,7 @@ public class SOPModule : IDetectionModule
                     _stateMachine.TryCompleteCurrentStep(timestamp);
                 }
 
-                // 检测姿态违规
-                if (_poseViolationDetector != null)
+                // 检测测姿态违?                if (_poseViolationDetector != null)
                 {
                     var violations = _poseViolationDetector.DetectViolations(poses, currentStep, timestamp);
                     foreach (var violation in violations)
@@ -536,8 +821,7 @@ public class SOPModule : IDetectionModule
         }
         else
         {
-            // 姿态服务未初始化，仅使用物体检测
-            _stateMachine.ProcessFrame(detections.ToList(), timestamp);
+            // 姿态服务务未初始化，仅使用物体检测?            _stateMachine.ProcessFrame(detections.ToList(), timestamp);
         }
     }
 
@@ -554,6 +838,52 @@ public class SOPModule : IDetectionModule
         HandPoseDetected?.Invoke(this, new HandPoseDetectedEventArgs(result, timestamp));
     }
 
+    /// <summary>
+    /// 手部姿态检测模式处理
+    /// </summary>
+    private void ProcessUnifiedDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
+    {
+        // ========== 1. 物体检测（YOLO）==========
+        // 临时屏蔽物体检测，专注于手部检测调试
+        // if (_yolo != null) { ... }
+
+        // ========== 2. 手部姿态检测 ==========
+
+        // 确保服务已初始化
+        if (_handPoseService == null || !_handPoseService.IsInitialized)
+        {
+            try
+            {
+                InitializeHandPoseEstimationAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"初始化手部姿态估计服务失败: {ex.Message}");
+            }
+        }
+
+        // 进行手部姿态检测
+        if (_handPoseService != null && _handPoseService.IsInitialized)
+        {
+            try
+            {
+                var handResult = _handPoseService.DetectHandsAsync(frame.Image).Result;
+                _lastHandPoseResult = handResult;
+
+                result.HandPoseResult = handResult;
+
+                if (handResult.Hands.Count > 0)
+                {
+                    OnHandPoseDetected(handResult, timestamp);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"手部姿态估计失败: {ex.Message}");
+            }
+        }
+    }
+
     public void StartWorkflow(SOPWorkflow workflow)
     {
         if (_stateMachine == null)
@@ -562,54 +892,49 @@ public class SOPModule : IDetectionModule
         var previousWorkflow = _currentWorkflow;
         _currentWorkflow = workflow;
 
-        // ⭐ 注入区域定义（已有）
+        // 注入区域域定义（已有）
         if (workflow.Regions != null && workflow.Regions.Count > 0)
         {
             _stateMachine.UpdateZones(workflow.Regions);
-            Console.WriteLine($"[SOP] 已加载 {workflow.Regions.Count} 个区域定义");
+            Log($"已加载载 {workflow.Regions.Count} 个区域域定义");
         }
         else
         {
-            Console.WriteLine("[SOP] 警告: 工作流中没有区域定义，object_in_zone 条件将无法工作");
+            Log("警告: 工作作流中没有区域域定义，object_in_zone 条件将无法工作作");
         }
 
-        // ⭐ 检查并切换 YOLO 模型
+        // 检测查并切换 YOLO 模式型
         if (workflow.Model != null && !string.IsNullOrWhiteSpace(workflow.Model.Path))
         {
             var modelPath = workflow.Model.Path;
 
-            // 支持相对路径：相对于项目根目录下 yolo_models/ 目录
-            if (!Path.IsPathRooted(modelPath))
+            // Resolve relative paths by searching common locations
+            var resolvedPath = ResolveModelPath(modelPath);
+            if (resolvedPath == null)
             {
-                var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                var projectRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
-                var candidate1 = Path.Combine(projectRoot, "yolo_models", modelPath);
-                var candidate2 = Path.Combine(projectRoot, modelPath);
-
-                if (File.Exists(candidate1))
-                    modelPath = candidate1;
-                else if (File.Exists(modelPath))
-                { /* 相对路径指的就是当前模型路径，保持不变 */ }
-                else if (File.Exists(candidate2))
-                    modelPath = candidate2;
-            }
-
-            if (modelPath != _lastLoadedModelPath)
-            {
-                Console.WriteLine($"[SOP] 切换模型: {_lastLoadedModelPath} → {modelPath}");
-                Console.WriteLine($"[SOP] 模型配置: confidence={workflow.Model.Confidence}, iou={workflow.Model.Iou}, gpu={workflow.Model.UseGpu}");
-
-                // 同步更新运行时置信度/IoU（本地生效，非配置文件）
-                _config.ConfidenceThreshold = workflow.Model.Confidence;
-                _config.IouThreshold = workflow.Model.Iou;
-
-                // 后台加载新模型（不影响当前帧处理）
-                _ = Task.Run(() => LoadYoloAsync(modelPath, workflow.Model.UseGpu, workflow.Model.GpuId.ToString()));
-                Console.WriteLine($"[SOP] 模型正在后台加载... 当前帧仍使用前一个模型");
+                Log($"警告: 工作作流模式型文件不存在: {modelPath}，跳过加载载");
             }
             else
             {
-                Console.WriteLine($"[SOP] 模型未变化，跳过: {Path.GetFileName(modelPath)}");
+                modelPath = resolvedPath;
+
+                if (modelPath != _lastLoadedModelPath)
+                {
+                    Log($"切换模式型: {_lastLoadedModelPath} → {modelPath}");
+                    Log($"模式型配置: confidence={workflow.Model.Confidence}, iou={workflow.Model.Iou}, gpu={workflow.Model.UseGpu}");
+
+                    // 同步更新运行时置信度/IoU（本地生效，非配置文件）
+                    _config.ConfidenceThreshold = workflow.Model.Confidence;
+                    _config.IouThreshold = workflow.Model.Iou;
+
+                    // 后台加载载新模式型（不影响当前帧处理理）
+                    _ = Task.Run(() => LoadYoloAsync(modelPath, workflow.Model.UseGpu, workflow.Model.GpuId.ToString()));
+                    Log("模式型正在后台加载载... 当前帧仍使用前一个模式型");
+                }
+                else
+                {
+                    Log($"模式型未变化，跳过: {Path.GetFileName(modelPath)}");
+                }
             }
         }
 
@@ -641,7 +966,7 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 从YAML文件加载并启动工作流
+    /// 从YAML文件加载载并启动工作作流
     /// </summary>
     public void StartWorkflowFromYaml(string yamlPath)
     {
@@ -650,15 +975,14 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 添加姿态检测区域
-    /// </summary>
+    /// 添加载姿态检测测区域?    /// </summary>
     public void AddPoseRegion(string regionId, SKRect region)
     {
         _poseEvaluator?.AddRegion(regionId, region);
     }
 
     /// <summary>
-    /// 添加禁区
+    /// 添加载禁区域
     /// </summary>
     public void AddForbiddenZone(string zoneId, SKRect zone)
     {
@@ -667,8 +991,29 @@ public class SOPModule : IDetectionModule
 
     public void Dispose()
     {
-        _yolo?.Dispose();
-        _poseService = null;
+        try
+        {
+            // 先停止工作流
+            StopWorkflow();
+
+            // 安全释放手部姿态估计服务（防止 AccessViolation）
+            if (_handPoseService is IDisposable disposableHand)
+            {
+                try { disposableHand.Dispose(); } catch { }
+                _handPoseService = null;
+            }
+
+            // 释放 YOLO
+            _yolo?.Dispose();
+            _yolo = null;
+
+            // 释放姿态服务
+            _poseService = null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SOP] Dispose 异常: {ex.Message}");
+        }
     }
 
     public Task ShutdownAsync()
@@ -678,11 +1023,90 @@ public class SOPModule : IDetectionModule
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 更新检测模式
+    /// </summary>
+    public void UpdateDetectionMode(SOPDetectionMode mode, bool enableHandPose)
+    {
+        lock (_lockObject)
+        {
+            var previousMode = _detectionMode;
+            _detectionMode = mode;
+
+            Console.WriteLine($"[SOP] 检测模式变更: {previousMode} -> {mode}");
+
+            // 统一检测模式下，如果启用手部检测，异步初始化手部姿态估计服务
+            if (enableHandPose)
+            {
+                if (_handPoseService == null || !_handPoseService.IsInitialized)
+                {
+                    // 异步初始化，不阻塞当前线程
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await InitializeHandPoseEstimationAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[SOP] 手部姿态估计初始化失败: {ex.Message}");
+                        }
+                    });
+                }
+            }
+
+            OnDetectionModeChanged();
+        }
+    }
+
+    /// <summary>
+    /// 确保手部姿态估计服务已准备好（用于启动前检查）
+    /// </summary>
+    public async Task EnsureHandPoseServiceReadyAsync()
+    {
+        // 统一检测模式下，如果手部姿态估计服务未初始化，等待初始化完成
+        if (_handPoseService == null || !_handPoseService.IsInitialized)
+        {
+            Console.WriteLine($"[SOP] 等待手部姿态估计服务初始化...");
+            await InitializeHandPoseEstimationAsync();
+            Console.WriteLine($"[SOP] 手部姿态估计服务准备完成, IsInitialized={_handPoseService?.IsInitialized}");
+        }
+    }
+
+    /// <summary>
+    /// 更新手部姿态估计配置
+    /// </summary>
+    public void UpdateHandPoseConfig(HandPoseEstimationConfig config)
+    {
+        lock (_lockObject)
+        {
+            _config.HandPoseEstimation = config;
+            Console.WriteLine($"[SOP] 手部姿态估计配置更新: MaxNumHands={config.MaxNumHands}, UseGpu={config.UseGpu}");
+
+            // 如果服务已初始化，异步重新初始化（不阻塞）
+            if (_handPoseService != null)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _handPoseService.ShutdownAsync();
+                        await InitializeHandPoseEstimationAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[SOP] 手部姿态估计重新初始化失败: {ex.Message}");
+                    }
+                });
+            }
+        }
+    }
+
     public VisualOverlay GetVisualOverlay()
     {
         var overlay = new VisualOverlay();
 
-        // 添加当前步骤信息
+        // 添加载当前步骤信息
         if (_stateMachine != null)
         {
             var currentStep = _stateMachine.CurrentWorkflow?.Steps
@@ -705,7 +1129,7 @@ public class SOPModule : IDetectionModule
 }
 
 /// <summary>
-/// SOP模块配置
+/// SOP模式块配置
 /// </summary>
 public class SOPModuleConfig
 {
@@ -716,13 +1140,12 @@ public class SOPModuleConfig
     public PoseEstimationConfig? PoseEstimation { get; set; }
     
     /// <summary>
-    /// 手部姿态估计配置
-    /// </summary>
+    /// 手部姿态估计计配?    /// </summary>
     public HandPoseEstimationConfig? HandPoseEstimation { get; set; }
 }
 
 /// <summary>
-/// SOP模块结果
+/// SOP模式块结果果
 /// </summary>
 public class SOPModuleResult : ModuleResult
 {
@@ -733,29 +1156,31 @@ public class SOPModuleResult : ModuleResult
     public bool IsPass { get; set; }
 
     /// <summary>
-    /// 检测结果（物体检测模式）
+    /// 检测测结果果（物体检测测模式式）
     /// </summary>
     public List<ObjectDetection> Detections { get; set; } = new();
 
     /// <summary>
-    /// 检测到的人体姿态数量（姿态模式）
+    /// 检测测到的人体姿态数量（姿态模式式）
     /// </summary>
     public int PoseCount { get; set; }
 
     /// <summary>
-    /// 步骤结果信息（用于UI显示）
-    /// </summary>
+    /// 手部姿态检测测结果?    /// </summary>
+    public HandPoseEstimationResult? HandPoseResult { get; set; }
+
+    /// <summary>
+    /// 步骤结果果信息（用于UI显示?    /// </summary>
     public StepResults StepResults { get; set; } = new();
 }
 
 /// <summary>
-/// 步骤结果显示信息
+/// 步骤结果果显示信息
 /// </summary>
 public class StepResults
 {
     /// <summary>
-    /// 状态消息
-    /// </summary>
+    /// 状态态消?    /// </summary>
     public string Message { get; set; } = "";
 
     /// <summary>
@@ -770,8 +1195,7 @@ public class StepResults
 }
 
 /// <summary>
-/// 检测模式变更事件参数
-/// </summary>
+/// 检测测模式式变更事件参?/// </summary>
 public class DetectionModeChangedEventArgs : EventArgs
 {
     public SOPDetectionMode NewMode { get; }
@@ -783,8 +1207,7 @@ public class DetectionModeChangedEventArgs : EventArgs
 }
 
 /// <summary>
-/// 姿态检测事件参数
-/// </summary>
+/// 姿态检测测事件参?/// </summary>
 public class PoseDetectedEventArgs : EventArgs
 {
     public List<HumanPose> Poses { get; }

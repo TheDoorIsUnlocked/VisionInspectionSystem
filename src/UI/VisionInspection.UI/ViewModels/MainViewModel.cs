@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Win32;
 using SkiaSharp;
 using System.IO;
+using System.Threading.Channels;
 using System.Windows;
 using VisionInspection.Core.Interfaces;
 using VisionInspection.Core.Models;
@@ -25,6 +26,32 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private SOPModule? _sopModule;
     private ModelInfo? _loadedModel;
     private bool _isDisposed = false;
+
+    /// <summary>
+    /// 保存的SOP检测模式配置（从SOP配置界面获取）
+    /// </summary>
+    private (string DetectionMode, bool EnableHandPose, int MaxNumHands)? _savedSOPDetectionConfig;
+
+    private static readonly object _logLock = new();
+    private const string _debugLogPath = "sop_frame_debug.log";
+
+    private void DebugLog(string message)
+    {
+        var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var logLine = $"[{timestamp}] {message}";
+
+        Console.WriteLine(logLine);
+        System.Diagnostics.Debug.WriteLine(logLine);
+
+        lock (_logLock)
+        {
+            try
+            {
+                File.AppendAllText(_debugLogPath, logLine + Environment.NewLine);
+            }
+            catch { }
+        }
+    }
 
     public bool IsCameraConnected => _cameraManager.IsConnected;
 
@@ -111,6 +138,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private bool _isProcessingFrame = false;
     private readonly SemaphoreSlim _inferenceLock = new(1, 1);
 
+    // 缓存最后一次手部骨架结果，在原始帧上绘制，消除"原始帧→骨架帧"交替闪烁
+    private HandPoseEstimationResult? _lastHandPoseResult;
+    // 连续无手部检测帧计数器，用于清除残留骨架
+    private int _noHandsFrameCount = 0;
+    private const int MaxNoHandsFrames = 8;
+    
+    // 修复：添加异步推理队列 - 改为可重新创建
+    private Channel<SKBitmap> _inferenceQueue;
+    private CancellationTokenSource? _inferenceCts;
+    private Task? _inferenceWorkerTask;
+    
+    /// <summary>
+    /// 创建新的推理队列
+    /// </summary>
+    private void CreateInferenceQueue()
+    {
+        _inferenceQueue = Channel.CreateBounded<SKBitmap>(new BoundedChannelOptions(2)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest
+        });
+    }
+
     public MainViewModel()
     {
         _roiManager = new ROIManager();
@@ -128,9 +177,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
     
     /// <summary>
-    /// 相机图像采集回调
+    /// 相机图像采集回调 - 修复：使用异步队列避免阻塞UI线程
     /// </summary>
-    private async void OnCameraImageGrabbed(object? sender, CameraImageData e)
+    private void OnCameraImageGrabbed(object? sender, CameraImageData e)
     {
         // 检查应用程序是否仍在运行
         if (System.Windows.Application.Current == null || _isDisposed)
@@ -140,6 +189,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var skBitmap = ConvertCameraImageToSKBitmap(e);
         if (skBitmap != null)
         {
+            // 先克隆用于推理（在绘制骨架前复制，确保推理用原始图像）
+            SKBitmap? inferenceBitmap = null;
+            if (IsSOPDetecting && _sopModule != null)
+            {
+                inferenceBitmap = skBitmap.Copy();
+            }
+
+            // 在原始帧上绘制缓存的手部骨架，消除"原始帧→骨架帧"交替闪烁
+            var cachedResult = _lastHandPoseResult;
+            if (IsSOPDetecting && cachedResult != null && cachedResult.Hands.Count > 0)
+            {
+                using var canvas = new SKCanvas(skBitmap);
+                DrawHandPoses(canvas, cachedResult);
+            }
+
             // 在UI线程更新图像
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
@@ -149,15 +213,101 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 }
             });
 
-            // ⭐ 优先走 SOP 实时检测
-            if (IsSOPDetecting && _sopModule != null && !_isSOPProcessingFrame)
+            // 将推理图像放入队列
+            if (inferenceBitmap != null)
             {
-                await PerformSOPDetectionAsync(skBitmap);
+                if (!_inferenceQueue.Writer.TryWrite(inferenceBitmap))
+                {
+                    inferenceBitmap.Dispose(); // 队列满了，丢弃旧帧
+                }
             }
-            // 否则走通用实时检测
             else if (IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
             {
-                await PerformRealTimeDetectionAsync(skBitmap);
+                _ = PerformRealTimeDetectionAsync(skBitmap);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// 启动推理工作线程
+    /// </summary>
+    private void StartInferenceWorker()
+    {
+        // 修复：创建新的队列
+        CreateInferenceQueue();
+        
+        _inferenceCts = new CancellationTokenSource();
+        _inferenceWorkerTask = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var bitmap in _inferenceQueue.Reader.ReadAllAsync(_inferenceCts.Token))
+                {
+                    try
+                    {
+                        await PerformSOPDetectionAsync(bitmap);
+                    }
+                    finally
+                    {
+                        bitmap.Dispose(); // 确保释放克隆的图像
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // 正常取消（包括TaskCanceledException），不输出异常
+                System.Diagnostics.Debug.WriteLine("[InferenceWorker] 工作线程正常取消");
+            }
+            catch (ChannelClosedException)
+            {
+                // Channel关闭，不输出异常
+                System.Diagnostics.Debug.WriteLine("[InferenceWorker] Channel已关闭");
+            }
+            catch (Exception ex)
+            {
+                // 其他异常记录
+                System.Diagnostics.Debug.WriteLine($"[InferenceWorker] 异常: {ex.GetType().Name}: {ex.Message}");
+            }
+        }, _inferenceCts.Token);
+    }
+    
+    /// <summary>
+    /// 停止推理工作线程
+    /// </summary>
+    private async Task StopInferenceWorkerAsync()
+    {
+        try
+        {
+            _inferenceCts?.Cancel();
+            _inferenceQueue?.Writer.TryComplete();
+        }
+        catch (Exception)
+        {
+            // 忽略关闭时的异常
+        }
+        
+        if (_inferenceWorkerTask != null)
+        {
+            try
+            {
+                await _inferenceWorkerTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // 正常取消（包括TaskCanceledException），不输出异常
+            }
+            catch (ChannelClosedException)
+            {
+                // Channel已关闭，忽略
+            }
+            catch (Exception ex)
+            {
+                // 其他异常记录但不抛出
+                System.Diagnostics.Debug.WriteLine($"[StopInference] 异常: {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                _inferenceWorkerTask = null;
             }
         }
     }
@@ -338,13 +488,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         // 使用信号量防止并发
         if (!await _sopInferenceLock.WaitAsync(0))
+        {
             return;
+        }
 
         try
         {
             _isSOPProcessingFrame = true;
 
-            if (_sopModule == null) return;
+            if (_sopModule == null)
+            {
+                return;
+            }
 
             // 构建帧数据
             var frames = new Dictionary<string, CaptureFrame>
@@ -367,6 +522,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                 {
                     if (_isDisposed) return;
+
+                    // 缓存手部骨架结果，无手部检测时逐渐清除缓存避免残留
+                    if (sopResult.HandPoseResult != null && sopResult.HandPoseResult.Hands.Count > 0)
+                    {
+                        _lastHandPoseResult = sopResult.HandPoseResult;
+                        _noHandsFrameCount = 0;
+                    }
+                    else
+                    {
+                        _noHandsFrameCount++;
+                        if (_noHandsFrameCount >= MaxNoHandsFrames)
+                        {
+                            _lastHandPoseResult = null;
+                        }
+                    }
 
                     // 更新状态栏
                     SopStatus = sopResult.StepResults.Message;
@@ -398,6 +568,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     {
                         RoiEditorViewModel.CurrentImage = resultBitmap;
                     }
+                    
+                    // 释放原始bitmap
+                    bitmap.Dispose();
 
                     // 计算推理 FPS
                     _inferenceFrameCount++;
@@ -416,6 +589,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 });
             }
         }
+        catch (OperationCanceledException)
+        {
+            // 正常取消（包括TaskCanceledException），不输出错误
+            DebugLog($"[SOPDetection] 检测被取消");
+        }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"SOP实时检测异常: {ex.Message}");
@@ -430,10 +608,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 绘制 SOP 检测结果（检测框 + 步骤状态 + 违规警告）
     /// </summary>
-    private SKBitmap? DrawSOPDetectionResults(SKBitmap sourceBitmap, SOPModuleResult sopResult)
+    private SKBitmap DrawSOPDetectionResults(SKBitmap sourceBitmap, SOPModuleResult sopResult)
     {
         try
         {
+            // 修复：创建新的bitmap并绘制，避免canvas释放问题
             var resultBitmap = sourceBitmap.Copy();
             using var canvas = new SKCanvas(resultBitmap);
 
@@ -478,36 +657,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 canvas.DrawText(labelText, box.Left + 4, box.Top - 4, textPaint);
             }
 
-            // 2. 顶部状态栏（半透明黑底）
-            using var headerBg = new SKPaint { Color = new SKColor(0, 0, 0, 180), Style = SKPaintStyle.Fill };
-            canvas.DrawRect(0, 0, resultBitmap.Width, 50, headerBg);
-
-            using var headerText = new SKPaint
+            // 2. 绘制手部关键点（如果启用了手部检测）
+            if (sopResult.HandPoseResult?.Hands.Count > 0)
             {
-                Color = SKColors.White,
-                TextSize = 22,
-                IsAntialias = true,
-                FakeBoldText = true
-            };
+                System.Diagnostics.Debug.WriteLine($"[DrawSOP] 开始绘制 {sopResult.HandPoseResult.Hands.Count} 只手");
+                try
+                {
+                    DrawHandPoses(canvas, sopResult.HandPoseResult);
+                    System.Diagnostics.Debug.WriteLine($"[DrawSOP] 手部绘制完成");
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[DrawSOP] 手部绘制异常: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"[DrawSOP] 堆栈: {ex.StackTrace}");
+                }
+            }
 
-            var stepName = sopResult.StepResults.Message ?? "等待";
-            var stepInfo = $"SOP 步骤 {sopResult.StepResults.CurrentStep}/{sopResult.StepResults.TotalSteps}: {stepName}";
-            canvas.DrawText(stepInfo, 15, 35, headerText);
-
-            // 右上角显示 PASS/NG
-            var passText = sopResult.IsPass ? "PASS" : "NG";
-            var passColor = sopResult.IsPass ? SKColors.LimeGreen : SKColors.Red;
-            using var passPaint = new SKPaint
-            {
-                Color = passColor,
-                TextSize = 28,
-                IsAntialias = true,
-                FakeBoldText = true
-            };
-            var passWidth = passPaint.MeasureText(passText);
-            canvas.DrawText(passText, resultBitmap.Width - passWidth - 15, 38, passPaint);
-
-            // 3. 违规警告（如果有）
+            // 4. 违规警告（如果有）
             if (sopResult.Violations.Count > 0)
             {
                 var lastViolation = sopResult.Violations.Last();
@@ -529,7 +695,140 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"绘制SOP结果异常: {ex.Message}");
-            return null;
+            return sourceBitmap;
+        }
+    }
+
+    /// <summary>
+    /// 绘制手部姿态（骨架线+关键点）
+    /// </summary>
+    private void DrawHandPoses(SKCanvas canvas, HandPoseEstimationResult handResult)
+    {
+        // 获取画布大小
+        var canvasSize = canvas.LocalClipBounds;
+
+        // 保存画布状态
+        canvas.Save();
+
+        // 注意：DWPose输出的坐标与SkiaSharp坐标系一致（原点在左上角）
+        // 不需要翻转Y轴
+
+        // 骨架线画笔（绿色，更粗更明显）
+        using var skeletonPaint = new SKPaint
+        {
+            Color = SKColors.LimeGreen,
+            StrokeWidth = 5,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+
+        // 关键点画笔（红色，更大更明显）
+        using var keypointPaint = new SKPaint
+        {
+            Color = SKColors.Red,
+            StrokeWidth = 3,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        // 关键点外圈（白色描边，增加对比度）
+        using var keypointOutlinePaint = new SKPaint
+        {
+            Color = SKColors.White,
+            StrokeWidth = 2,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+
+        // 关键点标签画笔
+        using var labelPaint = new SKPaint
+        {
+            Color = SKColors.Yellow,
+            TextSize = 14,
+            IsAntialias = true,
+            FakeBoldText = true
+        };
+
+        // 手部边界框画笔（青色）
+        using var handBoxPaint = new SKPaint
+        {
+            Color = SKColors.Cyan,
+            StrokeWidth = 4,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+
+        foreach (var hand in handResult.Hands)
+        {
+            // 绘制手部边界框
+            var bbox = hand.BoundingBox;
+            canvas.DrawRect(bbox, handBoxPaint);
+
+            // 绘制骨架线
+            DrawHandSkeleton(canvas, hand, skeletonPaint);
+
+            // 绘制关键点（只显示指尖，减少视觉干扰）
+            foreach (var kp in hand.Keypoints)
+            {
+                // 只绘制指尖关键点，减少视觉干扰和闪烁
+                bool isFingertip = kp.Type == HandKeypointType.ThumbTip ||
+                                   kp.Type == HandKeypointType.IndexFingerTip ||
+                                   kp.Type == HandKeypointType.MiddleFingerTip ||
+                                   kp.Type == HandKeypointType.RingFingerTip ||
+                                   kp.Type == HandKeypointType.PinkyTip;
+
+                // 使用置信度阈值判断，比 IsValid 更稳定，减少闪烁
+                // 只绘制指尖关键点
+                if (isFingertip && kp.Confidence >= SkeletonConfidenceThreshold)
+                {
+                    // 绘制关键点外圈（白色描边）
+                    canvas.DrawCircle(kp.X, kp.Y, 10, keypointOutlinePaint);
+                    // 绘制关键点（红色填充）
+                    canvas.DrawCircle(kp.X, kp.Y, 7, keypointPaint);
+
+                    // 绘制关键点标签（只显示指尖）
+                    canvas.DrawText(kp.Type.ToString(), kp.X + 12, kp.Y, labelPaint);
+                }
+            }
+        }
+
+        // 恢复画布状态
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// 绘制手部骨架线
+    /// </summary>
+    // 骨架绘制置信度阈值（低于此值的关键点不绘制，减少闪烁）
+    // 降低阈值以减少闪烁，配合时序平滑使用
+    public float SkeletonConfidenceThreshold { get; set; } = 0.1f;
+    
+    private void DrawHandSkeleton(SKCanvas canvas, HandPose hand, SKPaint paint)
+    {
+        // 极简骨架：只绘制手腕到各指尖的连线
+        // 避免复杂的多边形连接，减少视觉混乱和闪烁感
+        
+        var wrist = hand.GetKeypoint(HandKeypointType.Wrist);
+        if (wrist == null || wrist.Confidence < SkeletonConfidenceThreshold) return;
+        
+        // 定义指尖类型
+        var fingerTips = new[]
+        {
+            HandKeypointType.ThumbTip,
+            HandKeypointType.IndexFingerTip,
+            HandKeypointType.MiddleFingerTip,
+            HandKeypointType.RingFingerTip,
+            HandKeypointType.PinkyTip
+        };
+        
+        // 绘制手腕到每个指尖的线
+        foreach (var tipType in fingerTips)
+        {
+            var tip = hand.GetKeypoint(tipType);
+            if (tip != null && tip.Confidence >= SkeletonConfidenceThreshold)
+            {
+                canvas.DrawLine(wrist.X, wrist.Y, tip.X, tip.Y, paint);
+            }
         }
     }
 
@@ -640,11 +939,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _lastDetectionError = e;
     }
 
+    /// <summary>
+    /// 保存SOP检测模式配置（由SOP配置界面调用）
+    /// </summary>
+    public void SaveSOPDetectionConfig(string detectionMode, bool enableHandPose, int maxNumHands = 2)
+    {
+        _savedSOPDetectionConfig = (detectionMode, enableHandPose, maxNumHands);
+        Console.WriteLine($"[MainViewModel] SOP检测配置已保存: 模式={detectionMode}, 手部检测={enableHandPose}");
+    }
+
     [RelayCommand]
     public async Task InitializeSOPModuleAsync()
     {
+        var logFile = "sop_init_debug.log";
         try
         {
+            File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] 开始初始化SOP模块...\n");
+            
             IsBusy = true;
             Status = "初始化SOP模块...";
 
@@ -652,6 +963,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             string configPath = "configs/sop_config.json";
             if (!File.Exists(configPath))
             {
+                File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] 配置文件不存在，使用默认配置\n");
+                
                 // 尝试使用备选配置（内存配置）
                 Status = "使用默认配置初始化SOP模块...";
                 var defaultConfig = new ConfigurationBuilder()
@@ -662,18 +975,33 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         ["SOPModule:ConfidenceThreshold"] = "0.6",
                         ["SOPModule:IouThreshold"] = "0.45",
                         ["SOPModule:PoseEstimation:Enabled"] = "true",
-                        ["SOPModule:PoseEstimation:ModelPath"] = "yolo_models/yolov8s-pose.onnx"
+                        ["SOPModule:PoseEstimation:ModelPath"] = "yolo_models/yolov8s-pose.onnx",
+                        ["SOPModule:HandPoseEstimation:ModelPath"] = "models",
+                        ["SOPModule:HandPoseEstimation:ConfidenceThreshold"] = "0.5",
+                        ["SOPModule:HandPoseEstimation:MaxNumHands"] = "2",
+                        ["SOPModule:HandPoseEstimation:UseGpu"] = "true"
                     })
                     .Build();
 
+                File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] 创建SOPModule实例...\n");
                 _sopModule = new SOPModule();
+                
+                File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] 调用InitializeAsync...\n");
                 await _sopModule.InitializeAsync(defaultConfig, _cameraManager.CurrentCameraService!);
+                File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] InitializeAsync完成，State={_sopModule.State}\n");
             }
             else
             {
-                // 使用配置文件
+                // 使用配置文件，但添加手部检测配置
                 var config = new ConfigurationBuilder()
                     .AddJsonFile(configPath, optional: true)
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["SOPModule:HandPoseEstimation:ModelPath"] = "models",
+                        ["SOPModule:HandPoseEstimation:ConfidenceThreshold"] = "0.5",
+                        ["SOPModule:HandPoseEstimation:MaxNumHands"] = "2",
+                        ["SOPModule:HandPoseEstimation:UseGpu"] = "true"
+                    })
                     .Build();
 
                 _sopModule = new SOPModule();
@@ -701,8 +1029,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
+            var fullError = $"SOP模块初始化失败: {ex.Message}\n\n堆栈跟踪:\n{ex.StackTrace}";
+            if (ex.InnerException != null)
+            {
+                fullError += $"\n\n内部异常: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
+            }
+            Console.WriteLine($"[ERROR] {fullError}");
             SopStatus = $"SOP模块初始化失败: {ex.Message}";
             Status = $"错误: {ex.Message}";
+            MessageBox.Show(fullError, "SOP初始化错误", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -791,38 +1126,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            // 2. 选择 YAML 工作流文件
-            if (string.IsNullOrEmpty(SopWorkflowPath))
-            {
-                var openFileDialog = new OpenFileDialog
-                {
-                    Title = "选择 SOP 工作流配置文件",
-                    Filter = "YAML文件|*.yaml;*.yml|JSON文件|*.json|所有文件|*.*",
-                    InitialDirectory = System.IO.Path.Combine(
-                        AppDomain.CurrentDomain.BaseDirectory, "configs", "sop")
-                };
-
-                if (openFileDialog.ShowDialog() != true)
-                {
-                    Status = "取消选择 SOP 配置";
-                    return;
-                }
-                SopWorkflowPath = openFileDialog.FileName;
-            }
-
             Status = "正在初始化 SOP 模块...";
 
-            // 3. 初始化 SOP 模块（如果还没初始化）
+            // 2. 初始化 SOP 模块（如果还没初始化）
             if (_sopModule == null)
             {
                 var config = new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        // 模型路径由 YAML 工作流指定，这里给个 fallback
                         ["SOPModule:ModelPath"] = "yolo_models/yolov8s.onnx",
                         ["SOPModule:UseGpu"] = "true",
                         ["SOPModule:ConfidenceThreshold"] = "0.6",
-                        ["SOPModule:IouThreshold"] = "0.45"
+                        ["SOPModule:IouThreshold"] = "0.45",
+                        ["SOPModule:PoseEstimation:Enabled"] = "true",
+                        ["SOPModule:HandPoseEstimation:ModelPath"] = "models",
+                        ["SOPModule:HandPoseEstimation:ConfidenceThreshold"] = "0.5",
+                        ["SOPModule:HandPoseEstimation:MaxNumHands"] = "2",
+                        ["SOPModule:HandPoseEstimation:UseGpu"] = "true"
                     })
                     .Build();
 
@@ -833,20 +1153,66 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 _sopModule.StepChanged += OnSOPStepChanged;
                 _sopModule.ViolationDetected += OnSOPViolationDetected;
                 _sopModule.WorkflowCompleted += OnSOPWorkflowCompleted;
+
+                Console.WriteLine($"[MainViewModel] SOP模块创建完成，当前模式: {_sopModule.DetectionMode}");
+                Console.WriteLine($"[MainViewModel] 保存的配置: {(_savedSOPDetectionConfig.HasValue ? "存在" : "不存在")}");
+
+                // 应用保存的检测模式配置（如果存在）
+                if (_savedSOPDetectionConfig.HasValue)
+                {
+                    var savedConfig = _savedSOPDetectionConfig.Value;
+                    Console.WriteLine($"[MainViewModel] 应用保存配置: 模式={savedConfig.DetectionMode}, 手部检测={savedConfig.EnableHandPose}");
+
+                    // 统一检测模式：所有配置都映射到 UnifiedDetection
+                    var mode = SOPDetectionMode.UnifiedDetection;
+                    _sopModule.UpdateDetectionMode(mode, savedConfig.EnableHandPose);
+                    Console.WriteLine($"[MainViewModel] UpdateDetectionMode后，模式: {_sopModule.DetectionMode}");
+
+                    if (savedConfig.EnableHandPose)
+                    {
+                        _sopModule.UpdateHandPoseConfig(new HandPoseEstimationConfig
+                        {
+                            MaxNumHands = savedConfig.MaxNumHands,
+                            ConfidenceThreshold = 0.5f,
+                            UseGpu = true
+                        });
+                    }
+                }
             }
 
-            // 4. 加载 YAML 工作流
-            Status = $"正在加载工作流: {System.IO.Path.GetFileName(SopWorkflowPath)}...";
-            _sopModule.StartWorkflowFromYaml(SopWorkflowPath);
+            // 3. 确保手部姿态估计服务已准备好（等待异步初始化完成）
+            Console.WriteLine($"[MainViewModel] 确保手部服务准备就绪...");
+            await _sopModule.EnsureHandPoseServiceReadyAsync();
+            Console.WriteLine($"[MainViewModel] 手部服务已就绪, 模式: {_sopModule.DetectionMode}");
+
+            // 4. 创建默认工作流（不依赖YAML文件）
+            Status = "正在启动检测...";
+            DebugLog($"[StartSOP] 正在创建默认工作流...");
+            var workflow = new SOPWorkflow
+            {
+                Id = "default",
+                Name = "实时检测",
+                Description = "基于配置的实时检测工作流",
+                Steps = new List<SOPStep>(),
+                Regions = new List<ZoneDefinition>()
+            };
+            _sopModule.StartWorkflow(workflow);
+            DebugLog($"[StartSOP] StartWorkflow 完成");
 
             // 5. 启动实时检测
             IsSOPDetecting = true;
+            DebugLog($"[StartSOP] IsSOPDetecting 设置为: {IsSOPDetecting}");
             IsRealTimeDetecting = false; // 关闭通用检测，避免冲突
             _inferenceFrameCount = 0;
             _lastInferenceTime = DateTime.Now;
+            
+            // 修复：启动推理工作线程
+            StartInferenceWorker();
+            DebugLog($"[StartSOP] 推理工作线程已启动");
 
             SopStatus = "SOP 实时检测运行中";
-            Status = $"SOP 实时检测已启动 | 工作流: {System.IO.Path.GetFileName(SopWorkflowPath)}";
+            Status = $"SOP 实时检测已启动 | 模式: {_sopModule.DetectionMode}";
+            DebugLog($"[StartSOP] SOP启动完成，等待相机帧...");
         }
         catch (Exception ex)
         {
@@ -861,12 +1227,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 停止 SOP 实时检测
+    /// 停止 SOP 实时检测 - 修复：停止推理工作线程
     /// </summary>
     [RelayCommand]
-    public void StopSOPDetection()
+    public async Task StopSOPDetectionAsync()
     {
         IsSOPDetecting = false;
+        
+        // 修复：停止推理工作线程
+        await StopInferenceWorkerAsync();
+        DebugLog($"[StopSOP] 推理工作线程已停止");
+        
         _sopModule?.StopWorkflow();
         InferenceFps = 0;
         SopStatus = "SOP 检测已停止";
@@ -892,7 +1263,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         // 先停止当前检测
         var wasDetecting = IsSOPDetecting;
-        if (wasDetecting) StopSOPDetection();
+        if (wasDetecting) await StopSOPDetectionAsync();
 
         // 清空路径，让 StartSOPDetectionAsync 重新弹文件选择
         SopWorkflowPath = "";
@@ -1592,6 +1963,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 _sopModule.WorkflowCompleted -= OnSOPWorkflowCompleted;
                 _sopModule.Dispose();
                 _sopModule = null;
+            }
+
+            // 修复：停止推理工作线程
+            try
+            {
+                _inferenceCts?.Cancel();
+                _inferenceQueue?.Writer.TryComplete();
+            }
+            catch (Exception)
+            {
+                // Channel已经关闭或为空，忽略
             }
 
             // 释放图像资源

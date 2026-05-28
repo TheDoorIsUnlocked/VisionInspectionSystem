@@ -52,7 +52,7 @@ public class HandKeypoint
     public float Z { get; set; }  // MediaPipe提供3D坐标
     public float Confidence { get; set; }
 
-    public bool IsValid => Confidence >= 0.5f;
+    public bool IsValid => Confidence >= 0.05f;  // 降低阈值以适应DWPose的低置信度输出
 
     public HandKeypoint(HandKeypointType type, float x, float y, float z, float confidence)
     {
@@ -159,14 +159,62 @@ public class HandPoseEstimationResult
 public class HandPoseEstimationConfig
 {
     /// <summary>
-    /// 模型路径
+    /// 手掌检测模型路径（第一阶段）
     /// </summary>
-    public string ModelPath { get; set; } = "";
+    public string PalmModelPath { get; set; } = "";
+
+    /// <summary>
+    /// 关键点检测模型路径（第二阶段）
+    /// </summary>
+    public string LandmarkModelPath { get; set; } = "";
+
+    /// <summary>
+    /// 原始模型路径（目录或文件）
+    /// </summary>
+    public string RawModelPath { get; set; } = "";
+
+    /// <summary>
+    /// 模型路径（兼容旧版本，实际使用时会被拆解为Palm和Landmark路径）
+    /// 支持两种格式：
+    /// 1. 目录路径 - 自动在目录下查找 palm_detection 和 hand_landmark 模型
+    /// 2. 文件路径 - 作为 PalmModelPath，并在同目录查找 Landmark 模型
+    /// </summary>
+    public string ModelPath
+    {
+        get => RawModelPath;  // 返回原始路径，而不是 PalmModelPath
+        set
+        {
+            RawModelPath = value;
+
+            if (string.IsNullOrEmpty(value)) return;
+
+            // 情况1：如果是目录
+            if (Directory.Exists(value))
+            {
+                PalmModelPath = Path.Combine(value, "palm_detection_full_Nx3x192x192_post.onnx");
+                LandmarkModelPath = Path.Combine(value, "hand_landmark_sparse_Nx3x224x224.onnx");
+            }
+            // 情况2：如果是文件
+            else if (File.Exists(value))
+            {
+                PalmModelPath = value;
+                var dir = Path.GetDirectoryName(value);
+                // 在同一目录查找 landmark 模型
+                var landmarkPath = Path.Combine(dir ?? "", "hand_landmark_sparse_Nx3x224x224.onnx");
+                LandmarkModelPath = File.Exists(landmarkPath) ? landmarkPath : "";
+            }
+            // 情况3：直接赋值（可能是不存在的路径）
+            else
+            {
+                PalmModelPath = value;
+            }
+        }
+    }
 
     /// <summary>
     /// 置信度阈值
     /// </summary>
-    public float ConfidenceThreshold { get; set; } = 0.5f;
+    public float ConfidenceThreshold { get; set; } = 0.3f; // 降低阈值以减少闪烁
 
     /// <summary>
     /// 最大检测手数

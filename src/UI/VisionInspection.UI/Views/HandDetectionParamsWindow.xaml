@@ -1,0 +1,137 @@
+<Window x:Class="VisionInspection.UI.Views.HandDetectionParamsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="手部检测高级参数配置" Height="800" Width="550"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize">
+    <Grid Background="#F5F5F5">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 标题栏 -->
+        <Border Grid.Row="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="20,15">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="⚙️" FontSize="24" Margin="0,0,10,0"/>
+                <StackPanel>
+                    <TextBlock Text="手部检测高级参数" FontSize="18" FontWeight="Bold"/>
+                    <TextBlock Text="调整检测性能和稳定性参数" FontSize="12" Foreground="#999" Margin="0,5,0,0"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 参数配置区 -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="20">
+            <StackPanel>
+                <!-- 参数1：推理间隔 -->
+                <Border Background="White" CornerRadius="6" Padding="20" Margin="0,0,0,15">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="推理间隔（跳帧）" FontSize="14" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="1" x:Name="InferenceIntervalValue" Text="2" FontSize="14" FontWeight="Bold" Foreground="#1890FF"/>
+                        </Grid>
+                        <Slider x:Name="InferenceIntervalSlider" Minimum="1" Maximum="5" Value="2" 
+                                Margin="0,10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                ValueChanged="InferenceIntervalSlider_ValueChanged"/>
+                        <TextBlock Text="每N帧进行一次模型推理。值越大画面越流畅，但检测延迟增加。" 
+                                   FontSize="12" Foreground="#666" TextWrapping="Wrap"/>
+                        <TextBlock Text="推荐值：1-2（实时性要求高）| 3-5（性能优先）" 
+                                   FontSize="11" Foreground="#999" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 参数2：平滑窗口 -->
+                <Border Background="White" CornerRadius="6" Padding="20" Margin="0,0,0,15">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="平滑窗口大小" FontSize="14" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="1" x:Name="SmoothWindowValue" Text="5" FontSize="14" FontWeight="Bold" Foreground="#1890FF"/>
+                        </Grid>
+                        <Slider x:Name="SmoothWindowSlider" Minimum="3" Maximum="15" Value="5" 
+                                Margin="0,10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                ValueChanged="SmoothWindowSlider_ValueChanged"/>
+                        <TextBlock Text="用于时序平滑的历史帧数。值越大抖动越少，但响应变慢。" 
+                                   FontSize="12" Foreground="#666" TextWrapping="Wrap"/>
+                        <TextBlock Text="推荐值：3-5（响应优先）| 7-10（平滑优先）" 
+                                   FontSize="11" Foreground="#999" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 参数3：平滑系数 -->
+                <Border Background="White" CornerRadius="6" Padding="20" Margin="0,0,0,15">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="平滑系数（Alpha）" FontSize="14" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="1" x:Name="SmoothAlphaValue" Text="0.70" FontSize="14" FontWeight="Bold" Foreground="#1890FF"/>
+                        </Grid>
+                        <Slider x:Name="SmoothAlphaSlider" Minimum="0.3" Maximum="0.95" Value="0.7" 
+                                Margin="0,10" TickFrequency="0.05"
+                                ValueChanged="SmoothAlphaSlider_ValueChanged"/>
+                        <TextBlock Text="指数平滑系数，控制历史值与当前值的权重。值越小越平滑，值越大响应越快。" 
+                                   FontSize="12" Foreground="#666" TextWrapping="Wrap"/>
+                        <TextBlock Text="推荐值：0.5-0.6（强平滑）| 0.7-0.8（平衡）| 0.9+（快响应）" 
+                                   FontSize="11" Foreground="#999" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 参数4：骨架置信度阈值 -->
+                <Border Background="White" CornerRadius="6" Padding="20" Margin="0,0,0,15">
+                    <StackPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="骨架置信度阈值" FontSize="14" FontWeight="Bold"/>
+                            <TextBlock Grid.Column="1" x:Name="SkeletonThresholdValue" Text="0.30" FontSize="14" FontWeight="Bold" Foreground="#1890FF"/>
+                        </Grid>
+                        <Slider x:Name="SkeletonThresholdSlider" Minimum="0.1" Maximum="0.8" Value="0.3" 
+                                Margin="0,10" TickFrequency="0.05"
+                                ValueChanged="SkeletonThresholdSlider_ValueChanged"/>
+                        <TextBlock Text="绘制骨架和关键点的最小置信度。低于此值的关键点不显示，减少闪烁。" 
+                                   FontSize="12" Foreground="#666" TextWrapping="Wrap"/>
+                        <TextBlock Text="推荐值：0.2（完整显示）| 0.3（平衡）| 0.5+（稳定优先）" 
+                                   FontSize="11" Foreground="#999" Margin="0,5,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 快速预设按钮 -->
+                <Border Background="White" CornerRadius="6" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="快速预设" FontSize="14" FontWeight="Bold" Margin="0,0,0,10"/>
+                        <WrapPanel>
+                            <Button Content="🚀 实时优先" Margin="0,0,10,5" Padding="15,8" Click="PresetRealtime_Click" Height="40"/>
+                            <Button Content="⚖️ 平衡模式" Margin="0,0,10,5" Padding="15,8" Click="PresetBalanced_Click" Height="40"/>
+                            <Button Content="🎯 稳定优先" Margin="0,0,10,5" Padding="15,8" Click="PresetStable_Click" Height="40"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- 底部按钮 -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="10,15">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="❌ 取消" Margin="5,0" Padding="20,10" Click="CancelButton_Click" Height="40"/>
+                <Button Content="✓ 确定" Margin="5,0" Padding="20,10" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click" Height="40"/>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

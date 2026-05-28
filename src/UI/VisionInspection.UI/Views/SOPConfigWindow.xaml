@@ -11,6 +11,7 @@
     <Grid Background="#F5F5F5">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -37,8 +38,43 @@
             </Grid>
         </Border>
 
+        <!-- 全局配置栏 -->
+        <Border Grid.Row="1" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="15,10" Margin="15,15,15,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="200"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="100"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- 统一检测模式说明 -->
+                <TextBlock Grid.Column="0" Text="检测模式:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="Bold"/>
+                <TextBlock Grid.Column="1" Text="统一检测（物体检测 + 手部检测）" VerticalAlignment="Center" Foreground="#666"/>
+
+                <!-- 手部检测开关 -->
+                <CheckBox x:Name="EnableHandPoseCheckBox" Grid.Column="2" Content="启用手部检测" VerticalAlignment="Center" Margin="20,0,10,0" Checked="EnableHandPoseCheckBox_Checked" Unchecked="EnableHandPoseCheckBox_Unchecked" IsChecked="True"/>
+
+                <!-- 最大手数 -->
+                <TextBlock Grid.Column="3" Text="最大手数:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+                <ComboBox x:Name="MaxHandsComboBox" Grid.Column="4" Height="28" Padding="8,0" VerticalContentAlignment="Center" IsEnabled="False">
+                    <ComboBoxItem Content="1" IsSelected="True"/>
+                    <ComboBoxItem Content="2"/>
+                </ComboBox>
+
+                <!-- GPU加速 -->
+                <CheckBox x:Name="UseGpuCheckBox" Grid.Column="5" Content="GPU加速" VerticalAlignment="Center" Margin="20,0,0,0" IsChecked="True"/>
+                
+                <!-- 高级参数按钮 -->
+                <Button x:Name="AdvancedParamsButton" Grid.Column="6" Content="⚙️ 高级参数" HorizontalAlignment="Right" Padding="10,5" Click="AdvancedParamsButton_Click"/>
+            </Grid>
+        </Border>
+
         <!-- 主内容区 -->
-        <Grid Grid.Row="1" Margin="15">
+        <Grid Grid.Row="2" Margin="15">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="350"/>
@@ -140,7 +176,7 @@
         </Grid>
 
         <!-- 底部按钮 -->
-        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,12">
+        <Border Grid.Row="3" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,12">
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button x:Name="ClearAllButton" Content="🗑️ 清空全部" Margin="5,0" Padding="20,7" Click="ClearAllButton_Click"/>
                 <Button x:Name="CancelButton" Content="❌ 取消" Margin="5,0" Padding="20,7" Click="CancelButton_Click"/>
