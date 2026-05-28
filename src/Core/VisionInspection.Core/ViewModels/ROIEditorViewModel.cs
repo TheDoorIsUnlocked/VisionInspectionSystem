@@ -55,6 +55,9 @@ public partial class ROIEditorViewModel : ViewModelBase
     [ObservableProperty]
     private float _imageRotationAngle = 0f; // 图像旋转角度（度）
 
+    [ObservableProperty]
+    private bool _isImageFlippedHorizontally = false; // 图像是否水平翻转（左右对调）
+
     public IReadOnlyList<ROI> ROIs => _roiManager.ROIs;
 
     public ROIEditorViewModel(ROIManager roiManager)

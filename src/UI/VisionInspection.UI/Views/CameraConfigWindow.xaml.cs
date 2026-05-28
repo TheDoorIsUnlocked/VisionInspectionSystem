@@ -1,9 +1,11 @@
+using SkiaSharp;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -43,6 +45,11 @@ namespace VisionInspection.UI.Views
 
         #endregion
 
+        // 使用DispatcherTimer延迟更新预览，避免频繁刷新
+        private DispatcherTimer? _previewUpdateTimer;
+        private BitmapSource? _pendingFrame;
+        private readonly object _frameLock = new object();
+
         public CameraConfigWindow()
         {
             InitializeComponent();
@@ -61,11 +68,7 @@ namespace VisionInspection.UI.Views
                 _cameraManager.SetCameraService(new WebCameraService());
             }
             
-            // 订阅 CameraManager 的事件用于本地预览
-            _cameraManager.ImageGrabbed += CameraManager_ImageGrabbed;
-            _cameraManager.ConnectionStatusChanged += CameraManager_ConnectionStatusChanged;
-            _cameraManager.ErrorOccurred += CameraManager_ErrorOccurred;
-            
+            // 注意：事件订阅移到 IsVisibleChanged 中处理，避免隐藏时仍接收事件
             // 同步连接状态
             IsConnected = _cameraManager.IsConnected;
 
@@ -74,8 +77,63 @@ namespace VisionInspection.UI.Views
 
             UpdateUIState();
             
+            // 初始化预览更新定时器（30fps）
+            _previewUpdateTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, OnPreviewUpdateTimerTick, Dispatcher);
+            _previewUpdateTimer.Stop(); // 初始状态停止
+            
             // 窗口加载完成后，尝试自动连接上次使用的相机
             Loaded += CameraConfigWindow_Loaded;
+            
+            // 订阅可见性改变事件，在隐藏时取消事件订阅
+            IsVisibleChanged += CameraConfigWindow_IsVisibleChanged;
+        }
+        
+        /// <summary>
+        /// 窗口可见性改变事件 - 在隐藏时取消订阅，显示时重新订阅
+        /// </summary>
+        private void CameraConfigWindow_IsVisibleChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            if (e.NewValue is bool isVisible)
+            {
+                if (isVisible)
+                {
+                    // 窗口显示时，重新订阅事件
+                    _cameraManager.ImageGrabbed -= CameraManager_ImageGrabbed; // 先取消避免重复订阅
+                    _cameraManager.ImageGrabbed += CameraManager_ImageGrabbed;
+                    _cameraManager.ConnectionStatusChanged -= CameraManager_ConnectionStatusChanged;
+                    _cameraManager.ConnectionStatusChanged += CameraManager_ConnectionStatusChanged;
+                    _cameraManager.ErrorOccurred -= CameraManager_ErrorOccurred;
+                    _cameraManager.ErrorOccurred += CameraManager_ErrorOccurred;
+                    Debug.WriteLine("相机配置窗口：已订阅相机事件");
+                }
+                else
+                {
+                    // 窗口隐藏时，取消订阅事件，避免不必要的处理
+                    _cameraManager.ImageGrabbed -= CameraManager_ImageGrabbed;
+                    _cameraManager.ConnectionStatusChanged -= CameraManager_ConnectionStatusChanged;
+                    _cameraManager.ErrorOccurred -= CameraManager_ErrorOccurred;
+                    
+                    // 停止定时器
+                    _previewUpdateTimer?.Stop();
+                    Debug.WriteLine("相机配置窗口：已取消相机事件订阅");
+                }
+            }
+        }
+        
+        /// <summary>
+        /// 预览更新定时器回调 - 批量处理帧更新
+        /// </summary>
+        private void OnPreviewUpdateTimerTick(object? sender, EventArgs e)
+        {
+            lock (_frameLock)
+            {
+                if (_pendingFrame != null)
+                {
+                    PreviewImage.Source = _pendingFrame;
+                    NoImageText.Visibility = Visibility.Collapsed;
+                    _pendingFrame = null;
+                }
+            }
         }
         
         /// <summary>
@@ -83,6 +141,34 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private async void CameraConfigWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // 如果相机已经在采集（主窗口正在使用），不要重新枚举，避免中断采集
+            if (_cameraManager.IsGrabbing)
+            {
+                Debug.WriteLine("相机配置窗口：检测到相机正在采集，跳过自动搜索，避免中断主窗口");
+                
+                // 如果已连接，显示当前相机信息
+                if (_cameraManager.IsConnected && _cameraManager.CurrentCamera != null)
+                {
+                    _selectedCamera = _cameraManager.CurrentCamera;
+                    // 创建一个简单的UI项显示当前相机
+                    DeviceListPanel.Children.Clear();
+                    var radioButton = new RadioButton
+                    {
+                        Content = _cameraManager.CurrentCamera.DisplayName,
+                        Tag = _cameraManager.CurrentCamera,
+                        Margin = new Thickness(5),
+                        GroupName = "CameraGroup",
+                        IsChecked = true,
+                        IsEnabled = false // 禁用选择，因为正在使用中
+                    };
+                    DeviceListPanel.Children.Add(radioButton);
+                    _cameras.Add(_cameraManager.CurrentCamera);
+                }
+                
+                UpdateUIState();
+                return;
+            }
+            
             // 如果配置中有上次使用的相机，尝试自动搜索并选择
             if (!string.IsNullOrEmpty(_cameraConfig.LastCameraId) || 
                 !string.IsNullOrEmpty(_cameraConfig.LastCameraSerialNumber))
@@ -155,21 +241,132 @@ namespace VisionInspection.UI.Views
 
         #region CameraManager 事件处理
 
+        // 用于限制预览更新频率
+        private DateTime _lastPreviewUpdate = DateTime.MinValue;
+        private readonly TimeSpan _previewUpdateInterval = TimeSpan.FromMilliseconds(100); // 10fps，降低频率减少卡顿
+
         /// <summary>
         /// 相机图像采集事件 - 用于本地预览
         /// 参考VM程序：相机配置窗口直接显示图像
         /// </summary>
         private void CameraManager_ImageGrabbed(object sender, CameraImageData imageData)
         {
-            Dispatcher.Invoke(() =>
+            // 限制更新频率，避免与主窗口竞争资源
+            var now = DateTime.Now;
+            if (now - _lastPreviewUpdate < _previewUpdateInterval)
             {
-                var bitmap = ConvertCameraImageToBitmap(imageData);
+                return; // 跳过此帧
+            }
+            _lastPreviewUpdate = now;
+
+            // 立即复制数据，避免与其他订阅者竞争
+            // 因为imageData.Data是共享的byte[]，可能被其他线程修改
+            byte[]? dataCopy = null;
+            if (imageData.Data != null && imageData.Data.Length > 0)
+            {
+                dataCopy = new byte[imageData.Data.Length];
+                Buffer.BlockCopy(imageData.Data, 0, dataCopy, 0, imageData.Data.Length);
+            }
+            
+            // 在后台线程转换图像，避免阻塞UI
+            Task.Run(() =>
+            {
+                if (dataCopy == null) return;
+                
+                // 创建新的CameraImageData，使用复制的数据
+                var imageDataCopy = new CameraImageData
+                {
+                    Data = dataCopy,
+                    Width = imageData.Width,
+                    Height = imageData.Height,
+                    IsColor = imageData.IsColor,
+                    Channels = imageData.Channels
+                };
+                
+                var bitmap = ConvertCameraImageToBitmapSource(imageDataCopy);
                 if (bitmap != null)
                 {
-                    PreviewImage.Source = bitmap;
-                    NoImageText.Visibility = Visibility.Collapsed;
+                    lock (_frameLock)
+                    {
+                        _pendingFrame = bitmap;
+                    }
+                    
+                    // 确保定时器在运行
+                    if (_previewUpdateTimer?.IsEnabled == false)
+                    {
+                        Dispatcher.BeginInvoke(() => _previewUpdateTimer?.Start(), DispatcherPriority.Background);
+                    }
                 }
             });
+        }
+        
+        /// <summary>
+        /// 将相机图像数据转换为BitmapSource（直接转换，不使用SKBitmap中间格式）
+        /// </summary>
+        private BitmapSource? ConvertCameraImageToBitmapSource(CameraImageData imageData)
+        {
+            try
+            {
+                if (imageData.Data == null || imageData.Data.Length == 0)
+                    return null;
+
+                // 根据图像格式选择WPF像素格式
+                // WebCameraService 已经将 BGR 转换为 RGB，所以这里要用 RGB 格式
+                PixelFormat format;
+                int bytesPerPixel;
+                int stride;
+
+                if (imageData.IsColor)
+                {
+                    if (imageData.Channels == 4)
+                    {
+                        format = PixelFormats.Rgba64; // RGBA 格式
+                        bytesPerPixel = 4;
+                    }
+                    else if (imageData.Channels == 3)
+                    {
+                        format = PixelFormats.Rgb24; // RGB 格式（不是BGR！）
+                        bytesPerPixel = 3;
+                    }
+                    else
+                    {
+                        format = PixelFormats.Rgb24;
+                        bytesPerPixel = 3;
+                    }
+                }
+                else
+                {
+                    format = PixelFormats.Gray8;
+                    bytesPerPixel = 1;
+                }
+
+                stride = imageData.Width * bytesPerPixel;
+
+                // 确保数据长度正确
+                int expectedLength = stride * imageData.Height;
+                if (imageData.Data.Length < expectedLength)
+                {
+                    Debug.WriteLine($"图像数据长度不足: {imageData.Data.Length} < {expectedLength}");
+                    return null;
+                }
+
+                var bitmapSource = BitmapSource.Create(
+                    imageData.Width,
+                    imageData.Height,
+                    96, 96,
+                    format,
+                    null,
+                    imageData.Data,
+                    stride);
+
+                bitmapSource.Freeze(); // 冻结以提高性能
+                return bitmapSource;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"转换BitmapSource失败: {ex.Message}");
+                return null;
+            }
         }
 
         /// <summary>
@@ -548,6 +745,19 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            // 取消订阅可见性改变事件
+            IsVisibleChanged -= CameraConfigWindow_IsVisibleChanged;
+            
+            // 停止预览更新定时器
+            _previewUpdateTimer?.Stop();
+            _previewUpdateTimer = null;
+            
+            // 清理待处理帧
+            lock (_frameLock)
+            {
+                _pendingFrame = null;
+            }
+            
             // 停止本地预览，但不停止相机采集（主窗口可能仍在使用）
             // 取消事件订阅，避免内存泄漏
             _cameraManager.ImageGrabbed -= CameraManager_ImageGrabbed;

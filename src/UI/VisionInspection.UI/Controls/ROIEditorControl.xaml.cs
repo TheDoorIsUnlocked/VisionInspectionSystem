@@ -233,7 +233,7 @@ public partial class ROIEditorControl : SKElement
         var imageWidth = ViewModel.CurrentImage.Width;
         var imageHeight = ViewModel.CurrentImage.Height;
 
-        // 应用变换：先平移到控件中心，然后缩放，再旋转，最后平移使图像居中
+        // 应用变换：先平移到控件中心，然后缩放，再旋转/翻转，最后平移使图像居中
         canvas.Translate(info.Width / 2.0f, info.Height / 2.0f);  // 移到控件中心
         canvas.Scale(_zoomScale);  // 应用缩放
         
@@ -241,6 +241,12 @@ public partial class ROIEditorControl : SKElement
         if (ViewModel.ImageRotationAngle != 0)
         {
             canvas.RotateDegrees(ViewModel.ImageRotationAngle, 0, 0);
+        }
+        
+        // 应用水平翻转（左右对调）
+        if (ViewModel.IsImageFlippedHorizontally)
+        {
+            canvas.Scale(-1, 1, 0, 0);  // X轴翻转
         }
         
         canvas.Translate(_panOffset.X, _panOffset.Y);  // 平移使图像居中

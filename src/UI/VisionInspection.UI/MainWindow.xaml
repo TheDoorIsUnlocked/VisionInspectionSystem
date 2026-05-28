@@ -226,6 +226,25 @@
                         Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
                 <TextBlock Text="{Binding RoiEditorViewModel.ImageRotationAngle, StringFormat='{}{0}°'}" 
                           VerticalAlignment="Center" Margin="5,0" Width="40"/>
+                <Separator Margin="5,0"/>
+                
+                <!-- 图像翻转控制 -->
+                <ToggleButton Content="↔️" ToolTip="水平翻转（左右对调）" 
+                              IsChecked="{Binding RoiEditorViewModel.IsImageFlippedHorizontally}"
+                              Margin="2" Padding="8,4">
+                    <ToggleButton.Style>
+                        <Style TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+                            <Setter Property="Background" Value="White"/>
+                            <Setter Property="BorderBrush" Value="#CCCCCC"/>
+                            <Style.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter Property="Background" Value="#2196F3"/>
+                                    <Setter Property="Foreground" Value="White"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ToggleButton.Style>
+                </ToggleButton>
 
             </ToolBar>
         </ToolBarTray>

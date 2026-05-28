@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -26,6 +27,9 @@ namespace VisionInspection.UI.Views
         private DateTime _timerStartTime;
         private bool _isTimerRunning = false;
 
+        // YAML工作流路径
+        private string _currentYamlPath = "";
+
         // SOP检测模式配置 - 默认启用手部检测，最大手数为2
         private SOPDetectionModeConfig _detectionModeConfig = new()
         {
@@ -38,7 +42,7 @@ namespace VisionInspection.UI.Views
         public SOPModuleView()
         {
             InitializeComponent();
-            InitializeSampleSteps();
+            LoadDefaultWorkflow();
             InitializeTimer();
         }
 
@@ -124,17 +128,108 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 初始化示例步骤
+        /// 初始化示例步骤（回退方案）
         /// </summary>
         private void InitializeSampleSteps()
         {
-            // 添加示例SOP步骤
             AddStep("1", "检测车辆", "使用YOLO模型检测画面中是否存在车辆", "🔍", "detect_vehicle");
             AddStep("2", "车牌识别", "检测到车辆后，识别车牌号码", "📄", "recognize_plate");
             AddStep("3", "安全验证", "验证车牌是否在白名单中", "✓", "safety_verify");
             AddStep("4", "触发PLC", "验证通过，触发PLC开门", "🔌", "trigger_plc");
 
             UpdateStepDisplay();
+        }
+
+        /// <summary>
+        /// 加载默认工作流（优先从YAML加载，失败则使用示例步骤）
+        /// </summary>
+        private void LoadDefaultWorkflow()
+        {
+            var yamlPath = FindDefaultYamlFile();
+            if (!string.IsNullOrEmpty(yamlPath))
+            {
+                try
+                {
+                    LoadStepsFromYaml(yamlPath);
+                    _currentYamlPath = yamlPath;
+                    AddLog($"已加载工作流: {System.IO.Path.GetFileName(yamlPath)}");
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    AddLog($"YAML加载失败: {ex.Message}，使用默认示例步骤");
+                }
+            }
+
+            InitializeSampleSteps();
+        }
+
+        /// <summary>
+        /// 查找默认YAML文件
+        /// </summary>
+        private static string? FindDefaultYamlFile()
+        {
+            string[] searchDirs = { "configs/sop", "configs" };
+
+            foreach (var dir in searchDirs)
+            {
+                if (!Directory.Exists(dir)) continue;
+
+                var yamlFiles = Directory.GetFiles(dir, "*.yaml");
+                if (yamlFiles.Length > 0)
+                    return yamlFiles[0];
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 从YAML文件加载SOP步骤
+        /// </summary>
+        private void LoadStepsFromYaml(string yamlPath)
+        {
+            var workflow = SOPYamlConverter.LoadFromYaml(yamlPath);
+            LoadWorkflowSteps(workflow);
+        }
+
+        /// <summary>
+        /// 从SOPWorkflow加载步骤到UI列表
+        /// </summary>
+        private void LoadWorkflowSteps(SOPWorkflow workflow)
+        {
+            _steps.Clear();
+
+            foreach (var step in workflow.Steps.OrderBy(s => s.Order))
+            {
+                AddStep(
+                    step.StepId.ToString(),
+                    step.StepName,
+                    step.Description ?? "",
+                    GetStepIcon(step.Order),
+                    step.StepId.ToString()
+                );
+            }
+
+            UpdateStepDisplay();
+        }
+
+        /// <summary>
+        /// 获取步骤图标
+        /// </summary>
+        private static string GetStepIcon(int order)
+        {
+            return order switch
+            {
+                1 => "1️⃣",
+                2 => "2️⃣",
+                3 => "3️⃣",
+                4 => "4️⃣",
+                5 => "5️⃣",
+                6 => "6️⃣",
+                7 => "7️⃣",
+                8 => "8️⃣",
+                _ => "📋"
+            };
         }
 
         /// <summary>
@@ -696,6 +791,9 @@ namespace VisionInspection.UI.Views
             // 启动 SOP 实时检测
             SetStatus("启动中...", new SolidColorBrush(Color.FromRgb(24, 144, 255)));
             AddLog("正在启动 SOP 实时检测...");
+
+            // 传递当前YAML工作流路径给MainViewModel
+            viewModel.SopWorkflowPath = _currentYamlPath;
 
             await viewModel.StartSOPDetectionCommand.ExecuteAsync(null);
 

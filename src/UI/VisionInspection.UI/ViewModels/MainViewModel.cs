@@ -1181,18 +1181,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await _sopModule.EnsureHandPoseServiceReadyAsync();
             Console.WriteLine($"[MainViewModel] 手部服务已就绪, 模式: {_sopModule.DetectionMode}");
 
-            // 4. 创建默认工作流（不依赖YAML文件）
+            // 4. 加载工作流（优先从YAML，否则使用空工作流）
             Status = "正在启动检测...";
-            DebugLog($"[StartSOP] 正在创建默认工作流...");
-            var workflow = new SOPWorkflow
+            DebugLog($"[StartSOP] 正在加载工作流...");
+            if (!string.IsNullOrEmpty(SopWorkflowPath) && File.Exists(SopWorkflowPath))
             {
-                Id = "default",
-                Name = "实时检测",
-                Description = "基于配置的实时检测工作流",
-                Steps = new List<SOPStep>(),
-                Regions = new List<ZoneDefinition>()
-            };
-            _sopModule.StartWorkflow(workflow);
+                DebugLog($"[StartSOP] 从YAML加载工作流: {SopWorkflowPath}");
+                _sopModule.StartWorkflowFromYaml(SopWorkflowPath);
+            }
+            else
+            {
+                DebugLog($"[StartSOP] YAML路径为空或文件不存在，使用空工作流");
+                var workflow = new SOPWorkflow
+                {
+                    Id = "default",
+                    Name = "实时检测",
+                    Description = "基于配置的实时检测工作流",
+                    Steps = new List<SOPStep>(),
+                    Regions = new List<ZoneDefinition>()
+                };
+                _sopModule.StartWorkflow(workflow);
+            }
             DebugLog($"[StartSOP] StartWorkflow 完成");
 
             // 5. 启动实时检测
