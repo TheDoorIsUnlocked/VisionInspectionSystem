@@ -127,7 +127,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private string _sopWorkflowPath = "";
 
-    private bool _isSOPProcessingFrame = false;
     private readonly SemaphoreSlim _sopInferenceLock = new(1, 1);
 
     private string _lastDetectionError = "";
@@ -494,8 +493,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         try
         {
-            _isSOPProcessingFrame = true;
-
             if (_sopModule == null)
             {
                 return;
@@ -600,7 +597,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         finally
         {
-            _isSOPProcessingFrame = false;
             _sopInferenceLock.Release();
         }
     }

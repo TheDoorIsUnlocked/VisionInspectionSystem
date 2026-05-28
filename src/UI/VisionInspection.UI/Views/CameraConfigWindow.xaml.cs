@@ -548,9 +548,14 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
-            // 取消关闭操作，改为隐藏窗口
-            e.Cancel = true;
-            Hide();
+            // 停止本地预览，但不停止相机采集（主窗口可能仍在使用）
+            // 取消事件订阅，避免内存泄漏
+            _cameraManager.ImageGrabbed -= CameraManager_ImageGrabbed;
+            _cameraManager.ConnectionStatusChanged -= CameraManager_ConnectionStatusChanged;
+            _cameraManager.ErrorOccurred -= CameraManager_ErrorOccurred;
+            
+            // 允许窗口关闭
+            // 注意：不调用 e.Cancel = true，让窗口正常关闭
         }
 
         #endregion

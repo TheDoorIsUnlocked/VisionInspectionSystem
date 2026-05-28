@@ -52,6 +52,9 @@ public partial class ROIEditorViewModel : ViewModelBase
     [ObservableProperty]
     private ROI? _hoveredROI;
 
+    [ObservableProperty]
+    private float _imageRotationAngle = 0f; // 图像旋转角度（度）
+
     public IReadOnlyList<ROI> ROIs => _roiManager.ROIs;
 
     public ROIEditorViewModel(ROIManager roiManager)

@@ -172,18 +172,29 @@ public partial class MainWindow : Window
             MessageBoxImage.Information);
     }
 
+    private CameraConfigWindow? _cameraConfigWindow;
+    
     /// <summary>
     /// 相机配置菜单点击
     /// </summary>
     private void CameraConfigMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        // 创建相机配置窗口
-        // 注意：图像传输现在通过CameraManager单例处理
-        // MainViewModel已经订阅了CameraManager.ImageGrabbed事件
-        // 不需要再通过窗口间事件传递图像数据
-        var cameraConfigWindow = new CameraConfigWindow();
-        cameraConfigWindow.Owner = this;
-        cameraConfigWindow.ShowDialog();
+        // 复用相机配置窗口实例，避免多次创建导致的事件订阅混乱
+        if (_cameraConfigWindow == null)
+        {
+            _cameraConfigWindow = new CameraConfigWindow();
+            _cameraConfigWindow.Owner = this;
+            _cameraConfigWindow.Closed += (s, args) => _cameraConfigWindow = null;
+        }
+        
+        if (_cameraConfigWindow.IsVisible)
+        {
+            _cameraConfigWindow.Activate();
+        }
+        else
+        {
+            _cameraConfigWindow.Show();
+        }
     }
 
     /// <summary>
@@ -254,5 +265,41 @@ public partial class MainWindow : Window
                 ROISplitter.Visibility = isVisible ? Visibility.Visible : Visibility.Collapsed;
             }
         }
+    }
+
+    /// <summary>
+    /// 向左旋转90度
+    /// </summary>
+    private void RotateLeftButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.RoiEditorViewModel.ImageRotationAngle -= 90;
+            // 归一化到0-360度
+            viewModel.RoiEditorViewModel.ImageRotationAngle = NormalizeAngle(viewModel.RoiEditorViewModel.ImageRotationAngle);
+        }
+    }
+
+    /// <summary>
+    /// 向右旋转90度
+    /// </summary>
+    private void RotateRightButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+        {
+            viewModel.RoiEditorViewModel.ImageRotationAngle += 90;
+            // 归一化到0-360度
+            viewModel.RoiEditorViewModel.ImageRotationAngle = NormalizeAngle(viewModel.RoiEditorViewModel.ImageRotationAngle);
+        }
+    }
+
+    /// <summary>
+    /// 将角度归一化到0-360度范围
+    /// </summary>
+    private float NormalizeAngle(float angle)
+    {
+        while (angle >= 360) angle -= 360;
+        while (angle < 0) angle += 360;
+        return angle;
     }
 }

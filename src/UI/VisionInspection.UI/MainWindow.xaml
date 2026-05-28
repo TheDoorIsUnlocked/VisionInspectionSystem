@@ -217,6 +217,15 @@
                         </Style>
                     </Button.Style>
                 </Button>
+                <Separator Margin="5,0"/>
+                
+                <!-- 图像旋转控制 -->
+                <Button Content="↺" ToolTip="向左旋转90°" Click="RotateLeftButton_Click"
+                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                <Button Content="↻" ToolTip="向右旋转90°" Click="RotateRightButton_Click"
+                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                <TextBlock Text="{Binding RoiEditorViewModel.ImageRotationAngle, StringFormat='{}{0}°'}" 
+                          VerticalAlignment="Center" Margin="5,0" Width="40"/>
 
             </ToolBar>
         </ToolBarTray>
