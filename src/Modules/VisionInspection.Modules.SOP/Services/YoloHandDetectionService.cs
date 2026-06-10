@@ -344,42 +344,51 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
             {
                 try
                 {
+                    // 关闭程序时 _yolo 可能已被 Dispose 置为 null
+                    if (_yolo == null)
+                        return new HandPoseEstimationResult { Hands = new List<HandPose>() };
+
                     var hands = new List<HandPose>();
                     int trackId = 0;
 
                     // 检查模型类型（通过模型文件名判断）
                     bool isPoseModel = _config.PalmModelPath?.Contains("pose") ?? false;
-                    
-                    // 使用降低后的置信度阈值进行检测（减少闪烁）
-                    float actualThreshold = Math.Min(_config.ConfidenceThreshold, DetectionConfidenceThreshold);
+
+                    // 推理置信度：取 config 中的专用阈值（默认为握拳/握物优化过的 0.08）
+                    float actualThreshold = _config.DetectionConfidenceThreshold;
 
                     if (isPoseModel)
                     {
                         // 使用YOLO-pose模型进行姿态估计
                         var poseResults = _yolo.RunPoseEstimation(image, actualThreshold);
-                        
+
                         foreach (var pose in poseResults)
                         {
-                            // 将姿态估计结果转换为手部姿态
                             var handPose = ConvertPoseToHandPose(pose, trackId++, image.Width, image.Height);
                             if (handPose != null)
                             {
                                 hands.Add(handPose);
                             }
                         }
+
+                        // 旋转增强：原始方向检测不到手时，旋转90°再检测（解决横向手指检测率低的问题）
+                        // 不要求已有跟踪器，第一帧也可触发旋转增强
+                        if (hands.Count == 0 && _config.RotationAugmentation)
+                        {
+                            hands = RunRotatedDetectionPose(image, actualThreshold, ref trackId);
+                        }
                     }
                     else
                     {
                         // 使用普通YOLO检测模型
                         var detections = _yolo.RunObjectDetection(image, actualThreshold);
-                        
+
                         foreach (var detection in detections)
                         {
                             var labelName = detection.Label.Name.ToLower();
-                            
-                            // 处理手部类别（专用手部模型）
+
                             bool isHand = labelName.Contains("hand") || labelName.Contains("手");
-                            
+
                             if (isHand)
                             {
                                 var handPose = ConvertDetectionToHandPose(detection, trackId++, image.Width, image.Height);
@@ -388,6 +397,12 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
                                     hands.Add(handPose);
                                 }
                             }
+                        }
+
+                        // 旋转增强 — 不要求已有跟踪器
+                        if (hands.Count == 0 && _config.RotationAugmentation)
+                        {
+                            hands = RunRotatedDetectionObject(image, actualThreshold, ref trackId);
                         }
                     }
 
@@ -434,6 +449,108 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
     }
 
     /// <summary>
+    /// 将画面顺时针旋转90°
+    /// </summary>
+    private static SKBitmap RotateBitmap90CW(SKBitmap source)
+    {
+        var rotated = new SKBitmap(source.Height, source.Width);
+        using var canvas = new SKCanvas(rotated);
+        canvas.Translate(rotated.Width, 0);
+        canvas.RotateDegrees(90);
+        canvas.DrawBitmap(source, 0, 0);
+        return rotated;
+    }
+
+    /// <summary>
+    /// 将旋转后画面中的检测框坐标变换回原始画面坐标
+    /// 旋转后 (rx, ry, rw, rh) → 原始 (ry, origH - rx - rw, rh, rw)
+    /// </summary>
+    private static SKRect TransformBoxFromRotated(SKRect rotatedBox, int origWidth, int origHeight)
+    {
+        return new SKRect(
+            rotatedBox.Top,
+            origHeight - rotatedBox.Right,
+            rotatedBox.Bottom,
+            origHeight - rotatedBox.Left
+        );
+    }
+
+    /// <summary>
+    /// 将旋转后画面中的关键点变换回原始画面坐标
+    /// </summary>
+    private static HandKeypoint TransformKeypointFromRotated(HandKeypoint kp, int origHeight)
+    {
+        return new HandKeypoint(kp.Type, kp.Y, origHeight - kp.X, kp.Z, kp.Confidence);
+    }
+
+    /// <summary>
+    /// 旋转增强检测（pose 模型路径）
+    /// </summary>
+    private List<HandPose> RunRotatedDetectionPose(SKBitmap image, float threshold, ref int trackId)
+    {
+        var hands = new List<HandPose>();
+        try
+        {
+            using var rotated = RotateBitmap90CW(image);
+            var poseResults = _yolo!.RunPoseEstimation(rotated, threshold * 0.8f); // 旋转后降一点阈值
+            foreach (var pose in poseResults)
+            {
+                var handPose = ConvertPoseToHandPose(pose, 0, rotated.Width, rotated.Height);
+                if (handPose == null) continue;
+
+                // 变换回原始坐标
+                handPose.BoundingBox = TransformBoxFromRotated(handPose.BoundingBox, image.Width, image.Height);
+                for (int i = 0; i < handPose.Keypoints.Count; i++)
+                {
+                    handPose.Keypoints[i] = TransformKeypointFromRotated(handPose.Keypoints[i], image.Height);
+                }
+                handPose.TrackId = trackId++;
+                hands.Add(handPose);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[YoloHand] 旋转增强检测失败: {ex.Message}");
+        }
+        return hands;
+    }
+
+    /// <summary>
+    /// 旋转增强检测（object detection 路径）
+    /// </summary>
+    private List<HandPose> RunRotatedDetectionObject(SKBitmap image, float threshold, ref int trackId)
+    {
+        var hands = new List<HandPose>();
+        try
+        {
+            using var rotated = RotateBitmap90CW(image);
+            var detections = _yolo!.RunObjectDetection(rotated, threshold * 0.8f);
+            foreach (var detection in detections)
+            {
+                var labelName = detection.Label.Name.ToLower();
+                if (!labelName.Contains("hand") && !labelName.Contains("手"))
+                    continue;
+
+                var handPose = ConvertDetectionToHandPose(detection, 0, rotated.Width, rotated.Height);
+                if (handPose == null) continue;
+
+                handPose.BoundingBox = TransformBoxFromRotated(handPose.BoundingBox, image.Width, image.Height);
+                for (int i = 0; i < handPose.Keypoints.Count; i++)
+                {
+                    handPose.Keypoints[i] = TransformKeypointFromRotated(handPose.Keypoints[i], image.Height);
+                }
+                handPose.TrackId = trackId++;
+                hands.Add(handPose);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[YoloHand] 旋转增强检测失败: {ex.Message}");
+        }
+        return hands;
+    }
+
+    /// <summary>
     /// 将YOLO姿态估计结果转换为手部姿态
     /// </summary>
     private HandPose? ConvertPoseToHandPose(YoloDotNet.Models.PoseEstimation pose, int trackId, int imgWidth, int imgHeight)
@@ -446,9 +563,18 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
         float boxArea = boxWidth * boxHeight;
         float imgArea = imgWidth * imgHeight;
         
-        if (boxArea < imgArea * 0.001f || boxArea > imgArea * 0.5f)
+        if (boxArea < imgArea * _config.MinBoxAreaRatio || boxArea > imgArea * 0.5f)
         {
             return null;
+        }
+
+        // 面部过滤：先检查是否像脸部，如果是则要求更高置信度
+        bool faceLike = IsLikelyFace((float)box.Left, (float)box.Top, (float)box.Right, (float)box.Bottom, imgWidth, imgHeight, _config.FaceFilterUpperRatio);
+        if (_config.EnableFaceFilter && faceLike)
+        {
+            // 像脸部的检测：要求置信度 >= 0.35 才放行（面部误检通常 < 0.3）
+            if (pose.Confidence < 0.35f)
+                return null;
         }
 
         var handPose = new HandPose
@@ -503,7 +629,86 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
             ));
         }
 
+        // 手部结构验证：脸被误检时所有关键点挤在一起，手腕→指尖距离很短
+        if (_config.EnableHandStructureCheck
+            && !HasValidHandStructure(handPose.Keypoints, boxWidth, boxHeight, _config.HandStructureWristTipRatio))
+        {
+            return null;
+        }
+
         return handPose;
+    }
+
+    /// <summary>
+    /// 判断检测框是否更像人脸而非手部（基于长宽比和画面位置）
+    /// </summary>
+    private static bool IsLikelyFace(float boxLeft, float boxTop, float boxRight, float boxBottom, int imgWidth, int imgHeight, float upperRatio)
+    {
+        float boxW = boxRight - boxLeft;
+        float boxH = boxBottom - boxTop;
+        float aspectRatio = boxW / boxH;
+        float centerY = (boxTop + boxBottom) / 2f;
+        float boxArea = boxW * boxH;
+        float imgArea = imgWidth * imgHeight;
+
+        bool inUpperFrame = centerY < imgHeight * upperRatio;
+
+        // 1. 竖长形 → 整张脸（宽高比 0.55~0.9）
+        bool tallFace = aspectRatio >= 0.55f && aspectRatio <= 0.9f;
+
+        // 2. 横宽形 → 面部局部（宽高比 > 1.5），必须在画面很上方
+        bool wideFacePart = aspectRatio > 1.5f && centerY < imgHeight * 0.28f;
+
+        // 3. 小正方形 → 鼻子/嘴巴（宽高比 0.7~1.5，面积<15%，在上方）
+        bool smallFace = aspectRatio >= 0.7f && aspectRatio <= 1.5f
+            && boxArea < imgArea * 0.15f
+            && centerY < imgHeight * 0.40f;
+
+        // 4. 大面积正方形 → 整张脸近景（宽高比 0.65~1.5，面积>15%，在上方40%）
+        bool largeFace = aspectRatio >= 0.65f && aspectRatio <= 1.5f
+            && boxArea > imgArea * 0.15f
+            && centerY < imgHeight * 0.40f;
+
+        return (inUpperFrame && tallFace) || wideFacePart || smallFace || largeFace;
+    }
+
+    /// <summary>
+    /// 验证关键点是否构成有效的手部结构（区别于面部误检）
+    /// 核心依据：手腕到指尖的距离——真手即使握拳也有明显的手腕→指尖轴，面部误检所有点都挤在一起
+    /// </summary>
+    private static bool HasValidHandStructure(List<HandKeypoint> keypoints, float boxWidth, float boxHeight, float wristTipRatio)
+    {
+        var wrist = keypoints.FirstOrDefault(k =>
+            k.Type == HandKeypointType.Wrist && k.Confidence > 0.3f);
+
+        var tipTypes = new[]
+        {
+            HandKeypointType.IndexFingerTip,
+            HandKeypointType.MiddleFingerTip,
+            HandKeypointType.RingFingerTip,
+            HandKeypointType.PinkyTip,
+            HandKeypointType.ThumbTip
+        };
+
+        var tips = keypoints
+            .Where(k => tipTypes.Contains(k.Type) && k.Confidence > 0.3f)
+            .ToList();
+
+        if (wrist == null || tips.Count < 2)
+            return false; // 不足以验证 → 拒绝（保守策略，面部误检的指尖置信度通常很低）
+
+        float maxWristToTip = 0;
+        foreach (var tip in tips)
+        {
+            float dx = wrist.X - tip.X;
+            float dy = wrist.Y - tip.Y;
+            float dist = MathF.Sqrt(dx * dx + dy * dy);
+            if (dist > maxWristToTip) maxWristToTip = dist;
+        }
+
+        float boxDiagonal = MathF.Sqrt(boxWidth * boxWidth + boxHeight * boxHeight);
+
+        return maxWristToTip > boxDiagonal * wristTipRatio;
     }
 
     /// <summary>
@@ -519,7 +724,13 @@ public class YoloHandDetectionService : IHandPoseEstimationService, IDisposable
         float boxArea = boxWidth * boxHeight;
         float imgArea = imgWidth * imgHeight;
         
-        if (boxArea < imgArea * 0.001f || boxArea > imgArea * 0.5f)
+        if (boxArea < imgArea * _config.MinBoxAreaRatio || boxArea > imgArea * 0.5f)
+        {
+            return null;
+        }
+
+        if (_config.EnableFaceFilter
+            && IsLikelyFace(box.Left, box.Top, box.Right, box.Bottom, imgWidth, imgHeight, _config.FaceFilterUpperRatio))
         {
             return null;
         }

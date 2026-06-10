@@ -217,6 +217,24 @@ public class HandPoseEstimationConfig
     public float ConfidenceThreshold { get; set; } = 0.3f; // 降低阈值以减少闪烁
 
     /// <summary>
+    /// 模型推理时的最低置信度。握拳/握物时模型输出置信度低，建议 0.08~0.15
+    /// 提高至 0.20 以减少面部误检（面部误检通常置信度<0.3）
+    /// </summary>
+    public float DetectionConfidenceThreshold { get; set; } = 0.20f;
+
+    /// <summary>
+    /// 最小检测框面积比例（相对画面面积）。握拳时检测框更小，需降低此值
+    /// 默认 0.0005（画面的 0.05%），例如 640x480 下最小约 153 像素（~12x12）
+    /// </summary>
+    public float MinBoxAreaRatio { get; set; } = 0.0005f;
+
+    /// <summary>
+    /// 是否启用旋转增强：原始方向检测不到手时，自动旋转画面90°再次检测
+    /// 解决手指朝左/朝右时检测率极低的问题
+    /// </summary>
+    public bool RotationAugmentation { get; set; } = true;
+
+    /// <summary>
     /// 最大检测手数
     /// </summary>
     public int MaxNumHands { get; set; } = 2;
@@ -235,6 +253,34 @@ public class HandPoseEstimationConfig
     /// 是否使用GPU
     /// </summary>
     public bool UseGpu { get; set; } = true;
+
+    // ========== 面部过滤参数 ==========
+
+    /// <summary>
+    /// 是否启用面部过滤（将画面上的脸部/下巴/嘴巴排除，减少误检）
+    /// </summary>
+    public bool EnableFaceFilter { get; set; } = true;
+
+    /// <summary>
+    /// 面部过滤的画面高度比例：检测框中心Y在此比例以上视为"画面上方"
+    /// 默认 0.38，值越大过滤范围越大（更激进），越小越保守
+    /// </summary>
+    public float FaceFilterUpperRatio { get; set; } = 0.38f;
+
+    // ========== 手部结构验证参数 ==========
+
+    /// <summary>
+    /// 是否启用手部结构验证（检查手腕→指尖距离以区分真手和面部误检）
+    /// 手指合拢/握拳场景如果被误过滤，可关闭此选项
+    /// </summary>
+    public bool EnableHandStructureCheck { get; set; } = true;
+
+    /// <summary>
+    /// 手部结构验证的阈值：手腕到最远指尖距离 / 检测框对角线
+    /// 默认 0.18，值越小越宽松（握拳容易通过），值越大越严格（过滤更激进）
+    /// 范围建议：0.10（极宽松）~ 0.30（极严格）
+    /// </summary>
+    public float HandStructureWristTipRatio { get; set; } = 0.18f;
 }
 
 /// <summary>

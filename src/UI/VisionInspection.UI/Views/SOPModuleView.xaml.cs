@@ -724,7 +724,14 @@ namespace VisionInspection.UI.Views
                 viewModel.SaveSOPDetectionConfig(
                     _detectionModeConfig.DetectionMode,
                     _detectionModeConfig.EnableHandPoseEstimation,
-                    _detectionModeConfig.MaxNumHands
+                    _detectionModeConfig.MaxNumHands,
+                    _detectionModeConfig.EnableFaceFilter,
+                    _detectionModeConfig.FaceFilterUpperRatio,
+                    _detectionModeConfig.EnableHandStructureCheck,
+                    _detectionModeConfig.HandStructureWristTipRatio,
+                    _detectionModeConfig.DetectionConfidenceThreshold,
+                    _detectionModeConfig.MinBoxAreaRatio,
+                    _detectionModeConfig.RotationAugmentation
                 );
             }
 
@@ -743,7 +750,14 @@ namespace VisionInspection.UI.Views
                     {
                         MaxNumHands = _detectionModeConfig.MaxNumHands,
                         UseGpu = _detectionModeConfig.UseGpu,
-                        ConfidenceThreshold = 0.5f
+                        ConfidenceThreshold = 0.5f,
+                        EnableFaceFilter = _detectionModeConfig.EnableFaceFilter,
+                        FaceFilterUpperRatio = _detectionModeConfig.FaceFilterUpperRatio,
+                        EnableHandStructureCheck = _detectionModeConfig.EnableHandStructureCheck,
+                        HandStructureWristTipRatio = _detectionModeConfig.HandStructureWristTipRatio,
+                        DetectionConfidenceThreshold = _detectionModeConfig.DetectionConfidenceThreshold,
+                        MinBoxAreaRatio = _detectionModeConfig.MinBoxAreaRatio,
+                        RotationAugmentation = _detectionModeConfig.RotationAugmentation
                     });
                 }
             }

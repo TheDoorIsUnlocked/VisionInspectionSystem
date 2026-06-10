@@ -24,6 +24,16 @@ namespace VisionInspection.UI.Views
         public int HandSmoothWindowSize { get; private set; } = 5;
         public float HandSmoothAlpha { get; private set; } = 0.7f;
         public float HandSkeletonThreshold { get; private set; } = 0.3f;
+        // 面部过滤参数
+        public bool HandEnableFaceFilter { get; private set; } = true;
+        public float HandFaceFilterUpperRatio { get; private set; } = 0.38f;
+        // 手部结构验证参数
+        public bool HandEnableStructureCheck { get; private set; } = true;
+        public float HandStructureWristTipRatio { get; private set; } = 0.18f;
+        // 检测置信度与尺寸
+        public float HandDetectionConfidence { get; private set; } = 0.08f;
+        public float HandMinBoxAreaRatio { get; private set; } = 0.0005f;
+        public bool HandRotationAugmentation { get; private set; } = true;
 
         public SOPConfigWindow()
         {
@@ -586,7 +596,14 @@ namespace VisionInspection.UI.Views
                 DetectionMode = "UnifiedDetection",
                 EnableHandPoseEstimation = EnableHandPoseCheckBox.IsChecked ?? true,
                 MaxNumHands = int.TryParse((MaxHandsComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString(), out var maxHands) ? maxHands : 2,
-                UseGpu = UseGpuCheckBox.IsChecked ?? true
+                UseGpu = UseGpuCheckBox.IsChecked ?? true,
+                EnableFaceFilter = HandEnableFaceFilter,
+                FaceFilterUpperRatio = HandFaceFilterUpperRatio,
+                EnableHandStructureCheck = HandEnableStructureCheck,
+                HandStructureWristTipRatio = HandStructureWristTipRatio,
+                DetectionConfidenceThreshold = HandDetectionConfidence,
+                MinBoxAreaRatio = HandMinBoxAreaRatio,
+                RotationAugmentation = HandRotationAugmentation
             };
         }
 
@@ -613,6 +630,15 @@ namespace VisionInspection.UI.Views
 
             // 设置GPU
             UseGpuCheckBox.IsChecked = config.UseGpu;
+
+            // 设置过滤参数
+            HandEnableFaceFilter = config.EnableFaceFilter;
+            HandFaceFilterUpperRatio = config.FaceFilterUpperRatio;
+            HandEnableStructureCheck = config.EnableHandStructureCheck;
+            HandStructureWristTipRatio = config.HandStructureWristTipRatio;
+            HandDetectionConfidence = config.DetectionConfidenceThreshold;
+            HandMinBoxAreaRatio = config.MinBoxAreaRatio;
+            HandRotationAugmentation = config.RotationAugmentation;
         }
 
         /// <summary>
@@ -624,10 +650,16 @@ namespace VisionInspection.UI.Views
                 HandInferenceInterval,
                 HandSmoothWindowSize,
                 HandSmoothAlpha,
-                HandSkeletonThreshold);
-            
+                HandSkeletonThreshold,
+                HandEnableFaceFilter,
+                HandFaceFilterUpperRatio,
+                HandEnableStructureCheck,
+                HandStructureWristTipRatio,
+                HandDetectionConfidence,
+                HandMinBoxAreaRatio);
+
             paramsWindow.Owner = this;
-            
+
             if (paramsWindow.ShowDialog() == true)
             {
                 // 保存参数
@@ -635,12 +667,22 @@ namespace VisionInspection.UI.Views
                 HandSmoothWindowSize = paramsWindow.SmoothWindowSize;
                 HandSmoothAlpha = paramsWindow.SmoothAlpha;
                 HandSkeletonThreshold = paramsWindow.SkeletonConfidenceThreshold;
-                
+                HandEnableFaceFilter = paramsWindow.EnableFaceFilter;
+                HandFaceFilterUpperRatio = paramsWindow.FaceFilterUpperRatio;
+                HandEnableStructureCheck = paramsWindow.EnableHandStructureCheck;
+                HandStructureWristTipRatio = paramsWindow.HandStructureWristTipRatio;
+                HandDetectionConfidence = paramsWindow.DetectionConfidenceThreshold;
+                HandMinBoxAreaRatio = paramsWindow.MinBoxAreaRatio;
+
                 System.Diagnostics.Debug.WriteLine($"[SOPConfig] 高级参数已更新: " +
                     $"InferenceInterval={HandInferenceInterval}, " +
                     $"SmoothWindow={HandSmoothWindowSize}, " +
                     $"SmoothAlpha={HandSmoothAlpha:F2}, " +
-                    $"SkeletonThreshold={HandSkeletonThreshold:F2}");
+                    $"SkeletonThreshold={HandSkeletonThreshold:F2}, " +
+                    $"FaceFilter={HandEnableFaceFilter}({HandFaceFilterUpperRatio:F2}), " +
+                    $"StructureCheck={HandEnableStructureCheck}({HandStructureWristTipRatio:F2}), " +
+                    $"DetectConf={HandDetectionConfidence:F2}, " +
+                    $"MinBoxArea={HandMinBoxAreaRatio:F4}");
             }
         }
     }
@@ -654,6 +696,13 @@ namespace VisionInspection.UI.Views
         public bool EnableHandPoseEstimation { get; set; } = false;
         public int MaxNumHands { get; set; } = 1;
         public bool UseGpu { get; set; } = true;
+        public bool EnableFaceFilter { get; set; } = true;
+        public float FaceFilterUpperRatio { get; set; } = 0.38f;
+        public bool EnableHandStructureCheck { get; set; } = true;
+        public float HandStructureWristTipRatio { get; set; } = 0.18f;
+        public float DetectionConfidenceThreshold { get; set; } = 0.08f;
+        public float MinBoxAreaRatio { get; set; } = 0.0005f;
+        public bool RotationAugmentation { get; set; } = true;
     }
 
     /// <summary>

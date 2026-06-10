@@ -123,7 +123,6 @@ public class StepConditionEvaluator
             };
         }
 
-        // 获取区域定义（这里简化处理，实际应从配置中读取）
         var zone = GetZoneDefinition(condition.ZoneId);
         if (zone == null)
         {
@@ -288,16 +287,11 @@ public class StepConditionEvaluator
         return null;
     }
 
-    private bool IsInZone(SKRect objectBox, ZoneDefinition zone)
+    private static bool IsInZone(SKRect objectBox, ZoneDefinition zone)
     {
-        // 简化判断：检查对象中心点是否在区域内
-        var objectCenterX = objectBox.MidX;
-        var objectCenterY = objectBox.MidY;
-
-        // 假设区域坐标是归一化的（0-1），需要转换为实际像素
-        // 这里简化处理
-        return objectCenterX >= zone.X && objectCenterX <= zone.X + zone.Width &&
-               objectCenterY >= zone.Y && objectCenterY <= zone.Y + zone.Height;
+        // 检查边界框是否与区域有重叠（IOU > 0 即可）
+        var zoneBox = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+        return objectBox.IntersectsWith(zoneBox);
     }
 }
 

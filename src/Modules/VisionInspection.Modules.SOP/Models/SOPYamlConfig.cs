@@ -507,8 +507,9 @@ public static class SOPYamlConverter
         switch (detection.Method.ToLower())
         {
             case "hand_in_region":
-                condition.Type = ConditionType.ObjectPresent;
-                condition.Parameters["RegionId"] = detection.Region ?? "";
+                condition.Type = ConditionType.ObjectInZone;
+                condition.TargetObject = "hand";
+                condition.ZoneId = detection.Region ?? "";
                 condition.Parameters["HandSide"] = detection.Hand ?? "right";
                 break;
 
@@ -620,23 +621,24 @@ public static class SOPYamlConverter
         switch (condition.Type)
         {
             case ConditionType.ObjectPresent:
-                if (condition.Parameters.ContainsKey("RegionId"))
+                detection.Method = "object_present";
+                detection.TargetObject = condition.TargetObject;
+                break;
+
+            case ConditionType.ObjectInZone:
+                if (condition.TargetObject.Equals("hand", StringComparison.OrdinalIgnoreCase)
+                    && condition.Parameters.ContainsKey("HandSide"))
                 {
                     detection.Method = "hand_in_region";
-                    detection.Region = condition.Parameters.GetValueOrDefault("RegionId", "")?.ToString();
+                    detection.Region = condition.ZoneId;
                     detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
                 }
                 else
                 {
-                    detection.Method = "object_present";
+                    detection.Method = "object_in_zone";
                     detection.TargetObject = condition.TargetObject;
+                    detection.Region = condition.ZoneId;
                 }
-                break;
-
-            case ConditionType.ObjectInZone:
-                detection.Method = "object_in_zone";
-                detection.TargetObject = condition.TargetObject;
-                detection.Region = condition.ZoneId;
                 break;
 
             case ConditionType.ObjectStable:

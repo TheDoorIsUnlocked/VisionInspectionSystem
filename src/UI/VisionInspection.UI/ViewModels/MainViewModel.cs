@@ -30,7 +30,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 保存的SOP检测模式配置（从SOP配置界面获取）
     /// </summary>
-    private (string DetectionMode, bool EnableHandPose, int MaxNumHands)? _savedSOPDetectionConfig;
+    private (string DetectionMode, bool EnableHandPose, int MaxNumHands,
+        bool EnableFaceFilter, float FaceFilterUpperRatio,
+        bool EnableHandStructureCheck, float HandStructureWristTipRatio,
+        float DetectionConfidenceThreshold, float MinBoxAreaRatio,
+        bool RotationAugmentation)? _savedSOPDetectionConfig;
 
     private static readonly object _logLock = new();
     private const string _debugLogPath = "sop_frame_debug.log";
@@ -938,9 +942,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 保存SOP检测模式配置（由SOP配置界面调用）
     /// </summary>
-    public void SaveSOPDetectionConfig(string detectionMode, bool enableHandPose, int maxNumHands = 2)
+    public void SaveSOPDetectionConfig(string detectionMode, bool enableHandPose, int maxNumHands = 2,
+        bool enableFaceFilter = true, float faceFilterUpperRatio = 0.38f,
+        bool enableHandStructureCheck = true, float handStructureWristTipRatio = 0.18f,
+        float detectionConfidenceThreshold = 0.08f, float minBoxAreaRatio = 0.0005f,
+        bool rotationAugmentation = true)
     {
-        _savedSOPDetectionConfig = (detectionMode, enableHandPose, maxNumHands);
+        _savedSOPDetectionConfig = (detectionMode, enableHandPose, maxNumHands,
+            enableFaceFilter, faceFilterUpperRatio,
+            enableHandStructureCheck, handStructureWristTipRatio,
+            detectionConfidenceThreshold, minBoxAreaRatio,
+            rotationAugmentation);
         Console.WriteLine($"[MainViewModel] SOP检测配置已保存: 模式={detectionMode}, 手部检测={enableHandPose}");
     }
 
@@ -1170,7 +1182,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                         {
                             MaxNumHands = savedConfig.MaxNumHands,
                             ConfidenceThreshold = 0.5f,
-                            UseGpu = true
+                            UseGpu = true,
+                            EnableFaceFilter = savedConfig.EnableFaceFilter,
+                            FaceFilterUpperRatio = savedConfig.FaceFilterUpperRatio,
+                            EnableHandStructureCheck = savedConfig.EnableHandStructureCheck,
+                            HandStructureWristTipRatio = savedConfig.HandStructureWristTipRatio,
+                            DetectionConfidenceThreshold = savedConfig.DetectionConfidenceThreshold,
+                            MinBoxAreaRatio = savedConfig.MinBoxAreaRatio,
+                            RotationAugmentation = savedConfig.RotationAugmentation
                         });
                     }
                 }

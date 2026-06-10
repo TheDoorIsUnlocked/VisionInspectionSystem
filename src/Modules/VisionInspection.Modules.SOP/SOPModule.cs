@@ -443,33 +443,36 @@ public class SOPModule : IDetectionModule
             }
 
             // 选择手部检测方案
-            // 方案1: YOLOv8-hand - 直接检测手部，速度快，适合工业场景
-            // 方案2: DWPose - 全身姿态检测后提取手部，支持关键点但速度慢
-            bool useYoloHand = true;  // 切换到YOLOv8-hand方案
+            // 方案1: MediaPipe - 两阶段检测(手掌+关键点)，握拳/横向手都能检测
+            // 方案2: YOLOv8-hand - 单阶段检测，速度快但握拳/横向手识别差
+            // 方案3: DWPose - 全身姿态检测后提取手部，支持关键点但速度慢
 
-            if (useYoloHand)
+            // 优先使用 MediaPipe（手掌模型对各种手部姿势泛化更好）
+            bool useMediaPipe = File.Exists(handConfig.PalmModelPath)
+                && handConfig.PalmModelPath.Contains("palm_detection")
+                && File.Exists(handConfig.LandmarkModelPath);
+
+            if (useMediaPipe)
             {
-                // 使用YOLOv8-hand专用手部检测模型
+                Log($"检测到 MediaPipe 模型，使用 MediaPipe 方案（握拳/横向手支持更好）");
+                _handPoseService = new MediaPipeHandService();
+                await _handPoseService.InitializeAsync(handConfig);
+                Log($"MediaPipe 手部姿态初始化完成, IsInitialized={_handPoseService.IsInitialized}");
+            }
+            else
+            {
+                // 回退方案: 尝试 YOLO，再失败则用 DWPose
                 string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx";
-                
+
                 if (!File.Exists(yoloHandModelPath))
                 {
-                    // 尝试其他路径 - 包括专用手部模型和通用YOLOv8模型
                     var possiblePaths = new[]
                     {
-                        // YOLO11n-pose 手部关键点检测模型（推荐）
                         @"e:\yolo\YoloDotNet-master\yolo_models\yolo11n-pose-hands.onnx",
-                        // YOLOv8-hand 专用手部检测模型
                         @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-hand.onnx",
                         @"e:\yolo\YoloDotNet-master\yolo_models\yolov8m-hand.onnx",
-                        // 通用YOLOv8模型
-                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s.onnx",
-                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n.onnx",
-                        // 程序目录下的模型
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolo11n-pose-hands.onnx"),
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8n-hand.onnx"),
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s-hand.onnx"),
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s.onnx"),
                     };
                     yoloHandModelPath = possiblePaths.FirstOrDefault(File.Exists) ?? "";
                 }
@@ -479,29 +482,18 @@ public class SOPModule : IDetectionModule
                     handConfig.PalmModelPath = yoloHandModelPath;
                     _handPoseService = new YoloHandDetectionService();
                     await _handPoseService.InitializeAsync(handConfig);
-                    Log($"手部姿态估计初始化成功（YOLOv8-hand方案）, 模型: {yoloHandModelPath}, IsInitialized={_handPoseService.IsInitialized}");
+                    Log($"手部姿态估计初始化成功（YOLO方案）, 模型: {yoloHandModelPath}");
                 }
                 else
                 {
-                    Log("警告: 未找到YOLOv8-hand模型，回退到DWPose方案");
-                    useYoloHand = false;
+                    // DWPose 兜底
+                    string dwposeModelDir = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
+                    handConfig.PalmModelPath = dwposeModelDir;
+                    handConfig.LandmarkModelPath = dwposeModelDir;
+                    _handPoseService = new DWPoseHandEstimationService();
+                    await _handPoseService.InitializeAsync(handConfig);
+                    Log($"手部姿态估计初始化成功（DWPose兜底方案）");
                 }
-            }
-
-            if (!useYoloHand)
-            {
-                // 使用DWPose进行手部检测（全身姿态检测，提取手部关键点，支持双手）
-                // DWPose模型路径: e:\yolo\YoloDotNet-master\DWPose-onnx\models\
-                string dwposeModelDir = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
-
-                // 更新配置使用DWPose模型
-                handConfig.PalmModelPath = dwposeModelDir;  // 检测模型目录
-                handConfig.LandmarkModelPath = dwposeModelDir;  // 姿态模型目录
-
-                _handPoseService = new DWPoseHandEstimationService();
-                await _handPoseService.InitializeAsync(handConfig);
-
-                Log($"手部姿态估计初始化成功（DWPose方案）, IsInitialized={_handPoseService.IsInitialized}");
             }
         }
         catch (Exception ex)

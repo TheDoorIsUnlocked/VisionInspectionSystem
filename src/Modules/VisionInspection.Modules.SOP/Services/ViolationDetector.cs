@@ -327,12 +327,9 @@ public class ViolationDetector
         return null;
     }
 
-    private bool IsInZone(SKRect objectBox, ZoneDefinition zone)
+    private static bool IsInZone(SKRect objectBox, ZoneDefinition zone)
     {
-        var objectCenterX = objectBox.MidX;
-        var objectCenterY = objectBox.MidY;
-
-        return objectCenterX >= zone.X && objectCenterX <= zone.X + zone.Width &&
-               objectCenterY >= zone.Y && objectCenterY <= zone.Y + zone.Height;
+        var zoneBox = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+        return objectBox.IntersectsWith(zoneBox);
     }
 }
