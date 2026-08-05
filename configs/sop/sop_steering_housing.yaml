@@ -27,20 +27,12 @@ sop:
     timeoutSeconds: 30
 
   regions:
-    fixture_zone:
-      x1: 300,  y1: 250,  x2: 500,  y2: 450
-      name: "夹具定位区"
-    seal_zone:
-      x1: 350,  y1: 300,  x2: 500,  y2: 380
-      name: "密封面区域"
-    tool_zone:
-      x1: 550,  y1: 200,  x2: 750,  y2: 400
-      name: "工具架区域"
+    fixture_zone: { x1: 300,  y1: 250,  x2: 500,  y2: 450, name: "夹具定位区" }
+    seal_zone:    { x1: 350,  y1: 300,  x2: 500,  y2: 380, name: "密封面区域" }
+    tool_zone:    { x1: 550,  y1: 200,  x2: 750,  y2: 400, name: "工具架区域" }
 
   forbidden_zones:
-    danger_left:
-      x1: 0,    y1: 0,    x2: 100,  y2: 1000
-      name: "左侧危险区"
+    danger_left:  { x1: 0,    y1: 0,    x2: 100,  y2: 1000, name: "左侧危险区" }
 
   steps:
     - id: "step_1"
@@ -127,3 +119,19 @@ sop:
         - "part_gasket"
         - "part_cover"
         - "part_screw"
+
+    # ⭐ 漏放校验：与手机包装配方共用同一套 MissingRequiredObject 引擎，
+    # 此处声明的是转向器产品自己的必装零件，证明"漏放规则"可跨产品/配方复用。
+    - id: "step_7"
+      name: "成品漏放校验"
+      timeout: 30
+      transitions: []
+      description: "在夹具区停留2秒，校验壳体/密封垫/盖板/螺栓是否全部就位；任一缺失即判漏放。"
+      detection:
+        method: "time_elapsed"
+        stable_frames: 2
+      required_objects:
+        - { object: "part_base",   zone: "fixture_zone", min_confidence: 0.6 }
+        - { object: "part_gasket", zone: "fixture_zone", min_confidence: 0.6 }
+        - { object: "part_cover",  zone: "fixture_zone", min_confidence: 0.6 }
+        - { object: "part_screw",  zone: "fixture_zone", min_confidence: 0.6 }

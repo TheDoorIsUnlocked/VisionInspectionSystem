@@ -1,0 +1,82 @@
+# ============================================================
+# SOP 配方 YAML 范本（可直接复制改名后使用）
+# ------------------------------------------------------------
+# 用法：
+#   1) 复制本文件为 sop_你的产品名.yaml，放进 configs/sop/ 目录；
+#   2) 在界面「📦 产品配方」下拉框中即可看到并切换；
+#   3) 区域坐标(x1,y1,x2,y2)是相机帧像素，用「🎯 标定区域」工具实际拖框生成；
+#   4) model.path 必须指向训练好的专用模型，否则通用 COCO 模型认不出专属物料。
+# 注意：本文件含注释，转换器会忽略注释，仅读取字段；可作为模板长期保留。
+# ============================================================
+
+sop:
+  name: "范本配方（请改名）"        # 产品/工单名称，下拉框显示名
+  version: "1.0"
+  description: "SOP 作业监测配方范本"
+
+  # ---------------- 全局检测设置 ----------------
+  settings:
+    detectionMode: "UnifiedDetection"   # 统一检测（YOLO 物体 + DWPose 手部）
+    confidenceThreshold: 0.5            # 检测置信度阈值 (0-1)
+    stableFrames: 3                     # 状态稳定所需连续帧数
+    timeoutSeconds: 30                  # 单步默认超时（秒）
+    enableSkipDetection: true           # 是否检测“跳步”
+    enableTimeoutDetection: true        # 是否检测“超时”
+
+  # ---------------- ROI 区域 ----------------
+  # 在「🎯 标定区域」中拖框生成；区域 ID（如 part_box）供 steps 的 detection.region 引用。
+  # 坐标为相对相机帧分辨率的像素。
+  regions:
+    part_box:    { x1: 50,  y1: 200, x2: 250, y2: 400, name: "料盒" }
+    fixture:     { x1: 300, y1: 250, x2: 500, y2: 450, name: "夹具" }
+    finished:    { x1: 600, y1: 300, x2: 800, y2: 500, name: "成品区" }
+
+  # ---------------- 作业步骤（按顺序）----------------
+  steps:
+    - id: "1"
+      name: "取料"
+      description: "右手进入料盒区域"
+      timeout: 15
+      detection:
+        method: "hand_in_region"     # 手部条件：手进入某区域
+        hand: "right"                # right / left
+        region: "part_box"           # 引用 regions 中的 ID
+
+    - id: "2"
+      name: "放料到夹具"
+      description: "右手从料盒移到夹具"
+      timeout: 20
+      detection:
+        method: "hand_move"          # 手部动作：从 A 区移到 B 区
+        hand: "right"
+        from_region: "part_box"
+        to_region: "fixture"
+      forbidden_objects:             # 本步禁止出现的类别（防错料）
+        - "wrongPart"
+
+    - id: "3"
+      name: "成品校验（漏放检测）"
+      description: "在成品区检查必放物料是否齐全"
+      timeout: 30
+      detection:
+        method: "time_elapsed"       # 停留计时，让成品稳定可见
+        stable_frames: 2             # 停留约 2 秒
+      required_objects:              # 漏放校验：以下物料必须存在（可指定 zone）
+        - object: "phone"
+          zone: "finished"
+          min_confidence: 0.5
+        - object: "case_top"
+          zone: "finished"
+          min_confidence: 0.5
+        - object: "charger"
+          zone: ""
+          min_confidence: 0.5
+
+  # ---------------- 模型配置 ----------------
+  model:
+    path: "yolo_models/sop_custom_yolov8s.onnx"  # 替换为你的专用模型（如 sop_phone_yolo26s.onnx）
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    useGpu: true
+    classes: ["phone", "case_top", "charger"]    # 与训练时的类别名完全一致

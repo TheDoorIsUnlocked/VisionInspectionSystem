@@ -12,6 +12,7 @@
   "RegionConfigPath": "configs/sop/regions/phone_usage_regions.json",
   "WorkflowPath": "configs/sop/sop_phone_usage.yaml",
   "DetectionMode": "PoseBased",
+  "HandDetectionBackend": "DWPose",
   "Steps": [
     {
       "Id": "idle",

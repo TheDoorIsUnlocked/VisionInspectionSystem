@@ -48,6 +48,7 @@ public class ViolationDetector
                 ViolationType.ZoneIntrusion => DetectZoneIntrusion(currentStep, detections, timestamp),
                 ViolationType.SkipStep => DetectSkipStep(currentStep, detections, timestamp),
                 ViolationType.WrongOrder => DetectWrongOrder(currentStep, timestamp),
+                ViolationType.MissingRequiredObject => DetectMissingRequiredObject(currentStep, detections, timestamp),
                 _ => null
             };
 
@@ -180,6 +181,87 @@ public class ViolationDetector
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 检测漏放 / 缺料：当前步骤声明的必放物料（required_objects）中，若有任意一项在画面
+    /// （或在指定区域内）未以足够置信度出现，即判"漏放"违规。
+    /// 这是通用的数据驱动规则——每个配方在 YAML 中声明自己的必放物料，切换产品即复用同一引擎。
+    /// 防误报：若画面中完全没有任何必放物料出现，视为"成品尚未入框"，暂不判定漏放。
+    /// </summary>
+    private ViolationRecord? DetectMissingRequiredObject(SOPStep step, List<ObjectDetection> detections, DateTime timestamp)
+    {
+        var reqRules = step.ViolationRules
+            .Where(r => r.Type == ViolationType.MissingRequiredObject)
+            .ToList();
+        if (reqRules.Count == 0) return null;
+
+        // 汇集本步骤所有必放物料（类别 + 可选区域 + 最小置信度）
+        var required = new List<(string Class, string Zone, float MinConf)>();
+        foreach (var rule in reqRules)
+        {
+            if (!rule.Parameters.TryGetValue("RequiredObjects", out var obj)
+                || obj is not System.Collections.IEnumerable enumerable)
+            {
+                continue;
+            }
+
+            foreach (var item in enumerable)
+            {
+                if (item is Dictionary<string, object> d)
+                {
+                    var cls = (d.GetValueOrDefault("class", "") as string) ?? "";
+                    if (string.IsNullOrWhiteSpace(cls)) continue;
+                    var zone = (d.GetValueOrDefault("zone", "") as string) ?? "";
+                    var mcVal = d.GetValueOrDefault("min_confidence", 0.5f);
+                    float minc = mcVal is float f ? f : Convert.ToSingle(mcVal);
+                    required.Add((cls, zone, minc));
+                }
+                else if (item is string s && !string.IsNullOrWhiteSpace(s))
+                {
+                    required.Add((s, "", 0.5f));
+                }
+            }
+        }
+
+        if (required.Count == 0) return null;
+
+        // 防误报：画面中完全未出现任何必放物料时，视为成品尚未入框，不判漏放
+        var anyPresentAnywhere = detections.Any(d =>
+            required.Any(r => (d.Label?.Name ?? "").Equals(r.Class, StringComparison.OrdinalIgnoreCase)
+                              && d.Confidence >= r.MinConf));
+        if (!anyPresentAnywhere) return null;
+
+        // 逐项检查是否漏放
+        var missing = new List<string>();
+        foreach (var (cls, zone, minc) in required)
+        {
+            var matches = detections
+                .Where(d => (d.Label?.Name ?? "").Equals(cls, StringComparison.OrdinalIgnoreCase))
+                .Where(d => d.Confidence >= minc);
+
+            if (!string.IsNullOrEmpty(zone))
+            {
+                var z = GetZoneDefinition(zone);
+                if (z != null) matches = matches.Where(d => IsInZone(d.BoundingBox, z));
+            }
+
+            if (!matches.Any())
+            {
+                missing.Add(string.IsNullOrEmpty(zone) ? cls : $"{cls}(区域:{zone})");
+            }
+        }
+
+        if (missing.Count == 0) return null;
+
+        return new ViolationRecord
+        {
+            Timestamp = timestamp,
+            Type = ViolationType.MissingRequiredObject,
+            Description = $"漏放：缺少必须放置的物料 {string.Join(", ", missing)}",
+            StepId = step.StepId,
+            Evidence = $"Missing_{string.Join("_", missing)}_{timestamp:HHmmss}"
+        };
     }
 
     /// <summary>

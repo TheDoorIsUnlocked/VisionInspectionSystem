@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SkiaSharp;
 using VisionInspection.Modules.SOP.Models;
 using YoloDotNet.Models;
@@ -11,6 +12,20 @@ public class StepConditionEvaluator
 {
     private readonly SOPStateMachine _stateMachine;
     private readonly Dictionary<string, ZoneDefinition> _zones;
+
+    // 调试日志：与 SOPModule.DebugLog 写同一文件 sop_module_debug.log，方便一次性查看
+    private const string DebugLogFile = "sop_module_debug.log";
+    private static readonly object _dbgLock = new();
+    private static void Dbg(string msg)
+    {
+        var line = $"[{DateTime.Now:HH:mm:ss.fff}] [StepConditionEvaluator] {msg}";
+        Console.WriteLine(line);
+        Debug.WriteLine(line);
+        lock (_dbgLock)
+        {
+            try { File.AppendAllText(DebugLogFile, line + Environment.NewLine); } catch { }
+        }
+    }
 
     public StepConditionEvaluator(SOPStateMachine stateMachine, IReadOnlyList<ZoneDefinition>? zones = null)
     {
@@ -31,10 +46,13 @@ public class StepConditionEvaluator
     }
 
     /// <summary>
-    /// 评估步骤的所有条件
+    /// 评估步骤的所有条件（物体 + 手部姿态）
     /// </summary>
-    public ConditionEvaluationResult EvaluateConditions(SOPStep step, List<ObjectDetection> detections)
+    public ConditionEvaluationResult EvaluateConditions(SOPStep step, List<ObjectDetection> detections, HandPoseEstimationResult? handResult = null)
     {
+        // 先更新手部跨帧跟踪状态（用于稳定/移动判断）
+        UpdateHandTracks(handResult);
+
         if (step.PassConditions.Count == 0)
         {
             return new ConditionEvaluationResult { IsPass = true };
@@ -42,9 +60,29 @@ public class StepConditionEvaluator
 
         var results = new List<ConditionCheckResult>();
 
+        // [DEBUG] 评估入口摘要：每帧打印当前步骤的关键输入，便于排查"卡在某一步"。
+        // 一帧一行，格式固定，方便从 stdout grep。
+        if (step.PassConditions.Any(c =>
+            c.Type == ConditionType.HandMoveFromTo ||
+            c.Type == ConditionType.HandInRegion ||
+            c.Type == ConditionType.HandNotInRegion ||
+            c.Type == ConditionType.HandStable))
+        {
+            int handCount = handResult?.Hands?.Count ?? 0;
+            string handSummary = handCount == 0
+                ? "none"
+                : string.Join("|", handResult!.Hands.Select(h =>
+                    $"{h.HandType}(kx={h.Keypoints.Count},bbox={h.BoundingBox.Left:F0},{h.BoundingBox.Top:F0}-{h.BoundingBox.Right:F0},{h.BoundingBox.Bottom:F0})"));
+            string detSummary = detections.Count == 0
+                ? "none"
+                : string.Join("|", detections.Select(d =>
+                    $"{d.Label?.Name ?? "?"}({d.Confidence:F2},[{d.BoundingBox.Left:F0},{d.BoundingBox.Top:F0}-{d.BoundingBox.Right:F0},{d.BoundingBox.Bottom:F0}])"));
+            Dbg($"step='{step.StepName}' hands={handSummary} dets={detSummary}");
+        }
+
         foreach (var condition in step.PassConditions)
         {
-            var result = CheckCondition(condition, detections);
+            var result = CheckCondition(condition, detections, handResult);
             results.Add(result);
 
             if (!result.IsMet)
@@ -67,8 +105,23 @@ public class StepConditionEvaluator
         };
     }
 
-    private ConditionCheckResult CheckCondition(StepCondition condition, List<ObjectDetection> detections)
+    private ConditionCheckResult CheckCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
     {
+        // 手部动作条件分支
+        if (condition.Type == ConditionType.HandInRegion ||
+            condition.Type == ConditionType.HandNotInRegion ||
+            condition.Type == ConditionType.HandStable ||
+            condition.Type == ConditionType.HandMoveFromTo)
+        {
+            return CheckHandCondition(condition, detections, handResult);
+        }
+
+        if (condition.Type == ConditionType.HandNearObject)
+        {
+            return CheckHandNearObject(condition, detections, handResult);
+        }
+
+        // 物体/时间条件分支
         return condition.Type switch
         {
             ConditionType.ObjectPresent => CheckObjectPresent(condition, detections),
@@ -79,6 +132,371 @@ public class StepConditionEvaluator
             ConditionType.TimeElapsed => CheckTimeElapsed(condition),
             _ => new ConditionCheckResult { IsMet = false, Message = $"未知条件类型: {condition.Type}" }
         };
+    }
+
+    #region 手部动作条件评估
+
+    /// <summary>
+    /// 每只手最近若干帧的中心轨迹与经过区域记录（用于稳定/移动判断）
+    /// </summary>
+    private class HandTrackState
+    {
+        public List<SKPoint> CenterHistory { get; } = new();
+        public HashSet<string> RecentRegions { get; } = new();   // 最近访问过的区域
+        public const int MaxHistory = 30;
+    }
+
+    private readonly Dictionary<int, HandTrackState> _handTracks = new();
+
+    private void UpdateHandTracks(HandPoseEstimationResult? handResult)
+    {
+        if (handResult == null) return;
+
+        var alive = new HashSet<int>();
+        foreach (var hand in handResult.Hands)
+        {
+            if (hand.TrackId < 0) continue;
+            alive.Add(hand.TrackId);
+
+            if (!_handTracks.TryGetValue(hand.TrackId, out var track))
+            {
+                track = new HandTrackState();
+                _handTracks[hand.TrackId] = track;
+            }
+
+            var center = hand.GetCenter();
+            track.CenterHistory.Add(center);
+            if (track.CenterHistory.Count > HandTrackState.MaxHistory)
+                track.CenterHistory.RemoveAt(0);
+
+            // 记录当前所在的区域
+            foreach (var zone in _zones.Values)
+            {
+                var zoneRect = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+                if (zoneRect.Contains(center))
+                {
+                    track.RecentRegions.Add(zone.ZoneId);
+                }
+            }
+            if (track.RecentRegions.Count > 20)
+                track.RecentRegions.Remove(track.RecentRegions.First());
+        }
+
+        // 清理离开画面的手
+        foreach (var id in _handTracks.Keys.ToList())
+        {
+            if (!alive.Contains(id)) _handTracks.Remove(id);
+        }
+    }
+
+    /// <summary>
+    /// 根据条件参数选择左手/右手（默认右手）
+    /// </summary>
+    private HandPose? SelectHand(StepCondition condition, HandPoseEstimationResult? handResult)
+    {
+        if (handResult == null || handResult.Hands.Count == 0) return null;
+
+        var handSide = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString()?.ToLower() ?? "right";
+        var preferredType = handSide switch
+        {
+            "left" or "左手" => HandType.Left,
+            _ => HandType.Right
+        };
+
+        var chosen = handResult.Hands.FirstOrDefault(h => h.HandType == preferredType && h.IsValidGesture(8))
+                     ?? handResult.Hands.FirstOrDefault(h => h.IsValidGesture(8));
+        return chosen;
+    }
+
+    private ConditionCheckResult CheckHandCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
+    {
+        var hand = SelectHand(condition, handResult);
+        if (hand == null)
+        {
+            var side = condition.Parameters.GetValueOrDefault("HandSide", "right");
+            return new ConditionCheckResult { IsMet = false, Message = $"未检测到{side}手" };
+        }
+
+        var center = hand.GetCenter();
+
+        switch (condition.Type)
+        {
+            case ConditionType.HandInRegion:
+            {
+                var zone = GetZoneDefinition(condition.ZoneId ?? "");
+                if (zone == null) return new ConditionCheckResult { IsMet = false, Message = $"未找到区域: {condition.ZoneId}" };
+                var zoneRect = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+                return zoneRect.Contains(center)
+                    ? new ConditionCheckResult { IsMet = true, Message = $"{condition.ZoneId} 内检测到手部" }
+                    : new ConditionCheckResult { IsMet = false, Message = $"手部未在区域 {condition.ZoneId} 内" };
+            }
+            case ConditionType.HandNotInRegion:
+            {
+                var zone = GetZoneDefinition(condition.ZoneId ?? "");
+                if (zone == null) return new ConditionCheckResult { IsMet = false, Message = $"未找到区域: {condition.ZoneId}" };
+                var zoneRect = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+                return !zoneRect.Contains(center)
+                    ? new ConditionCheckResult { IsMet = true, Message = $"手部不在区域 {condition.ZoneId} 内" }
+                    : new ConditionCheckResult { IsMet = false, Message = $"手部仍在区域 {condition.ZoneId} 内" };
+            }
+            case ConditionType.HandStable:
+            {
+                if (!_handTracks.TryGetValue(hand.TrackId, out var track) || track.CenterHistory.Count < condition.StableFrames)
+                    return new ConditionCheckResult { IsMet = false, Message = $"手部稳定帧不足（已跟踪 {track?.CenterHistory.Count ?? 0}/{condition.StableFrames}）" };
+
+                var tolerance = condition.Parameters.GetValueOrDefault("Tolerance", 20f);
+                float tol = tolerance is float f ? f : Convert.ToSingle(tolerance);
+
+                var recent = track.CenterHistory.TakeLast(condition.StableFrames).ToList();
+                double maxMove = 0;
+                for (int i = 1; i < recent.Count; i++)
+                {
+                    var d = SKPoint.Distance(recent[i - 1], recent[i]);
+                    if (d > maxMove) maxMove = d;
+                }
+                return maxMove <= tol
+                    ? new ConditionCheckResult { IsMet = true, Message = $"手部已稳定（最大位移 {maxMove:F1}px ≤ {tol}px）" }
+                    : new ConditionCheckResult { IsMet = false, Message = $"手部未稳定（最大位移 {maxMove:F1}px > {tol}px）" };
+            }
+            case ConditionType.HandMoveFromTo:
+            {
+                var fromRegion = condition.Parameters.GetValueOrDefault("FromRegion", "")?.ToString() ?? "";
+                var toRegion = condition.Parameters.GetValueOrDefault("ToRegion", "")?.ToString() ?? "";
+                bool hasFrom = !string.IsNullOrEmpty(fromRegion);
+                bool hasTo = !string.IsNullOrEmpty(toRegion);
+
+                var zoneFrom = hasFrom ? GetZoneDefinition(fromRegion) : null;
+                var zoneTo = hasTo ? GetZoneDefinition(toRegion) : null;
+                if (hasFrom && zoneFrom == null) return new ConditionCheckResult { IsMet = false, Message = $"未找到起始区域: {fromRegion}" };
+                if (hasTo && zoneTo == null) return new ConditionCheckResult { IsMet = false, Message = $"未找到目标区域: {toRegion}" };
+
+                var fromRect = zoneFrom != null ? new SKRect(zoneFrom.X, zoneFrom.Y, zoneFrom.X + zoneFrom.Width, zoneFrom.Y + zoneFrom.Height) : SKRect.Empty;
+                var toRect = zoneTo != null ? new SKRect(zoneTo.X, zoneTo.Y, zoneTo.X + zoneTo.Width, zoneTo.Y + zoneTo.Height) : SKRect.Empty;
+
+                bool inFrom = zoneFrom != null && fromRect.Contains(center);
+                bool inTo = zoneTo != null && toRect.Contains(center);
+                bool visitedFrom = hasFrom
+                    && _handTracks.TryGetValue(hand.TrackId, out var t2)
+                    && t2.RecentRegions.Contains(fromRegion);
+
+                // [DEBUG] HandMoveFromTo 入口摘要：所有输入一目了然
+                Dbg(
+                    $"HandMoveFromTo target='{condition.TargetObject}' minConf={condition.MinConfidence:F2} stableFrames={condition.StableFrames} " +
+                    $"from='{fromRegion}'({(zoneFrom != null ? $"[{zoneFrom.X},{zoneFrom.Y}-{zoneFrom.X + zoneFrom.Width},{zoneFrom.Y + zoneFrom.Height}]" : "null")}) " +
+                    $"to='{toRegion}'({(zoneTo != null ? $"[{zoneTo.X},{zoneTo.Y}-{zoneTo.X + zoneTo.Width},{zoneTo.Y + zoneTo.Height}]" : "null")}) " +
+                    $"hand[{hand.HandType}](center=({center.X:F0},{center.Y:F0}) bbox=[{hand.BoundingBox.Left:F0},{hand.BoundingBox.Top:F0}-{hand.BoundingBox.Right:F0},{hand.BoundingBox.Bottom:F0}] keypoints={hand.Keypoints.Count}) " +
+                    $"inFrom={inFrom} inTo={inTo} visitedFrom={visitedFrom} trackEntries={_handTracks.Count}");
+
+                // ⭐ 目标物体辅助判定：手正拿着 target_object（适用于"拿起/放下"最直接的语义）
+                bool handHoldingTarget = false;
+                ObjectDetection? targetObjDebug = null;
+                if (!string.IsNullOrEmpty(condition.TargetObject))
+                {
+                    var allCandidates = detections
+                        .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+                    var targetObj = allCandidates
+                        .Where(d => d.Confidence >= condition.MinConfidence)
+                        .OrderByDescending(d => d.Confidence)
+                        .FirstOrDefault();
+                    targetObjDebug = targetObj;
+
+                    if (allCandidates.Count > 0 && targetObj == null)
+                    {
+                        Dbg(
+                            $"  找到 {allCandidates.Count} 个候选 '{condition.TargetObject}' 但全部低于阈值 " +
+                            $"({condition.MinConfidence:F2})：{string.Join(",", allCandidates.Select(c => $"conf={c.Confidence:F2}"))}");
+                    }
+
+                    if (targetObj != null)
+                    {
+                        handHoldingTarget = IsHandHoldingObject(hand, targetObj, out var intersectDetail);
+                        Dbg(
+                            $"  target_obj '{condition.TargetObject}' conf={targetObj.Confidence:F2} " +
+                            $"bbox=[{targetObj.BoundingBox.Left:F0},{targetObj.BoundingBox.Top:F0}-{targetObj.BoundingBox.Right:F0},{targetObj.BoundingBox.Bottom:F0}] " +
+                            $"handHolding={handHoldingTarget} {intersectDetail}");
+                    }
+                    else if (allCandidates.Count == 0)
+                    {
+                        Dbg($"  本帧未检测到 '{condition.TargetObject}'（detections 里有 {detections.Count} 个其它物体）");
+                    }
+                }
+
+                if (hasTo)
+                {
+                    // 放下：目标物体已到达目标区域（最直接的语义）
+                    if (!string.IsNullOrEmpty(condition.TargetObject))
+                    {
+                        var targetObj = detections
+                            .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
+                            .Where(d => d.Confidence >= condition.MinConfidence)
+                            .OrderByDescending(d => d.Confidence)
+                            .FirstOrDefault();
+
+                        if (targetObj != null)
+                        {
+                            bool objInTo = toRect != SKRect.Empty && IsInZone(targetObj.BoundingBox, zoneTo!);
+                            // 物体已放入目标区域（无论手当前是否还握着，都视为放下）
+                            if (objInTo)
+                            {
+                                return new ConditionCheckResult
+                                {
+                                    IsMet = true,
+                                    Message = $"目标物体 '{condition.TargetObject}' 已到达区域 {toRegion}"
+                                };
+                            }
+                        }
+                    }
+
+                    // 放下：手到达目标区域（指定起始区域时需曾访问过）
+                    if (inTo && (!hasFrom || visitedFrom))
+                        return new ConditionCheckResult { IsMet = true, Message = $"手部已到达区域 {toRegion}" };
+
+                    return new ConditionCheckResult
+                    {
+                        IsMet = false,
+                        Message = hasFrom
+                            ? $"手部尚未从 {fromRegion} 到达 {toRegion}"
+                            : $"手部尚未进入目标区域 {toRegion}"
+                    };
+                }
+
+                // 无目标区域：理解为"从起始区域离开"或"拿起目标物体"（pickup 语义）
+                if (hasFrom)
+                {
+                    // ⭐ 优先判定：手正拿着 target_object —— 直接视为拿起
+                    // 即使物体 BBox 仍与 from_region 有交叠（用户拿起后手臂可能仍覆盖该区域），
+                    // 只要手握着物体就算拿起成功。这是最贴近真实"拿起"动作的语义。
+                    if (handHoldingTarget)
+                    {
+                        return new ConditionCheckResult
+                        {
+                            IsMet = true,
+                            Message = $"手部已拿起 '{condition.TargetObject}'"
+                        };
+                    }
+
+                    // 备用判定 1：手曾位于起始区域且现已离开
+                    if (visitedFrom && !inFrom)
+                        return new ConditionCheckResult { IsMet = true, Message = $"手部已离开区域 {fromRegion}" };
+
+                    // 备用判定 2：手曾在起始区域，且物体已离开起始区域（最宽松）
+                    if (visitedFrom && !string.IsNullOrEmpty(condition.TargetObject))
+                    {
+                        var targetObj = detections
+                            .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
+                            .Where(d => d.Confidence >= condition.MinConfidence)
+                            .OrderByDescending(d => d.Confidence)
+                            .FirstOrDefault();
+
+                        if (targetObj != null && fromRect != SKRect.Empty && !IsInZone(targetObj.BoundingBox, zoneFrom!))
+                        {
+                            return new ConditionCheckResult
+                            {
+                                IsMet = true,
+                                Message = $"目标物体 '{condition.TargetObject}' 已离开区域 {fromRegion}"
+                            };
+                        }
+                    }
+
+                    return new ConditionCheckResult
+                    {
+                        IsMet = false,
+                        Message = visitedFrom
+                            ? $"手部仍在区域 {fromRegion} 内（未拿起目标 {condition.TargetObject}）"
+                            : $"手部尚未访问区域 {fromRegion}，且未拿起目标 {condition.TargetObject}"
+                    };
+                }
+
+                // 既无 from 也无 to：只判"手拿着目标物体"
+                if (handHoldingTarget)
+                    return new ConditionCheckResult { IsMet = true, Message = $"手部已拿起 '{condition.TargetObject}'" };
+
+                return new ConditionCheckResult { IsMet = false, Message = "未配置起始/目标区域" };
+            }
+            default:
+                return new ConditionCheckResult { IsMet = false, Message = $"未支持的手部条件: {condition.Type}" };
+        }
+    }
+
+    /// <summary>
+    /// 手部靠近目标物体（手-物交互判断）：手的包围盒与目标检测框（外扩 margin）相交
+    /// </summary>
+    private ConditionCheckResult CheckHandNearObject(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
+    {
+        var hand = SelectHand(condition, handResult);
+        if (hand == null)
+            return new ConditionCheckResult { IsMet = false, Message = "未检测到目标手" };
+
+        var marginValue = condition.Parameters.GetValueOrDefault("Margin", 30f);
+        float margin = marginValue is float f ? f : Convert.ToSingle(marginValue);
+
+        foreach (var det in detections)
+        {
+            if (!string.Equals(det.Label?.Name, condition.TargetObject, StringComparison.OrdinalIgnoreCase)) continue;
+            if (det.Confidence < condition.MinConfidence) continue;
+
+            var box = det.BoundingBox;
+            var expanded = new SKRect(box.Left - margin, box.Top - margin, box.Right + margin, box.Bottom + margin);
+            if (expanded.IntersectsWith(hand.BoundingBox))
+                return new ConditionCheckResult { IsMet = true, Message = $"手部靠近 '{condition.TargetObject}'" };
+        }
+
+        return new ConditionCheckResult { IsMet = false, Message = $"手部未靠近 '{condition.TargetObject}'" };
+    }
+
+    #endregion
+
+    /// <summary>
+    /// 判断手是否正拿着目标物体：手框与物体框相交，或手的中心落在物体框内。
+    /// </summary>
+    private static bool IsHandHoldingObject(HandPose hand, ObjectDetection targetObj)
+    {
+        return IsHandHoldingObject(hand, targetObj, out _);
+    }
+
+    /// <summary>
+    /// 重载：附加返回每条子判断的明细，供调试日志使用。
+    /// </summary>
+    private static bool IsHandHoldingObject(HandPose hand, ObjectDetection targetObj, out string detail)
+    {
+        var objBox = targetObj.BoundingBox;
+        if (objBox.IsEmpty)
+        {
+            detail = "(物体 BBox 为空)";
+            return false;
+        }
+
+        // 1. 手部包围盒与物体包围盒相交
+        bool intersectBox = hand.BoundingBox.IntersectsWith(objBox);
+        if (intersectBox)
+        {
+            detail = $"(BBox相交: hand[{hand.BoundingBox.Left:F0},{hand.BoundingBox.Top:F0}-{hand.BoundingBox.Right:F0},{hand.BoundingBox.Bottom:F0}] ∩ obj[{objBox.Left:F0},{objBox.Top:F0}-{objBox.Right:F0},{objBox.Bottom:F0}])";
+            return true;
+        }
+
+        // 2. 手部中心落在物体框内
+        var center = hand.GetCenter();
+        bool centerInObj = objBox.Contains((int)center.X, (int)center.Y);
+        if (centerInObj)
+        {
+            detail = $"(手中心({center.X:F0},{center.Y:F0})在物体内)";
+            return true;
+        }
+
+        // 3. 手部中心在物体框附近（留 30px 容差）
+        const float margin = 30f;
+        var expanded = new SKRect(objBox.Left - margin, objBox.Top - margin, objBox.Right + margin, objBox.Bottom + margin);
+        bool centerNearObj = expanded.Contains((int)center.X, (int)center.Y);
+        if (centerNearObj)
+        {
+            detail = $"(手中心({center.X:F0},{center.Y:F0})在物体框外扩[{margin}px]范围内)";
+            return true;
+        }
+
+        detail = $"(手中心({center.X:F0},{center.Y:F0})距离物体中心最近" +
+                 $"|dx={center.X - (objBox.Left + objBox.Right) / 2:F0}|dy={center.Y - (objBox.Top + objBox.Bottom) / 2:F0}|)";
+        return false;
     }
 
     /// <summary>

@@ -445,6 +445,7 @@ public class SOPWorkflowManager
             (ViolationType.WrongOrder, "顺序错误", "步骤顺序不正确"),
             (ViolationType.ForbiddenObject, "禁止对象", "出现禁止的对象"),
             (ViolationType.ObjectRemoved, "对象被移除", "必须保持的对象被移除"),
+            (ViolationType.MissingRequiredObject, "漏放/缺料", "最终校验时必放物料缺失"),
             (ViolationType.ZoneIntrusion, "区域入侵", "进入禁区")
         };
     }

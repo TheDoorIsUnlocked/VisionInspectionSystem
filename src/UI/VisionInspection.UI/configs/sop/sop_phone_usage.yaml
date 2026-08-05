@@ -12,6 +12,9 @@ sop:
     confidenceThreshold: 0.6
     stableFrames: 3
     timeoutSeconds: 30
+    # 持续监控场景：所有步骤通过后自动重置，循环检测下一轮
+    auto_reset_on_complete: true
+    reset_delay_sec: 3
   
   # 区域定义
   regions:
@@ -66,6 +69,7 @@ sop:
         action: "pickup"
         hand: "any"
         from_region: "phone_table"
+        target_object: "cell phone"
         min_confidence: 0.6
         stable_frames: 3
         description: "手从手机放置区拿起手机"
@@ -104,6 +108,7 @@ sop:
         action: "putdown"
         hand: "any"
         to_region: "phone_table"
+        target_object: "cell phone"
         min_confidence: 0.6
         stable_frames: 3
         description: "手将手机放回放置区"

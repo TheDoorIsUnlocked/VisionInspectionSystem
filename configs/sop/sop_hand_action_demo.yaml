@@ -1,0 +1,59 @@
+sop:
+  name: "手部动作MVP演示"
+  version: "1.0"
+  description: "验证 DWPose 手部结果接入状态机：取料→放料→压合"
+  settings:
+    detectionMode: "UnifiedDetection"
+    confidenceThreshold: 0.5
+    stableFrames: 3
+    timeoutSeconds: 30
+    enableSkipDetection: true
+    enableTimeoutDetection: true
+
+  # 区域（在画面上用 ROI 标定，坐标需按实际相机分辨率填写）
+  regions:
+    part_box:    { x1: 50,  y1: 200, x2: 250, y2: 400, name: "料盒" }
+    fixture:     { x1: 300, y1: 250, x2: 500, y2: 450, name: "夹具" }
+    tool_rack:   { x1: 550, y1: 200, x2: 750, y2: 400, name: "工具架" }
+    product:     { x1: 320, y1: 270, x2: 480, y2: 430, name: "产品" }
+
+  steps:
+    - id: "1"
+      name: "取料"
+      description: "右手进入料盒区域"
+      timeout: 15
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "part_box"
+
+    - id: "2"
+      name: "放料"
+      description: "右手从料盒移动到夹具并稳定"
+      timeout: 20
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "part_box"
+        to_region: "fixture"
+
+    - id: "3"
+      name: "压合"
+      description: "右手进入工具架取工具(压合器)并靠近产品稳定"
+      timeout: 25
+      detection:
+        method: "hand_near_object"
+        hand: "right"
+        target_object: "pressTool"
+        tolerance: 40          # 手-物交互的外扩边距(px)
+      violation_rules:
+        - type: "ForbiddenObject"
+          description: "禁止出现异物"
+
+  model:
+    path: "yolo_models/sop_custom_yolov8s.onnx"   # 替换为你的专用模型；未准备好时可先用 yolov8s.onnx（仅COCO类）
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    useGpu: true
+    classes: ["pressTool", "tape", "frame", "product"]

@@ -1,0 +1,103 @@
+sop:
+  name: "手机包装作业监测"
+  version: "1.0"
+  description: "手机包装 SOP：放盖→放手机→放说明书→放配件→盖上盖→成品。区域坐标为占位示意（基于1280x720），请用 ROI 标定工具按真机重新拖框。"
+  settings:
+    detectionMode: "UnifiedDetection"
+    confidenceThreshold: 0.5
+    stableFrames: 3
+    timeoutSeconds: 45
+    enableSkipDetection: true
+    enableTimeoutDetection: true
+
+  # 区域（在画面上用 ROI 标定工具拖框生成，坐标是占位值）
+  regions:
+    phone_tray:       { x1: 100,  y1: 120, x2: 260,  y2: 260, name: "手机托盘" }
+    manual_zone:      { x1: 280,  y1: 120, x2: 400,  y2: 240, name: "说明书位" }
+    accessory_zone:   { x1: 820,  y1: 120, x2: 1000, y2: 280, name: "充电配件位" }
+    bottom_case_zone: { x1: 480,  y1: 380, x2: 680,  y2: 520, name: "下盖/装配区" }
+    top_case_zone:    { x1: 1020, y1: 380, x2: 1180, y2: 540, name: "上盖存放" }
+    finished_zone:    { x1: 480,  y1: 560, x2: 680,  y2: 680, name: "成品区" }
+
+  steps:
+    - id: "1"
+      name: "放置下盖"
+      description: "右手将手机盒下盖放到装配区"
+      timeout: 15
+      detection:
+        method: "hand_in_region"
+        hand: "right"
+        region: "bottom_case_zone"
+
+    - id: "2"
+      name: "放入手机"
+      description: "右手从手机托盘取手机移入装配区"
+      timeout: 15
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "phone_tray"
+        to_region: "bottom_case_zone"
+
+    - id: "3"
+      name: "放入说明书"
+      description: "右手从说明书位取说明书移入装配区"
+      timeout: 15
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "manual_zone"
+        to_region: "bottom_case_zone"
+
+    - id: "4"
+      name: "放入充电配件"
+      description: "右手从配件位取充电器/线移入装配区"
+      timeout: 20
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "accessory_zone"
+        to_region: "bottom_case_zone"
+
+    - id: "5"
+      name: "盖上盖"
+      description: "右手从上盖存放取上盖移入装配区上方"
+      timeout: 20
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "top_case_zone"
+        to_region: "bottom_case_zone"
+
+    - id: "6"
+      name: "移至成品"
+      description: "右手将装配好的手机盒移到成品区"
+      timeout: 15
+      detection:
+        method: "hand_move"
+        hand: "right"
+        from_region: "bottom_case_zone"
+        to_region: "finished_zone"
+
+    - id: "7"
+      name: "成品校验（漏放检测）"
+      description: "在成品区停留2秒，校验手机/上盖/下盖/说明书/充电器/充电线是否全部就位；任一缺失即判漏放。坐标与区域为占位值，请用 ROI 工具按真机标定 finished_zone。"
+      timeout: 20
+      detection:
+        method: "time_elapsed"
+        stable_frames: 2          # 复用为 RequiredSeconds=2（成品需在画面停留2秒）
+      required_objects:
+        - { object: "phone",       zone: "finished_zone", min_confidence: 0.5 }
+        - { object: "case_top",    zone: "finished_zone", min_confidence: 0.5 }
+        - { object: "case_bottom", zone: "finished_zone", min_confidence: 0.5 }
+        - { object: "manual",      zone: "finished_zone", min_confidence: 0.5 }
+        - { object: "charger",     zone: "finished_zone", min_confidence: 0.5 }
+        - { object: "cable",       zone: "finished_zone", min_confidence: 0.5 }
+
+  model:
+    path: "yolo_models/sop_custom_yolov8s.onnx"   # 专用模型；未训练好前可先用 yolov8s.onnx（仅COCO类，认不出手机/盒/配件）
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    useGpu: true
+    classes: ["phone", "case_top", "case_bottom", "manual", "charger", "cable"]

@@ -51,3 +51,7 @@ configs/*.local.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Nested git repos / large model files
+yolo_models/dwpose-github/
+0_IMG_0631.png

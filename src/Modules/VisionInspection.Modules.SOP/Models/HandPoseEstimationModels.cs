@@ -254,6 +254,32 @@ public class HandPoseEstimationConfig
     /// </summary>
     public bool UseGpu { get; set; } = true;
 
+    // ========== DWPose（全身姿态→手部关键点）后端选项 ==========
+
+    /// <summary>
+    /// 手部检测后端选择。
+    /// Auto   : 维持原有优先级 MediaPipe → YOLO → DWPose 兜底（向后兼容）
+    /// MediaPipe / Yolo / DWPose : 强制使用该方案
+    /// 说明：DWPose 关键点更平滑、遮挡与握拳场景更稳，可替代 MediaPipe。
+    /// </summary>
+    public HandDetectionBackend Backend { get; set; } = HandDetectionBackend.Auto;
+
+    /// <summary>
+    /// DWPose 人体检测模型(yolox_l.onnx)显式路径。为空则用 DWPoseModelDir 下的默认文件名。
+    /// </summary>
+    public string DWPoseDetModelPath { get; set; } = "";
+
+    /// <summary>
+    /// DWPose 全身姿态模型(dw-ll_ucoco_384.onnx)显式路径。为空则用 DWPoseModelDir 下的默认文件名。
+    /// </summary>
+    public string DWPosePoseModelPath { get; set; } = "";
+
+    /// <summary>
+    /// DWPose 模型目录（含 yolox_l.onnx 与 dw-ll_ucoco_384.onnx）。
+    /// 默认指向已下载好的目录。
+    /// </summary>
+    public string DWPoseModelDir { get; set; } = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
+
     // ========== 面部过滤参数 ==========
 
     /// <summary>
@@ -325,4 +351,23 @@ public static class HandSkeletonConnections
         (HandKeypointType.PinkyPIP, HandKeypointType.PinkyDIP),
         (HandKeypointType.PinkyDIP, HandKeypointType.PinkyTip)
     };
+}
+
+/// <summary>
+/// 手部检测后端枚举。
+/// Auto=维持原有优先级(MediaPipe→YOLO→DWPose)；其余为强制指定方案。
+/// </summary>
+public enum HandDetectionBackend
+{
+    /// <summary>自动：MediaPipe → YOLO → DWPose 兜底（向后兼容默认行为）</summary>
+    Auto = 0,
+
+    /// <summary>MediaPipe 两阶段手部关键点（握拳/横向手泛化好）</summary>
+    MediaPipe = 1,
+
+    /// <summary>YOLO 单/双阶段手部检测</summary>
+    Yolo = 2,
+
+    /// <summary>DWPose 全身姿态估计后提取 21 点手部关键点（最丝滑、遮挡/握拳更稳）</summary>
+    DWPose = 3
 }

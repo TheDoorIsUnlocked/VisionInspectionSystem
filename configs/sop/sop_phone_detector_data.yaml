@@ -1,0 +1,17 @@
+# YOLOv8 训练数据配置 —— 手机包装专用检测模型（6 类）
+# 把 path 改成你实际的数据集根目录（建议放 E 盘，避免占 C 盘）
+path: E:/yolo/YoloDotNet-master/VisionInspectionSystem/datasets/sop_phone_det
+train: images/train
+val: images/val
+
+# 类别数
+nc: 6
+
+# 类别名（必须与 sop_*.yaml 的 model.classes 完全一致）
+names:
+  0: phone
+  1: case_top
+  2: case_bottom
+  3: manual
+  4: charger
+  5: cable

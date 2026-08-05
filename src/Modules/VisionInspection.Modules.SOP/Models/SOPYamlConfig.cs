@@ -83,6 +83,38 @@ public class SopyamlStep
     /// </summary>
     [YamlMember(Alias = "must_keep")]
     public List<string>? MustKeep { get; set; }
+
+    /// <summary>
+    /// 该步骤（通常是最终成品校验步）必须放置/存在的物料清单。
+    /// 任意一项在画面（或指定区域内）缺失即判"漏放"。
+    /// 这是通用的数据驱动规则——每个配方声明自己的物料即可跨产品复用。
+    /// </summary>
+    [YamlMember(Alias = "required_objects")]
+    public List<SopyamlRequiredObject>? RequiredObjects { get; set; }
+}
+
+/// <summary>
+/// 必放物料项（漏放校验用）
+/// </summary>
+public class SopyamlRequiredObject
+{
+    /// <summary>
+    /// 必须存在的 YOLO 检测类别名
+    /// </summary>
+    [YamlMember(Alias = "object")]
+    public string Object { get; set; } = "";
+
+    /// <summary>
+    /// 可选：限定该物料必须出现的区域 ID（不填则为全局存在即可）
+    /// </summary>
+    [YamlMember(Alias = "zone")]
+    public string? Zone { get; set; }
+
+    /// <summary>
+    /// 最小置信度（0-1），默认 0.5
+    /// </summary>
+    [YamlMember(Alias = "min_confidence")]
+    public float MinConfidence { get; set; } = 0.5f;
 }
 
 public class SopyamlSettings
@@ -104,6 +136,19 @@ public class SopyamlSettings
 
     [YamlMember(Alias = "enableTimeoutDetection")]
     public bool EnableTimeoutDetection { get; set; } = true;
+
+    /// <summary>
+    /// 所有步骤通过后是否自动重置状态机，循环检测下一轮。
+    /// 默认 true，符合持续监控场景；用户可在 yaml 中显式设为 false。
+    /// </summary>
+    [YamlMember(Alias = "auto_reset_on_complete")]
+    public bool AutoResetOnComplete { get; set; } = true;
+
+    /// <summary>
+    /// 自动重置前的延迟秒数（让 UI 显示 PASS 一段时间再开始下一轮）。
+    /// </summary>
+    [YamlMember(Alias = "reset_delay_sec")]
+    public int ResetDelaySec { get; set; } = 3;
 }
 
 public class SopyamlDetection
@@ -417,6 +462,36 @@ public static class SOPYamlConverter
                 });
             }
 
+            // 转换 required_objects → MissingRequiredObject（漏放）违规规则
+            if (yamlStep.RequiredObjects != null && yamlStep.RequiredObjects.Count > 0)
+            {
+                var requiredList = new List<Dictionary<string, object>>();
+                foreach (var ro in yamlStep.RequiredObjects)
+                {
+                    if (string.IsNullOrWhiteSpace(ro.Object)) continue;
+                    requiredList.Add(new Dictionary<string, object>
+                    {
+                        ["class"] = ro.Object,
+                        ["zone"] = ro.Zone ?? "",
+                        ["min_confidence"] = ro.MinConfidence
+                    });
+                }
+
+                if (requiredList.Count > 0)
+                {
+                    step.ViolationRules.Add(new ViolationRule
+                    {
+                        Type = ViolationType.MissingRequiredObject,
+                        Description = $"漏放校验: {string.Join(", ", yamlStep.RequiredObjects.Where(o => !string.IsNullOrWhiteSpace(o.Object)).Select(o => o.Object))}",
+                        Severity = 3,
+                        Parameters = new Dictionary<string, object>
+                        {
+                            ["RequiredObjects"] = requiredList
+                        }
+                    });
+                }
+            }
+
             workflow.Steps.Add(step);
         }
 
@@ -429,8 +504,10 @@ public static class SOPYamlConverter
                 EnableTimeoutDetection = yamlSop.Settings.EnableTimeoutDetection,
                 StableFrameCount = yamlSop.Settings.StableFrames,
                 PositionTolerance = 20f, // 默认值
-                AutoResetOnComplete = false, // 默认值
-                ResetDelaySec = 5 // 默认值
+                // ⭐ 改为使用 yaml 字段（已带 snake_case alias，缺省时走 SopyamlSettings 模型默认值 true / 3），
+                // 这样 SOP 完成后会自动循环检测下一轮，符合持续监控场景。
+                AutoResetOnComplete = yamlSop.Settings.AutoResetOnComplete,
+                ResetDelaySec = yamlSop.Settings.ResetDelaySec
             };
         }
 
@@ -507,10 +584,37 @@ public static class SOPYamlConverter
         switch (detection.Method.ToLower())
         {
             case "hand_in_region":
-                condition.Type = ConditionType.ObjectInZone;
+                condition.Type = ConditionType.HandInRegion;
                 condition.TargetObject = "hand";
                 condition.ZoneId = detection.Region ?? "";
                 condition.Parameters["HandSide"] = detection.Hand ?? "right";
+                break;
+
+            case "hand_not_in_region":
+                condition.Type = ConditionType.HandNotInRegion;
+                condition.TargetObject = "hand";
+                condition.ZoneId = detection.Region ?? "";
+                condition.Parameters["HandSide"] = detection.Hand ?? "right";
+                break;
+
+            case "hand_stable":
+                condition.Type = ConditionType.HandStable;
+                condition.Parameters["HandSide"] = detection.Hand ?? "right";
+                condition.Parameters["Tolerance"] = detection.Tolerance;
+                break;
+
+            case "hand_move":
+                condition.Type = ConditionType.HandMoveFromTo;
+                condition.Parameters["HandSide"] = detection.Hand ?? "right";
+                condition.Parameters["FromRegion"] = detection.FromRegion ?? "";
+                condition.Parameters["ToRegion"] = detection.ToRegion ?? "";
+                break;
+
+            case "hand_near_object":
+                condition.Type = ConditionType.HandNearObject;
+                condition.TargetObject = detection.TargetObject ?? "";
+                condition.Parameters["HandSide"] = detection.Hand ?? "right";
+                condition.Parameters["Margin"] = detection.Tolerance;
                 break;
 
             case "object_present":
@@ -534,8 +638,49 @@ public static class SOPYamlConverter
                 condition.Parameters["RequiredSeconds"] = detection.StableFrames; // 复用字段
                 break;
 
+            case "person_present":
+                // 人在场：COCO 原生支持 "person" 类别，无需专用模型
+                condition.Type = ConditionType.ObjectPresent;
+                condition.TargetObject = detection.TargetObject ?? "person";
+                break;
+
+            case "hand_action":
+            {
+                // 基于手部"取/放"语义转换成 HandMoveFromTo：
+                //  - pickup  ：手曾位于 FromRegion（如手机放置区）且现已离开，
+                //              或检测到手正拿着 target_object 且该物体已离开 FromRegion
+                //  - putdown ：手到达 ToRegion（如手机放置区）
+                condition.Type = ConditionType.HandMoveFromTo;
+                var action = (detection.Action ?? "").ToLowerInvariant();
+                if (action == "pickup")
+                {
+                    condition.Parameters["FromRegion"] = detection.FromRegion ?? "";
+                    condition.Parameters["ToRegion"] = "";
+                    // target_object 辅助判定：手机等物品离开放置区即视为拿起
+                    condition.TargetObject = detection.TargetObject ?? "";
+                }
+                else if (action == "putdown")
+                {
+                    condition.Parameters["FromRegion"] = "";
+                    condition.Parameters["ToRegion"] = detection.ToRegion ?? "";
+                    condition.TargetObject = detection.TargetObject ?? "";
+                }
+                else
+                {
+                    // 未指定/未知 action：退化为普通手移动（from/to 任一即可）
+                    condition.Parameters["FromRegion"] = detection.FromRegion ?? "";
+                    condition.Parameters["ToRegion"] = detection.ToRegion ?? "";
+                    condition.TargetObject = detection.TargetObject ?? "";
+                }
+                condition.Parameters["HandSide"] = detection.Hand ?? "any";
+                // 保存 action 到 Parameters，供 ConvertConditionToDetection 回读
+                condition.Parameters["Action"] = action;
+                break;
+            }
+
             default:
-                return null;
+                throw new InvalidOperationException(
+                    $"不支持的检测方法 '{detection.Method}'。支持的方法: person_present, hand_action, hand_in_region, hand_not_in_region, hand_stable, hand_move, hand_near_object, object_present, object_in_zone, pose_stable, time_elapsed");
         }
 
         return condition;
@@ -549,8 +694,9 @@ public static class SOPYamlConverter
         var yamlSop = ConvertToYamlSop(workflow);
         var config = new SOPYamlConfig { Sop = yamlSop };
 
+        // 不使用全局命名约定，完全由 [YamlMember(Alias = "...")] 控制字段名，
+        // 避免 CamelCase 把 from_region / stable_frames 等改成 fromRegion / stableFrames。
         var serializer = new SerializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
             .Build();
 
         var yaml = serializer.Serialize(config);
@@ -601,6 +747,35 @@ public static class SOPYamlConverter
                 yamlStep.Detection = ConvertConditionToDetection(step.PassConditions[0]);
             }
 
+            // 转换漏放（MissingRequiredObject）违规规则 → required_objects
+            var missingRule = step.ViolationRules
+                .FirstOrDefault(r => r.Type == ViolationType.MissingRequiredObject);
+            if (missingRule != null &&
+                missingRule.Parameters.TryGetValue("RequiredObjects", out var reqObj) &&
+                reqObj is System.Collections.IEnumerable reqEnum)
+            {
+                var reqList = new List<SopyamlRequiredObject>();
+                foreach (var item in reqEnum)
+                {
+                    if (item is Dictionary<string, object> d)
+                    {
+                        var zoneVal = d.GetValueOrDefault("zone", "")?.ToString();
+                        var mcVal = d.GetValueOrDefault("min_confidence", 0.5f);
+                        float mc = mcVal is float f ? f : Convert.ToSingle(mcVal);
+                        reqList.Add(new SopyamlRequiredObject
+                        {
+                            Object = d.GetValueOrDefault("class", "")?.ToString() ?? "",
+                            Zone = string.IsNullOrEmpty(zoneVal) ? null : zoneVal,
+                            MinConfidence = mc
+                        });
+                    }
+                }
+                if (reqList.Count > 0)
+                {
+                    yamlStep.RequiredObjects = reqList;
+                }
+            }
+
             yamlSop.Steps.Add(yamlStep);
         }
 
@@ -641,6 +816,58 @@ public static class SOPYamlConverter
                 }
                 break;
 
+            case ConditionType.HandInRegion:
+                detection.Method = "hand_in_region";
+                detection.Region = condition.ZoneId;
+                detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
+                break;
+
+            case ConditionType.HandNotInRegion:
+                detection.Method = "hand_not_in_region";
+                detection.Region = condition.ZoneId;
+                detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
+                break;
+
+            case ConditionType.HandStable:
+                detection.Method = "hand_stable";
+                detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
+                detection.Tolerance = condition.Parameters.GetValueOrDefault("Tolerance", 20f) is float fh ? fh : 20f;
+                break;
+
+            case ConditionType.HandMoveFromTo:
+            {
+                var fromRegion = condition.Parameters.GetValueOrDefault("FromRegion", "")?.ToString() ?? "";
+                var toRegion = condition.Parameters.GetValueOrDefault("ToRegion", "")?.ToString() ?? "";
+                var action = condition.Parameters.GetValueOrDefault("Action", "")?.ToString() ?? "";
+                detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
+
+                if (!string.IsNullOrEmpty(action))
+                {
+                    // hand_action（pickup/putdown）：保留 action / target_object 语义，
+                    // 避免往返保存后退化成 hand_move 丢失 from_region/target_object
+                    detection.Method = "hand_action";
+                    detection.Action = action;
+                    detection.FromRegion = fromRegion;
+                    detection.ToRegion = toRegion;
+                    detection.TargetObject = condition.TargetObject;
+                }
+                else
+                {
+                    // 普通 hand_move
+                    detection.Method = "hand_move";
+                    detection.FromRegion = fromRegion;
+                    detection.ToRegion = toRegion;
+                }
+                break;
+            }
+
+            case ConditionType.HandNearObject:
+                detection.Method = "hand_near_object";
+                detection.TargetObject = condition.TargetObject;
+                detection.Hand = condition.Parameters.GetValueOrDefault("HandSide", "right")?.ToString();
+                detection.Tolerance = condition.Parameters.GetValueOrDefault("Margin", 30f) is float fm ? fm : 30f;
+                break;
+
             case ConditionType.ObjectStable:
                 detection.Method = "pose_stable";
                 detection.Tolerance = condition.Parameters.GetValueOrDefault("Tolerance", 20f) is float f ? f : 20f;
@@ -656,5 +883,36 @@ public static class SOPYamlConverter
         }
 
         return detection;
+    }
+
+    /// <summary>
+    /// 仅更新 YAML 中的 regions 段（区域标定工具用），其余字段（steps / model / settings 等）原样保留。
+    /// 采用完整 SOPYamlConfig 往返序列化；模型已覆盖 YAML 全部字段，避免信息丢失。
+    /// </summary>
+    public static void SaveRegions(string yamlPath, Dictionary<string, SopyamlRegion> regions)
+    {
+        SOPYamlConfig config;
+        if (File.Exists(yamlPath))
+        {
+            var yaml = File.ReadAllText(yamlPath);
+            // 不使用全局命名约定，完全由 [YamlMember(Alias = "...")] 控制字段名，
+            // 与 ParseYaml 和序列化器保持一致，避免 snake_case 字段在往返中丢失。
+            var deserializer = new DeserializerBuilder()
+                .IgnoreUnmatchedProperties()
+                .Build();
+            config = deserializer.Deserialize<SOPYamlConfig>(yaml) ?? new SOPYamlConfig();
+        }
+        else
+        {
+            config = new SOPYamlConfig();
+        }
+
+        config.Sop ??= new SopyamlSop();
+        config.Sop.Regions = regions;
+
+        // 不使用全局命名约定，完全由 [YamlMember(Alias = "...")] 控制字段名。
+        var serializer = new SerializerBuilder()
+            .Build();
+        File.WriteAllText(yamlPath, serializer.Serialize(config));
     }
 }

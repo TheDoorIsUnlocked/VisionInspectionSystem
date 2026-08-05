@@ -146,6 +146,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 连续无手部检测帧计数器，用于清除残留骨架
     private int _noHandsFrameCount = 0;
     private const int MaxNoHandsFrames = 8;
+
+    // 缓存最后一次 SOP 检测结果，让最新相机帧到达时再叠加渲染。
+    // 关键：避免"推理完成 → 把旧帧+检测框覆盖到 CurrentImage → 画面退回上一帧"的卡顿感。
+    private SOPModuleResult? _lastSopResult;
+    private int _noSopResultFrameCount = 0;
+    private const int MaxNoSopResultFrames = 15;  // ~0.5s @ 30fps，超过后清除残留检测框
+
+    // 检测框时序平滑器：IOU 跟踪 + EMA 位置平滑 + 确认/保持机制，消除检测框闪烁与跳动。
+    // 仅在推理产生新结果时 Update，渲染时读取 GetActiveBoxes。
+    private readonly DetectionTrackSmoother _detectionSmoother = new();
     
     // 修复：添加异步推理队列 - 改为可重新创建
     private Channel<SKBitmap> _inferenceQueue;
@@ -181,6 +191,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     
     /// <summary>
     /// 相机图像采集回调 - 修复：使用异步队列避免阻塞UI线程
+    /// 关键修复（卡顿/显示上一帧）：
+    ///   1. 用 BeginInvoke 异步投递到 UI 线程，不再阻塞相机采集线程
+    ///   2. 检测结果统一在「最新相机帧」上叠加，不再用"推理旧帧+检测框"覆盖画面
     /// </summary>
     private void OnCameraImageGrabbed(object? sender, CameraImageData e)
     {
@@ -192,29 +205,57 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var skBitmap = ConvertCameraImageToSKBitmap(e);
         if (skBitmap != null)
         {
-            // 先克隆用于推理（在绘制骨架前复制，确保推理用原始图像）
+            // 先克隆用于推理（在绘制任何 overlay 前复制，确保推理用原始图像）
             SKBitmap? inferenceBitmap = null;
             if (IsSOPDetecting && _sopModule != null)
             {
                 inferenceBitmap = skBitmap.Copy();
             }
 
-            // 在原始帧上绘制缓存的手部骨架，消除"原始帧→骨架帧"交替闪烁
-            var cachedResult = _lastHandPoseResult;
-            if (IsSOPDetecting && cachedResult != null && cachedResult.Hands.Count > 0)
+            // 在最新相机帧上叠加最后一次 SOP 检测结果（检测框 + 手部骨架 + 违规）
+            // 这是消除"画面退回上一帧"卡顿感的关键：
+            //   - 之前是"推理完成后用旧帧+检测框覆盖 CurrentImage"，造成画面回退
+            //   - 现在是"每收到一帧新画面，用最新的检测结果叠加渲染"，画面永远是最新帧
+            var cachedSopResult = _lastSopResult;
+            if (IsSOPDetecting && cachedSopResult != null)
             {
-                using var canvas = new SKCanvas(skBitmap);
-                DrawHandPoses(canvas, cachedResult);
+                try
+                {
+                    using var canvas = new SKCanvas(skBitmap);
+                    DrawSOPDetectionOverlay(canvas, skBitmap.Info, cachedSopResult);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[OnCameraImageGrabbed] 叠加 SOP 结果异常: {ex.Message}");
+                }
+
+                // 老化计数：如果连续 N 帧没新检测结果，清空缓存避免残留
+                _noSopResultFrameCount++;
+                if (_noSopResultFrameCount >= MaxNoSopResultFrames)
+                {
+                    _lastSopResult = null;
+                    _noSopResultFrameCount = 0;
+                }
+            }
+            else if (IsSOPDetecting)
+            {
+                // 还没收到第一次检测结果时，至少画上缓存的手部骨架（保留原行为）
+                var cachedHand = _lastHandPoseResult;
+                if (cachedHand != null && cachedHand.Hands.Count > 0)
+                {
+                    using var canvas = new SKCanvas(skBitmap);
+                    DrawHandPoses(canvas, cachedHand);
+                }
             }
 
-            // 在UI线程更新图像
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            // 在UI线程更新图像（用 BeginInvoke 避免阻塞相机采集线程）
+            System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
             {
                 if (!_isDisposed && RoiEditorViewModel != null)
                 {
                     RoiEditorViewModel.CurrentImage = skBitmap;
                 }
-            });
+            }));
 
             // 将推理图像放入队列
             if (inferenceBitmap != null)
@@ -519,12 +560,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             if (result is SOPModuleResult sopResult)
             {
-                // 在 UI 线程更新
-                System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+                // 在 UI 线程更新（只更新数据字段，不再覆盖画面）
+                // 关键修复：之前这里会用"推理旧帧 + 检测框"覆盖 CurrentImage，
+                // 导致画面退回上一帧、看起来一卡一卡。
+                // 现在改为：缓存 sopResult，让 OnCameraImageGrabbed 收到下一帧新画面时再叠加渲染。
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (_isDisposed) return;
 
-                    // 缓存手部骨架结果，无手部检测时逐渐清除缓存避免残留
+                    // 缓存 SOP 检测结果（供 OnCameraImageGrabbed 在最新帧上叠加）
+                    _lastSopResult = sopResult;
+                    _noSopResultFrameCount = 0;
+
+                    // 更新检测框时序平滑器（仅在推理出新结果时更新，渲染时读取）
+                    _detectionSmoother.Update(sopResult.Detections);
+
+                    // 缓存手部骨架结果（保留原行为，作为 fallback）
                     if (sopResult.HandPoseResult != null && sopResult.HandPoseResult.Hands.Count > 0)
                     {
                         _lastHandPoseResult = sopResult.HandPoseResult;
@@ -563,14 +614,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
                     HighConfidenceCount = DetectionResults.Count(o => o.Confidence >= 0.5);
 
-                    // 绘制检测框 + SOP 步骤信息
-                    var resultBitmap = DrawSOPDetectionResults(bitmap, sopResult);
-                    if (resultBitmap != null && RoiEditorViewModel != null)
-                    {
-                        RoiEditorViewModel.CurrentImage = resultBitmap;
-                    }
-                    
-                    // 释放原始bitmap
+                    // 不再在此处覆盖 RoiEditorViewModel.CurrentImage：
+                    // 让 OnCameraImageGrabbed 在收到下一帧新画面时统一叠加渲染，
+                    // 画面永远是"最新相机帧 + 最新检测结果"，消除卡顿和上一帧残留。
+
+                    // 释放原始bitmap（推理队列里克隆的）
                     bitmap.Dispose();
 
                     // 计算推理 FPS
@@ -587,7 +635,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                              $"检测到 {DetectionResults.Count} 个对象 | " +
                              $"FPS: {InferenceFps:F1} | " +
                              $"耗时: {sopResult.ElapsedMs}ms";
-                });
+                }));
             }
         }
         catch (OperationCanceledException)
@@ -615,13 +663,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // 修复：创建新的bitmap并绘制，避免canvas释放问题
             var resultBitmap = sourceBitmap.Copy();
             using var canvas = new SKCanvas(resultBitmap);
+            DrawSOPDetectionOverlay(canvas, resultBitmap.Info, sopResult);
+            return resultBitmap;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"绘制SOP结果异常: {ex.Message}");
+            return sourceBitmap;
+        }
+    }
 
-            // 1. 绘制检测框
-            foreach (var detection in sopResult.Detections)
+    /// <summary>
+    /// 在已存在的 canvas 上叠加 SOP 检测结果（检测框 + 手部骨架 + 违规警告）。
+    /// 抽出此方法是为了让"最新相机帧到达时"也能复用同一份渲染逻辑，
+    /// 避免"推理旧帧 + 检测框覆盖 CurrentImage"导致的画面退回上一帧。
+    /// </summary>
+    private void DrawSOPDetectionOverlay(SKCanvas canvas, SKImageInfo info, SOPModuleResult sopResult)
+    {
+        try
+        {
+            // 1. 绘制检测框（使用时序平滑后的轨迹，消除闪烁/跳动）
+            foreach (var track in _detectionSmoother.GetActiveBoxes())
             {
-                var label = detection.Label?.Name ?? "unknown";
-                var conf = detection.Confidence;
-                var box = detection.BoundingBox;
+                var label = track.Label;
+                var conf = track.Confidence;
+                var box = track.Box;
 
                 // 框颜色：高置信度绿色，低置信度黄色
                 var color = conf > 0.7 ? SKColors.LimeGreen :
@@ -660,25 +726,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // 2. 绘制手部关键点（如果启用了手部检测）
             if (sopResult.HandPoseResult?.Hands.Count > 0)
             {
-                System.Diagnostics.Debug.WriteLine($"[DrawSOP] 开始绘制 {sopResult.HandPoseResult.Hands.Count} 只手");
                 try
                 {
                     DrawHandPoses(canvas, sopResult.HandPoseResult);
-                    System.Diagnostics.Debug.WriteLine($"[DrawSOP] 手部绘制完成");
                 }
                 catch (Exception ex)
                 {
                     System.Diagnostics.Debug.WriteLine($"[DrawSOP] 手部绘制异常: {ex.Message}");
-                    System.Diagnostics.Debug.WriteLine($"[DrawSOP] 堆栈: {ex.StackTrace}");
                 }
             }
 
-            // 4. 违规警告（如果有）
+            // 3. 违规警告（如果有）
             if (sopResult.Violations.Count > 0)
             {
                 var lastViolation = sopResult.Violations.Last();
                 using var warnBg = new SKPaint { Color = new SKColor(255, 0, 0, 160), Style = SKPaintStyle.Fill };
-                canvas.DrawRect(0, resultBitmap.Height - 50, resultBitmap.Width, 50, warnBg);
+                canvas.DrawRect(0, info.Height - 50, info.Width, 50, warnBg);
 
                 using var warnText = new SKPaint
                 {
@@ -687,15 +750,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     IsAntialias = true,
                     FakeBoldText = true
                 };
-                canvas.DrawText($"⚠ 违规: {lastViolation.Description}", 15, resultBitmap.Height - 18, warnText);
+                canvas.DrawText($"⚠ 违规: {lastViolation.Description}", 15, info.Height - 18, warnText);
             }
-
-            return resultBitmap;
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"绘制SOP结果异常: {ex.Message}");
-            return sourceBitmap;
+            System.Diagnostics.Debug.WriteLine($"叠加SOP结果异常: {ex.Message}");
         }
     }
 
@@ -713,19 +773,37 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // 注意：DWPose输出的坐标与SkiaSharp坐标系一致（原点在左上角）
         // 不需要翻转Y轴
 
-        // 骨架线画笔（绿色，更粗更明显）
+        // 骨架线画笔
         using var skeletonPaint = new SKPaint
         {
             Color = SKColors.LimeGreen,
-            StrokeWidth = 5,
+            StrokeWidth = 3,
             IsAntialias = true,
             Style = SKPaintStyle.Stroke
         };
 
-        // 关键点画笔（红色，更大更明显）
-        using var keypointPaint = new SKPaint
+        // 指尖关键点画笔（红色）
+        using var tipPaint = new SKPaint
         {
             Color = SKColors.Red,
+            StrokeWidth = 3,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        // 关节关键点画笔（黄色）
+        using var jointPaint = new SKPaint
+        {
+            Color = SKColors.Yellow,
+            StrokeWidth = 3,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+
+        // 手腕关键点画笔（青色）
+        using var wristPaint = new SKPaint
+        {
+            Color = SKColors.Cyan,
             StrokeWidth = 3,
             IsAntialias = true,
             Style = SKPaintStyle.Fill
@@ -744,7 +822,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         using var labelPaint = new SKPaint
         {
             Color = SKColors.Yellow,
-            TextSize = 14,
+            TextSize = 12,
             IsAntialias = true,
             FakeBoldText = true
         };
@@ -760,34 +838,42 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         foreach (var hand in handResult.Hands)
         {
+            int validCount = hand.Keypoints.Count(k => k.Confidence >= SkeletonConfidenceThreshold);
+            float avgConf = hand.Keypoints.Count > 0 ? hand.Keypoints.Average(k => k.Confidence) : 0f;
+            System.Diagnostics.Debug.WriteLine($"[DrawHandPoses] Hand {hand.TrackId}({hand.HandType}): Keypoints={hand.Keypoints.Count}, Valid(>={SkeletonConfidenceThreshold:F1})={validCount}, AvgConf={avgConf:F3}");
+
             // 绘制手部边界框
             var bbox = hand.BoundingBox;
             canvas.DrawRect(bbox, handBoxPaint);
 
-            // 绘制骨架线
+            // 绘制完整骨架线
             DrawHandSkeleton(canvas, hand, skeletonPaint);
 
-            // 绘制关键点（只显示指尖，减少视觉干扰）
+            // 绘制全部 21 个关键点：手腕青色、指尖红色、关节黄色
             foreach (var kp in hand.Keypoints)
             {
-                // 只绘制指尖关键点，减少视觉干扰和闪烁
-                bool isFingertip = kp.Type == HandKeypointType.ThumbTip ||
-                                   kp.Type == HandKeypointType.IndexFingerTip ||
-                                   kp.Type == HandKeypointType.MiddleFingerTip ||
-                                   kp.Type == HandKeypointType.RingFingerTip ||
-                                   kp.Type == HandKeypointType.PinkyTip;
+                if (kp.Confidence < SkeletonConfidenceThreshold) continue;
 
-                // 使用置信度阈值判断，比 IsValid 更稳定，减少闪烁
-                // 只绘制指尖关键点
-                if (isFingertip && kp.Confidence >= SkeletonConfidenceThreshold)
+                bool isTip = kp.Type == HandKeypointType.ThumbTip ||
+                             kp.Type == HandKeypointType.IndexFingerTip ||
+                             kp.Type == HandKeypointType.MiddleFingerTip ||
+                             kp.Type == HandKeypointType.RingFingerTip ||
+                             kp.Type == HandKeypointType.PinkyTip;
+
+                bool isWrist = kp.Type == HandKeypointType.Wrist;
+
+                float radius = isTip ? 7 : (isWrist ? 8 : 5);
+                var paint = isTip ? tipPaint : (isWrist ? wristPaint : jointPaint);
+
+                // 绘制关键点外圈（白色描边）
+                canvas.DrawCircle(kp.X, kp.Y, radius + 3, keypointOutlinePaint);
+                // 绘制关键点
+                canvas.DrawCircle(kp.X, kp.Y, radius, paint);
+
+                // 只在指尖旁边绘制标签，避免杂乱
+                if (isTip)
                 {
-                    // 绘制关键点外圈（白色描边）
-                    canvas.DrawCircle(kp.X, kp.Y, 10, keypointOutlinePaint);
-                    // 绘制关键点（红色填充）
-                    canvas.DrawCircle(kp.X, kp.Y, 7, keypointPaint);
-
-                    // 绘制关键点标签（只显示指尖）
-                    canvas.DrawText(kp.Type.ToString(), kp.X + 12, kp.Y, labelPaint);
+                    canvas.DrawText(kp.Type.ToString(), kp.X + 10, kp.Y, labelPaint);
                 }
             }
         }
@@ -797,38 +883,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 绘制手部骨架线
+    /// 绘制手部骨架线（使用 HandSkeletonConnections 完整 21 点连接）
     /// </summary>
     // 骨架绘制置信度阈值（低于此值的关键点不绘制，减少闪烁）
-    // 降低阈值以减少闪烁，配合时序平滑使用
     public float SkeletonConfidenceThreshold { get; set; } = 0.1f;
-    
+
     private void DrawHandSkeleton(SKCanvas canvas, HandPose hand, SKPaint paint)
     {
-        // 极简骨架：只绘制手腕到各指尖的连线
-        // 避免复杂的多边形连接，减少视觉混乱和闪烁感
-        
-        var wrist = hand.GetKeypoint(HandKeypointType.Wrist);
-        if (wrist == null || wrist.Confidence < SkeletonConfidenceThreshold) return;
-        
-        // 定义指尖类型
-        var fingerTips = new[]
+        foreach (var (startType, endType) in HandSkeletonConnections.Connections)
         {
-            HandKeypointType.ThumbTip,
-            HandKeypointType.IndexFingerTip,
-            HandKeypointType.MiddleFingerTip,
-            HandKeypointType.RingFingerTip,
-            HandKeypointType.PinkyTip
-        };
-        
-        // 绘制手腕到每个指尖的线
-        foreach (var tipType in fingerTips)
-        {
-            var tip = hand.GetKeypoint(tipType);
-            if (tip != null && tip.Confidence >= SkeletonConfidenceThreshold)
-            {
-                canvas.DrawLine(wrist.X, wrist.Y, tip.X, tip.Y, paint);
-            }
+            var start = hand.GetKeypoint(startType);
+            var end = hand.GetKeypoint(endType);
+
+            if (start == null || end == null) continue;
+            if (start.Confidence < SkeletonConfidenceThreshold || end.Confidence < SkeletonConfidenceThreshold) continue;
+
+            canvas.DrawLine(start.X, start.Y, end.X, end.Y, paint);
         }
     }
 
@@ -1161,6 +1231,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 _sopModule.StepChanged += OnSOPStepChanged;
                 _sopModule.ViolationDetected += OnSOPViolationDetected;
                 _sopModule.WorkflowCompleted += OnSOPWorkflowCompleted;
+                _sopModule.ModelWarning += OnSOPModelWarning;
 
                 Console.WriteLine($"[MainViewModel] SOP模块创建完成，当前模式: {_sopModule.DetectionMode}");
                 Console.WriteLine($"[MainViewModel] 保存的配置: {(_savedSOPDetectionConfig.HasValue ? "存在" : "不存在")}");
@@ -1263,6 +1334,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         DebugLog($"[StopSOP] 推理工作线程已停止");
         
         _sopModule?.StopWorkflow();
+        _detectionSmoother.Clear();
+        _lastSopResult = null;
+        _noSopResultFrameCount = 0;
         InferenceFps = 0;
         SopStatus = "SOP 检测已停止";
         Status = "SOP 检测已停止";
@@ -1332,6 +1406,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Status = isPass
                 ? $"SOP 完成: 全部 {TotalSteps} 步通过"
                 : $"SOP 完成: 有 {e.Violations.Count} 个违规";
+        });
+    }
+
+    /// <summary>
+    /// 模型加载告警：专用模型缺失/回退时弹窗提示，避免"什么都没识别到却无提示"
+    /// </summary>
+    private void OnSOPModelWarning(object? sender, string message)
+    {
+        System.Windows.Application.Current?.Dispatcher.Invoke(() =>
+        {
+            if (_isDisposed) return;
+            SopStatus = "⚠ 模型告警: " + message;
+            Status = "⚠ SOP 模型告警（见弹窗）";
+            MessageBox.Show(message, "SOP 模型告警", MessageBoxButton.OK, MessageBoxImage.Warning);
         });
     }
 

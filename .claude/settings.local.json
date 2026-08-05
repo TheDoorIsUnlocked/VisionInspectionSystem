@@ -6,7 +6,15 @@
       "Bash(git *)",
       "Read(*)",
       "Write(*)",
-      "SearchReplace(*)"
+      "SearchReplace(*)",
+      "Bash(python *)",
+      "Bash(nvidia-smi)",
+      "Bash(nvidia-smi *)",
+      "Bash(pip uninstall *)",
+      "Bash(pip install *)",
+      "Bash(pip config *)",
+      "Read(//c/Users/王敏杰/.claude/projects/E--yolo-YoloDotNet-master-VisionInspectionSystem/**)",
+      "Read(//c/Users/王敏杰/.claude/projects/**)"
     ]
   },
   "context": {
@@ -73,7 +81,7 @@
   "sop_workflow": {
     "steps": [
       "装说明书",
-      "装手机壳", 
+      "装手机壳",
       "封口",
       "装密实袋",
       "放置手机",

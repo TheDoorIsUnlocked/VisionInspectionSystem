@@ -57,6 +57,12 @@ public enum ConditionType
     ObjectAbsent,
     SequenceComplete,
     TimeElapsed,
+    // ===== 手部动作条件（基于 DWPose 21 点手部结果）=====
+    HandInRegion,       // 指定手进入某区域
+    HandNotInRegion,    // 指定手不在某区域
+    HandStable,         // 指定手在区域内稳定 N 帧（用于"放置/保持"确认）
+    HandMoveFromTo,     // 指定手从区域 A 移动到区域 B（取料→放料）
+    HandNearObject,     // 指定手靠近某目标物体（手-物交互）
     Custom
 }
 
@@ -79,6 +85,12 @@ public enum ViolationType
     ForbiddenObject,
     ObjectRemoved,
     ZoneIntrusion,
+    /// <summary>
+    /// 漏放 / 缺料：最终校验时某个必须放置的物料缺失（与 ObjectRemoved 不同——后者是"曾经存在后被移除"）
+    /// 该规则为通用的数据驱动规则：每个配方在 YAML 的 required_objects 中声明自己的必放物料，
+    /// 切换产品即加载对应 YAML，同一引擎自动复用，无需改代码。
+    /// </summary>
+    MissingRequiredObject,
     Custom
 }
 
@@ -91,8 +103,8 @@ public class SOPGlobalSettings
     public bool EnableTimeoutDetection { get; set; } = true;
     public int StableFrameCount { get; set; } = 5;
     public float PositionTolerance { get; set; } = 20f;
-    public bool AutoResetOnComplete { get; set; } = false;
-    public int ResetDelaySec { get; set; } = 5;
+    public bool AutoResetOnComplete { get; set; } = true;
+    public int ResetDelaySec { get; set; } = 3;
 }
 
 /// <summary>

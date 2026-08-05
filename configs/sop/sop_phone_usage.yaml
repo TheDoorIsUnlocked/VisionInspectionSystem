@@ -1,5 +1,11 @@
 # 手机使用场景 SOP 配置
 # 场景：拿起手机 -> 打电话 -> 放下手机
+#
+# ⚠️ 标定提醒（务必用「🎯 标定区域」工具按真机画面设置，否则步骤不会推进）：
+#   - phone_table：手机平时放在桌面的位置（拿起/放下都以它为准）
+#   - ear_region ：你打电话时手机/手到达的"耳边"位置（必须对准你的耳朵，否则"打电话"永远超时）
+# 本示例不依赖专用模型：人在场用 COCO 通用模型(person)，拿起/放下/打电话用手部姿态(DWPose)。
+# 如需识别具体物料（手机/盒/线），请训练专用模型并把下方 model.path 指向它。
 
 sop:
   name: "手机使用场景SOP"
@@ -13,7 +19,7 @@ sop:
     stableFrames: 3
     timeoutSeconds: 30
   
-  # 区域定义
+  # 区域定义（坐标需在「🎯 标定区域」工具里按真机画面重新标定）
   regions:
     phone_table:
       x1: 200
@@ -21,7 +27,7 @@ sop:
       x2: 350
       y2: 550
       name: "手机放置区"
-      description: "手机放置的桌面区域"
+      description: "手机放置的桌面区域（拿起=手离开此区；放下=手到达此区）"
       color: "#4CAF50"
       
     ear_region:
@@ -30,7 +36,7 @@ sop:
       x2: 550
       y2: 250
       name: "耳边区域"
-      description: "打电话时手机应该到达的耳边位置"
+      description: "打电话时手/手机应到达的耳边位置（务必对准你的耳朵）"
       color: "#2196F3"
       
     face_region:
@@ -53,7 +59,7 @@ sop:
       detection:
         method: "person_present"
         min_confidence: 0.6
-        description: "检测到人员在场"
+        description: "检测到人员在场（COCO person 类别）"
     
     # 步骤2: 拿起手机
     - id: "pickup_phone"
@@ -66,32 +72,24 @@ sop:
         action: "pickup"
         hand: "any"
         from_region: "phone_table"
+        target_object: "cell phone"   # 辅助判定：手拿着 cell phone 离开 phone_table 即视为拿起
         min_confidence: 0.6
         stable_frames: 3
-        description: "手从手机放置区拿起手机"
-      violation_rules:
-        - type: "wrong_hand"
-          description: "使用了不允许的手"
+        description: "手曾位于手机放置区且现已离开，或检测到手拿着手机离开放置区"
     
     # 步骤3: 打电话
     - id: "make_call"
       name: "打电话"
       description: "将手机放到耳边打电话"
-      timeout: 10
+      timeout: 15
       transitions: ["put_down_phone"]
       detection:
         method: "hand_in_region"
         hand: "any"
         region: "ear_region"
         min_confidence: 0.6
-        stable_frames: 5
-        duration_ms: 1000
-        description: "手在耳边区域停留1秒"
-      violation_rules:
-        - type: "hand_leave_early"
-          description: "手过早离开耳边"
-        - type: "wrong_posture"
-          description: "打电话姿势不正确"
+        stable_frames: 3
+        description: "手在耳边区域稳定停留（ear_region 须对准耳朵）"
     
     # 步骤4: 放下手机
     - id: "put_down_phone"
@@ -104,12 +102,10 @@ sop:
         action: "putdown"
         hand: "any"
         to_region: "phone_table"
+        target_object: "cell phone"   # 辅助判定：手拿着 cell phone 进入 phone_table 即视为放下
         min_confidence: 0.6
         stable_frames: 3
         description: "手将手机放回放置区"
-      violation_rules:
-        - type: "wrong_location"
-          description: "手机放错位置"
     
     # 步骤5: 完成
     - id: "complete"

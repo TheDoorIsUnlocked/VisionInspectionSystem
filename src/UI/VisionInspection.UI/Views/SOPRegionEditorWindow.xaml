@@ -1,0 +1,80 @@
+<Window x:Class="VisionInspection.UI.Views.SOPRegionEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:VisionInspection.UI.Views"
+        xmlns:controls="clr-namespace:VisionInspection.UI.Controls"
+        Title="SOP 区域标定" Height="760" Width="1180">
+    <Window.Resources>
+        <local:RoiRectConverter x:Key="RoiRectConverter"/>
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 工具栏 -->
+        <ToolBar Grid.Row="0">
+            <Button Content="📁 打开YAML" Click="OpenYaml_Click" Margin="2" Padding="8,4"/>
+            <Separator/>
+            <Button Content="➕ 新建区域" Click="NewRegion_Click" Margin="2" Padding="8,4"/>
+            <Button Content="🗑 删除选中" Click="DeleteSelected_Click" Margin="2" Padding="8,4"/>
+            <Button Content="🧹 清空" Click="ClearAll_Click" Margin="2" Padding="8,4"/>
+            <Separator/>
+            <Button Content="💾 保存" Click="Save_Click" Margin="2" Padding="8,4"
+                    Background="#52C41A" Foreground="White" FontWeight="Bold"/>
+            <Button Content="❌ 关闭" Click="Close_Click" Margin="2" Padding="8,4"/>
+            <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#888" FontSize="11"
+                       TextWrapping="Wrap" MaxWidth="520">
+                用法：点「新建区域」后在画面上拖拽画矩形；右侧列表可改名（名称即区域ID，供 hand_in_region 等步骤条件引用）；双击画面可重置视图。
+            </TextBlock>
+        </ToolBar>
+
+        <!-- 主区：画面 + 区域列表 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="300"/>
+            </Grid.ColumnDefinitions>
+
+            <controls:ROIEditorControl x:Name="RoiEditor" Grid.Column="0"/>
+
+            <Border Grid.Column="1" BorderBrush="#DDD" BorderThickness="1,0,0,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="区域列表（名称 = 区域ID）"
+                               FontWeight="Bold" Padding="10,8" Background="#F5F5F5"/>
+                    <ListBox Grid.Row="1" BorderThickness="0"
+                             ItemsSource="{Binding EditorVm.ROIs}"
+                             SelectedItem="{Binding EditorVm.SelectedROI, Mode=TwoWay}">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="8,5">
+                                    <TextBox Text="{Binding ROIName, UpdateSourceTrigger=PropertyChanged}"
+                                             FontWeight="Bold" BorderThickness="0" Padding="0"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                                        <TextBlock Text="{Binding Converter={StaticResource RoiRectConverter}}"
+                                                   Foreground="#666" FontSize="11"/>
+                                        <Button Content="删除" Tag="{Binding}" Click="DeleteRegion_Click"
+                                                Margin="10,0,0,0" Padding="8,1" FontSize="11"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- 状态栏 -->
+        <StatusBar Grid.Row="2">
+            <StatusBarItem>
+                <TextBlock x:Name="YamlPathText" Text="(未选择 YAML)" FontSize="11" Foreground="#666"/>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SkiaSharp;
 using VisionInspection.Core.Models;
 using VisionInspection.Modules.SOP.Services;
@@ -58,7 +59,7 @@ public class SOPStateMachine
         StepChanged?.Invoke(this, new StepChangedEventArgs(0, CurrentStepId, workflow.Steps.FirstOrDefault(s => s.StepId == CurrentStepId)?.StepName ?? ""));
     }
 
-    public void ProcessFrame(List<ObjectDetection> detections, DateTime timestamp)
+    public void ProcessFrame(List<ObjectDetection> detections, HandPoseEstimationResult? handResult, DateTime timestamp)
     {
         if (_workflow == null || CurrentState != SOPExecutionState.Running)
             return;
@@ -78,12 +79,46 @@ public class SOPStateMachine
             ViolationDetected?.Invoke(this, new ViolationEventArgs(violation));
         }
 
-        // 评估步骤条件
-        var evaluation = _conditionEvaluator.EvaluateConditions(currentStep, detections);
+        // 评估步骤条件（物体 + 手部姿态）
+        var evaluation = _conditionEvaluator.EvaluateConditions(currentStep, detections, handResult);
         if (evaluation.IsPass)
         {
             CompleteCurrentStep(timestamp);
         }
+        else if (!string.IsNullOrEmpty(evaluation.Message))
+        {
+            // 仅打印一次当前条件不满足的原因（每帧一次），便于排查"卡在某一步"问题
+            EmitFailureDebug(currentStep, evaluation, detections, handResult);
+            Console.WriteLine($"[SOP] 步骤 '{currentStep.StepName}' 条件未满足: {evaluation.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 失败时写一行调试到文件，帮助定位 hand_action 不通过的真实原因。
+    /// 只在条件未通过时打印，频率 ≈ 一行/帧 × 步骤数，不会爆量。
+    /// </summary>
+    private static void EmitFailureDebug(SOPStep step, ConditionEvaluationResult evaluation, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
+    {
+        try
+        {
+            int handCount = handResult?.Hands?.Count ?? 0;
+            string handSummary = handCount == 0
+                ? "none"
+                : string.Join("|", handResult!.Hands.Select(h =>
+                    $"{h.HandType}(kx={h.Keypoints.Count},bbox={h.BoundingBox.Left:F0},{h.BoundingBox.Top:F0}-{h.BoundingBox.Right:F0},{h.BoundingBox.Bottom:F0})"));
+            string detSummary = detections.Count == 0
+                ? "none"
+                : string.Join("|", detections.Select(d =>
+                    $"{d.Label?.Name ?? "?"}({d.Confidence:F2})"));
+            string condSummary = evaluation.FailedCondition == null
+                ? "?"
+                : $"{evaluation.FailedCondition.Type}(target='{evaluation.FailedCondition.TargetObject}',minConf={evaluation.FailedCondition.MinConfidence:F2},params=[{string.Join(",", evaluation.FailedCondition.Parameters.Select(kv => $"{kv.Key}={kv.Value}"))}])";
+            var line = $"[{DateTime.Now:HH:mm:ss.fff}] [SOP-Fail] step='{step.StepName}' cond={condSummary} | reason={evaluation.Message} | dets={detSummary} | hands={handSummary}";
+            Console.WriteLine(line);
+            Debug.WriteLine(line);
+            File.AppendAllText("sop_module_debug.log", line + Environment.NewLine);
+        }
+        catch { }
     }
 
     public void Pause()
@@ -238,7 +273,15 @@ public class SOPStateMachine
 
             if (_workflow.Settings.AutoResetOnComplete)
             {
-                Task.Delay(TimeSpan.FromSeconds(_workflow.Settings.ResetDelaySec)).ContinueWith(_ => Reset());
+                // ⭐ 修复：原版只调用 Reset()，但 Reset() 之后状态变 Idle，ProcessFrame 会因
+                // CurrentState != Running 直接 return，导致即使配了 AutoResetOnComplete
+                // 也不会真的循环。改为先 Reset 清空状态，然后重新 Start 同一 workflow。
+                var workflow = _workflow;
+                Task.Delay(TimeSpan.FromSeconds(_workflow.Settings.ResetDelaySec)).ContinueWith(_ =>
+                {
+                    Reset();
+                    if (workflow != null) Start(workflow);
+                });
             }
         }
         else

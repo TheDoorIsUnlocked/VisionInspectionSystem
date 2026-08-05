@@ -34,16 +34,24 @@ public class DWPoseHandEstimationService : IHandPoseEstimationService
         {
             lock (_lockObject)
             {
-                // DWPose使用两个模型：检测模型和姿态模型
-                string modelDir = config.PalmModelPath;
-                string detModelPath = config.PalmModelPath;
-                string poseModelPath = config.LandmarkModelPath;
+                // DWPose 使用两个模型：人体检测(yolox_l.onnx) + 全身姿态(dw-ll_ucoco_384.onnx)
+                // 优先使用显式配置路径，否则回退到模型目录下的默认文件名
+                string detModelPath = config.DWPoseDetModelPath;
+                string poseModelPath = config.DWPosePoseModelPath;
 
-                // 如果路径是DWPose模型目录，使用默认模型名称
-                if (Directory.Exists(modelDir))
+                if (string.IsNullOrEmpty(detModelPath) || string.IsNullOrEmpty(poseModelPath))
                 {
-                    detModelPath = Path.Combine(modelDir, "yolox_l.onnx");
-                    poseModelPath = Path.Combine(modelDir, "dw-ll_ucoco_384.onnx");
+                    string modelDir = !string.IsNullOrEmpty(config.DWPoseModelDir)
+                        ? config.DWPoseModelDir
+                        : config.PalmModelPath; // 兼容旧逻辑：把 PalmModelPath 当目录用
+
+                    if (Directory.Exists(modelDir))
+                    {
+                        if (string.IsNullOrEmpty(detModelPath))
+                            detModelPath = Path.Combine(modelDir, "yolox_l.onnx");
+                        if (string.IsNullOrEmpty(poseModelPath))
+                            poseModelPath = Path.Combine(modelDir, "dw-ll_ucoco_384.onnx");
+                    }
                 }
 
                 Console.WriteLine($"[HandPose] 正在初始化DWPose手部姿态估计服务...");

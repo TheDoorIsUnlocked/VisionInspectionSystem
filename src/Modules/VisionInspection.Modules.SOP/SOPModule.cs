@@ -43,6 +43,11 @@ public class SOPModule : IDetectionModule
     private IHandPoseEstimationService? _handPoseService;
     private HandPoseEstimationResult? _lastHandPoseResult;
 
+    // 手部检测后端选择：Auto=维持 MediaPipe→YOLO→DWPose；DWPose/MediaPipe/Yolo=强制
+    // 想用 DWPose（比 MediaPipe 更丝滑、遮挡/握拳更稳）时，在 sop_config.json 设
+    // "HandDetectionBackend": "DWPose" 即可，无需改代码。
+    private HandDetectionBackend _handBackend = HandDetectionBackend.Auto;
+
     // 文件日志记录器
     private static readonly object _sopLogLock = new();
     private const string _sopDebugLogPath = "sop_module_debug.log";
@@ -132,6 +137,12 @@ public class SOPModule : IDetectionModule
     public event EventHandler<DetectionModeChangedEventArgs>? DetectionModeChanged;
     public event EventHandler<PoseDetectedEventArgs>? PoseDetected;
 
+    /// <summary>
+    /// 模型加载告警（例如工作流指定的专用模型文件不存在、回退到通用COCO模型时触发）。
+    /// 用于把"静默回退"暴露给界面，避免操作员面对"什么都没识别到"却无任何提示。
+    /// </summary>
+    public event EventHandler<string>? ModelWarning;
+
     public async Task InitializeAsync(IConfiguration config, ICameraService cameraService)
     {
         State = ModuleState.Initializing;
@@ -166,6 +177,14 @@ public class SOPModule : IDetectionModule
                     Enabled = bool.TryParse(poseSection["Enabled"], out var poseEnabled) ? poseEnabled : false,
                     ModelPath = poseSection["ModelPath"] ?? "yolo_models/yolov8s-pose.onnx"
                 };
+            }
+
+            // 读取手部检测后端选择（Auto / MediaPipe / Yolo / DWPose）
+            var backendStr = sopSection["HandDetectionBackend"];
+            if (!string.IsNullOrEmpty(backendStr)
+                && System.Enum.TryParse<HandDetectionBackend>(backendStr, true, out var parsedBackend))
+            {
+                _handBackend = parsedBackend;
             }
 
             // 读取手部姿态估计配置
@@ -427,6 +446,7 @@ public class SOPModule : IDetectionModule
             var handConfig = new HandPoseEstimationConfig
             {
                 ModelPath = actualModelPath,
+                Backend = _handBackend,
                 ConfidenceThreshold = _config.HandPoseEstimation?.ConfidenceThreshold ?? 0.5f,
                 MaxNumHands = _config.HandPoseEstimation?.MaxNumHands ?? 2,
                 UseGpu = _config.HandPoseEstimation?.UseGpu ?? true
@@ -443,40 +463,47 @@ public class SOPModule : IDetectionModule
             }
 
             // 选择手部检测方案
-            // 方案1: MediaPipe - 两阶段检测(手掌+关键点)，握拳/横向手都能检测
-            // 方案2: YOLOv8-hand - 单阶段检测，速度快但握拳/横向手识别差
-            // 方案3: DWPose - 全身姿态检测后提取手部，支持关键点但速度慢
+            // Backend=DWPose / MediaPipe / Yolo : 按配置强制使用该方案
+            // Backend=Auto（默认）              : MediaPipe → YOLO → DWPose 兜底（向后兼容）
+            // DWPose 使用 DWPose-onnx/models 下的 yolox_l.onnx + dw-ll_ucoco_384.onnx，
+            // 关键点更平滑、遮挡/握拳场景更稳，适合替代 MediaPipe。
 
-            // 优先使用 MediaPipe（手掌模型对各种手部姿势泛化更好）
-            bool useMediaPipe = File.Exists(handConfig.PalmModelPath)
-                && handConfig.PalmModelPath.Contains("palm_detection")
-                && File.Exists(handConfig.LandmarkModelPath);
-
-            if (useMediaPipe)
+            if (handConfig.Backend == HandDetectionBackend.DWPose)
             {
-                Log($"检测到 MediaPipe 模型，使用 MediaPipe 方案（握拳/横向手支持更好）");
-                _handPoseService = new MediaPipeHandService();
+                string dwposeModelDir = string.IsNullOrEmpty(handConfig.DWPoseModelDir)
+                    ? @"e:\yolo\YoloDotNet-master\DWPose-onnx\models"
+                    : handConfig.DWPoseModelDir;
+                handConfig.PalmModelPath = dwposeModelDir;
+                handConfig.LandmarkModelPath = dwposeModelDir;
+                _handPoseService = new DWPoseHandEstimationService();
                 await _handPoseService.InitializeAsync(handConfig);
-                Log($"MediaPipe 手部姿态初始化完成, IsInitialized={_handPoseService.IsInitialized}");
+                Log($"手部姿态估计初始化成功（DWPose 方案）, 模型目录: {dwposeModelDir}");
             }
-            else
+            else if (handConfig.Backend == HandDetectionBackend.MediaPipe)
             {
-                // 回退方案: 尝试 YOLO，再失败则用 DWPose
-                string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx";
-
+                if (File.Exists(handConfig.PalmModelPath) && handConfig.PalmModelPath.Contains("palm_detection") && File.Exists(handConfig.LandmarkModelPath))
+                {
+                    _handPoseService = new MediaPipeHandService();
+                    await _handPoseService.InitializeAsync(handConfig);
+                    Log($"MediaPipe 手部姿态初始化完成, IsInitialized={_handPoseService.IsInitialized}");
+                }
+                else
+                {
+                    Log("Backend=MediaPipe 但模型文件缺失，手部检测未初始化");
+                }
+            }
+            else if (handConfig.Backend == HandDetectionBackend.Yolo)
+            {
+                string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolo11n-pose-hands.onnx";
                 if (!File.Exists(yoloHandModelPath))
                 {
-                    var possiblePaths = new[]
+                    yoloHandModelPath = new[]
                     {
-                        @"e:\yolo\YoloDotNet-master\yolo_models\yolo11n-pose-hands.onnx",
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx",
                         @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-hand.onnx",
-                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov8m-hand.onnx",
                         Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolo11n-pose-hands.onnx"),
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8n-hand.onnx"),
-                    };
-                    yoloHandModelPath = possiblePaths.FirstOrDefault(File.Exists) ?? "";
+                    }.FirstOrDefault(File.Exists) ?? "";
                 }
-
                 if (!string.IsNullOrEmpty(yoloHandModelPath))
                 {
                     handConfig.PalmModelPath = yoloHandModelPath;
@@ -486,13 +513,59 @@ public class SOPModule : IDetectionModule
                 }
                 else
                 {
-                    // DWPose 兜底
-                    string dwposeModelDir = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
-                    handConfig.PalmModelPath = dwposeModelDir;
-                    handConfig.LandmarkModelPath = dwposeModelDir;
-                    _handPoseService = new DWPoseHandEstimationService();
+                    Log("Backend=Yolo 但模型文件缺失，手部检测未初始化");
+                }
+            }
+            else // Auto：维持原有优先级
+            {
+                bool useMediaPipe = File.Exists(handConfig.PalmModelPath)
+                    && handConfig.PalmModelPath.Contains("palm_detection")
+                    && File.Exists(handConfig.LandmarkModelPath);
+
+                if (useMediaPipe)
+                {
+                    Log($"检测到 MediaPipe 模型，使用 MediaPipe 方案（握拳/横向手支持更好）");
+                    _handPoseService = new MediaPipeHandService();
                     await _handPoseService.InitializeAsync(handConfig);
-                    Log($"手部姿态估计初始化成功（DWPose兜底方案）");
+                    Log($"MediaPipe 手部姿态初始化完成, IsInitialized={_handPoseService.IsInitialized}");
+                }
+                else
+                {
+                    // 回退方案: 尝试 YOLO，再失败则用 DWPose
+                    string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx";
+
+                    if (!File.Exists(yoloHandModelPath))
+                    {
+                        var possiblePaths = new[]
+                        {
+                            @"e:\yolo\YoloDotNet-master\yolo_models\yolo11n-pose-hands.onnx",
+                            @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-hand.onnx",
+                            @"e:\yolo\YoloDotNet-master\yolo_models\yolov8m-hand.onnx",
+                            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolo11n-pose-hands.onnx"),
+                            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8n-hand.onnx"),
+                        };
+                        yoloHandModelPath = possiblePaths.FirstOrDefault(File.Exists) ?? "";
+                    }
+
+                    if (!string.IsNullOrEmpty(yoloHandModelPath))
+                    {
+                        handConfig.PalmModelPath = yoloHandModelPath;
+                        _handPoseService = new YoloHandDetectionService();
+                        await _handPoseService.InitializeAsync(handConfig);
+                        Log($"手部姿态估计初始化成功（YOLO方案）, 模型: {yoloHandModelPath}");
+                    }
+                    else
+                    {
+                        // DWPose 兜底
+                        string dwposeModelDir = string.IsNullOrEmpty(handConfig.DWPoseModelDir)
+                            ? @"e:\yolo\YoloDotNet-master\DWPose-onnx\models"
+                            : handConfig.DWPoseModelDir;
+                        handConfig.PalmModelPath = dwposeModelDir;
+                        handConfig.LandmarkModelPath = dwposeModelDir;
+                        _handPoseService = new DWPoseHandEstimationService();
+                        await _handPoseService.InitializeAsync(handConfig);
+                        Log($"手部姿态估计初始化成功（DWPose兜底方案）");
+                    }
                 }
             }
         }
@@ -623,9 +696,12 @@ public class SOPModule : IDetectionModule
         var timestamp = DateTime.Now;
 
         // 统一检测模式：同时进行物体检测和手部姿态检测
-        ProcessUnifiedDetection(frame, result, timestamp);
+        var detections = ProcessUnifiedDetection(frame, result, timestamp);
 
-        // 更新结果果
+        // 关键：把感知结果（物体 + 手部）喂给状态机驱动步骤推进
+        _stateMachine?.ProcessFrame(detections, _lastHandPoseResult, timestamp);
+
+        // 更新结果
         if (_stateMachine != null)
         {
             result.CurrentStepId = _stateMachine.CurrentStepId;
@@ -639,7 +715,7 @@ public class SOPModule : IDetectionModule
             var currentStep = _currentWorkflow?.Steps.FirstOrDefault(s => s.StepId == _stateMachine.CurrentStepId);
             result.StepResults = new StepResults
             {
-                Message = currentStep?.StepName ?? "等待开始始",
+                Message = currentStep?.StepName ?? "等待开始",
                 CurrentStep = _stateMachine.CurrentStepId,
                 TotalSteps = _currentWorkflow?.Steps.Count ?? 0
             };
@@ -660,13 +736,29 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 手部姿态检测模式处理
+    /// 统一检测模式处理：物体检测（YOLO）+ 手部姿态（DWPose），结果一并喂给状态机
     /// </summary>
-    private void ProcessUnifiedDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
+    private List<ObjectDetection> ProcessUnifiedDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
     {
         // ========== 1. 物体检测（YOLO）==========
-        // 临时屏蔽物体检测，专注于手部检测调试
-        // if (_yolo != null) { ... }
+        var detections = new List<ObjectDetection>();
+        if (_yolo != null)
+        {
+            try
+            {
+                detections = _yolo.RunObjectDetection(frame.Image, _config.ConfidenceThreshold).ToList();
+                result.Detections = detections;
+                DebugLog($"YOLO 物体检测: {detections.Count} 个目标");
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"YOLO 物体检测失败: {ex.Message}");
+            }
+        }
+        else
+        {
+            DebugLog("YOLO 未初始化，跳过物体检测");
+        }
 
         // ========== 2. 手部姿态检测 ==========
 
@@ -703,6 +795,8 @@ public class SOPModule : IDetectionModule
                 DebugLog($"手部姿态估计失败: {ex.Message}");
             }
         }
+
+        return detections;
     }
 
     public void StartWorkflow(SOPWorkflow workflow)
@@ -733,7 +827,13 @@ public class SOPModule : IDetectionModule
             var resolvedPath = ResolveModelPath(modelPath);
             if (resolvedPath == null)
             {
-                Log($"警告: 工作作流模式型文件不存在: {modelPath}，跳过加载载");
+                var warn = $"工作流模型文件不存在: {modelPath}。\n" +
+                           $"已回退到初始化时加载的通用(COCO)模型，该模型不含本产品专属类别" +
+                           $"(phone/case_top/case_bottom/manual/charger/cable 等)，\n" +
+                           $"因此物体检测、object_present / object_in_zone / hand_near_object / 漏放校验将全部失效。\n" +
+                           $"请先训练专用模型并放到该路径，或修正 YAML 的 model.path。";
+                Log("警告: " + warn);
+                ModelWarning?.Invoke(this, warn);
             }
             else
             {

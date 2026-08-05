@@ -18,24 +18,59 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- 标题和控制按钮 -->
-        <Border Grid.Row="0" Background="#F5F5F5" Padding="1,10">
+        <!-- 顶部操作工具栏 + 标题/配方栏 -->
+        <Border Grid.Row="0" Background="#F5F5F5" Padding="1,5">
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
-                </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="📋" FontSize="20" Margin="0,0,0,0"/>
-                    <TextBlock Text="SOP检测模块" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
-                </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- 顶部操作工具栏：标定 / 配置 / 运行 -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,5,5">
+                    <Button x:Name="RegionButton" Content="🎯 标定区域" Margin="5,0" Padding="10,5"
+                            Click="RegionButton_Click" Height="30"/>
                     <Button x:Name="ConfigButton" Content="⚙️ 配置" Margin="5,0" Padding="10,5"
-                            Click="ConfigButton_Click"/>
+                            Click="ConfigButton_Click" Height="30"/>
                     <Button x:Name="RunButton" Content="▶️ 运行" Margin="5,0" Padding="10,5"
                             Background="#52C41A" Foreground="White"
-                            Click="RunButton_Click"/>
+                            Click="RunButton_Click" Height="30"/>
                 </StackPanel>
+
+                <!-- 标题行：模块名称 + 产品配方 -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal">
+                        <TextBlock Text="📋" FontSize="20" Margin="0,0,0,0"/>
+                        <TextBlock Text="SOP检测模块" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0"
+                                x:Name="RecipePanel">
+                        <StackPanel.ContextMenu>
+                            <ContextMenu x:Name="RecipeActionsContextMenu">
+                                <MenuItem Header="➕ 新建" Click="NewRecipeButton_Click"
+                                          ToolTip="基于模板或空白新建一个产品配方"/>
+                                <MenuItem x:Name="RenameRecipeMenuItem" Header="✏️ 重命名" Click="RenameRecipeButton_Click"
+                                          ToolTip="修改当前配方的产品名称" IsEnabled="False"/>
+                                <MenuItem x:Name="DeleteRecipeMenuItem" Header="🗑 删除" Click="DeleteRecipeButton_Click"
+                                          ToolTip="删除当前选中的配方文件（不可恢复）" IsEnabled="False"/>
+                            </ContextMenu>
+                        </StackPanel.ContextMenu>
+                        <TextBlock Text="📦 产品配方" FontSize="12" Foreground="#666" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <ComboBox x:Name="RecipeComboBox" Width="200" Height="30" VerticalAlignment="Center"
+                                  DisplayMemberPath="DisplayName" SelectedValuePath="FullPath"
+                                  SelectionChanged="RecipeComboBox_SelectionChanged"/>
+                        <!-- 配方管理操作合并为单个下拉菜单，避免标题栏溢出 -->
+                        <Button x:Name="RecipeActionsButton" Content="⋮" FontSize="16" Padding="6,0" Height="30" Width="30"
+                                Margin="6,0,0,0" VerticalAlignment="Center" VerticalContentAlignment="Center"
+                                ToolTip="配方管理：新建 / 重命名 / 删除"
+                                Click="RecipeActionsButton_Click"/>
+                    </StackPanel>
+                </Grid>
             </Grid>
         </Border>
 
