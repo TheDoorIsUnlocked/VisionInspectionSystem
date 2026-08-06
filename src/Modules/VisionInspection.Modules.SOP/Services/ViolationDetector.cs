@@ -10,12 +10,14 @@ namespace VisionInspection.Modules.SOP.Services;
 public class ViolationDetector
 {
     private readonly SOPStateMachine _stateMachine;
+    private readonly StepConditionEvaluator _conditionEvaluator;
     private readonly Dictionary<string, DateTime> _violationCooldown = new();
     private readonly Dictionary<string, ZoneDefinition> _zones;
 
-    public ViolationDetector(SOPStateMachine stateMachine, IReadOnlyList<ZoneDefinition>? zones = null)
+    public ViolationDetector(SOPStateMachine stateMachine, StepConditionEvaluator conditionEvaluator, IReadOnlyList<ZoneDefinition>? zones = null)
     {
         _stateMachine = stateMachine;
+        _conditionEvaluator = conditionEvaluator;
         _zones = (zones ?? new List<ZoneDefinition>()).ToDictionary(z => z.ZoneId, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -34,7 +36,7 @@ public class ViolationDetector
     /// <summary>
     /// 检测违规
     /// </summary>
-    public List<ViolationRecord> DetectViolations(SOPStep currentStep, List<ObjectDetection> detections, DateTime timestamp)
+    public List<ViolationRecord> DetectViolations(SOPStep currentStep, List<ObjectDetection> detections, HandPoseEstimationResult? handResult, DateTime timestamp)
     {
         var violations = new List<ViolationRecord>();
 
@@ -46,7 +48,6 @@ public class ViolationDetector
                 ViolationType.ForbiddenObject => DetectForbiddenObject(currentStep, detections, timestamp),
                 ViolationType.ObjectRemoved => DetectObjectRemoved(currentStep, detections, timestamp),
                 ViolationType.ZoneIntrusion => DetectZoneIntrusion(currentStep, detections, timestamp),
-                ViolationType.SkipStep => DetectSkipStep(currentStep, detections, timestamp),
                 ViolationType.WrongOrder => DetectWrongOrder(currentStep, timestamp),
                 ViolationType.MissingRequiredObject => DetectMissingRequiredObject(currentStep, detections, timestamp),
                 _ => null
@@ -67,6 +68,24 @@ public class ViolationDetector
             {
                 violations.Add(timeoutViolation);
                 SetCooldown(timeoutViolation);
+            }
+        }
+
+        // 全局跳步检测：基于"后续步骤的完整条件是否已满足"判断，比单纯检测物体出现更可靠，
+        // 避免把正常的拿/放过程误判为跳步。仅在 EnableSkipDetection 开启、且非第一步时启用。
+        if (_stateMachine.Workflow?.Settings.EnableSkipDetection == true)
+        {
+            var minStepId = _stateMachine.Workflow.Steps.Count > 0
+                ? _stateMachine.Workflow.Steps.Min(s => s.StepId)
+                : 0;
+            if (currentStep.StepId > minStepId)
+            {
+                var skip = DetectSkipStep(currentStep, detections, handResult, timestamp);
+                if (skip != null && !IsOnCooldown(skip))
+                {
+                    violations.Add(skip);
+                    SetCooldown(skip);
+                }
             }
         }
 
@@ -312,45 +331,37 @@ public class ViolationDetector
     }
 
     /// <summary>
-    /// 检测跳步
+    /// 检测跳步：若"下一个"步骤（按 StepId 顺序）的条件已经满足，而当前步骤尚未通过，
+    /// 说明当前步骤被跳过。只检查下一步，避免把更后面的 time_elapsed 等条件误报为跳步。
     /// </summary>
-    private ViolationRecord? DetectSkipStep(SOPStep step, List<ObjectDetection> detections, DateTime timestamp)
+    private ViolationRecord? DetectSkipStep(SOPStep step, List<ObjectDetection> detections, HandPoseEstimationResult? handResult, DateTime timestamp)
     {
         if (_stateMachine.Workflow?.Settings.EnableSkipDetection != true)
             return null;
 
-        // 检查是否满足了后续步骤的条件（说明可能跳过了当前步骤）
-        var futureSteps = _stateMachine.Workflow.Steps
+        // 只检查"下一个"步骤：跳步=当前步骤未完成却做了下一步。
+        var nextStep = _stateMachine.Workflow.Steps
             .Where(s => s.StepId > step.StepId)
             .OrderBy(s => s.StepId)
-            .ToList();
+            .FirstOrDefault();
 
-        foreach (var futureStep in futureSteps)
+        if (nextStep == null) return null;
+
+        // 排除纯时间条件步骤（如 complete 的 time_elapsed），否则只要等 1 秒就误报跳步
+        if (nextStep.PassConditions.Count == 1 && nextStep.PassConditions[0].Type == ConditionType.TimeElapsed)
+            return null;
+
+        var eval = _conditionEvaluator.EvaluateConditions(nextStep, detections, handResult);
+        if (eval.IsPass)
         {
-            // 简化判断：如果检测到后续步骤的关键对象，可能说明跳步了
-            var keyObjects = futureStep.PassConditions.Select(c => c.TargetObject).Distinct().ToList();
-
-            foreach (var keyObject in keyObjects)
+            return new ViolationRecord
             {
-                if (string.IsNullOrEmpty(keyObject))
-                    continue;
-
-                var detected = detections.Any(d =>
-                    (d.Label?.Name ?? "").Equals(keyObject, StringComparison.OrdinalIgnoreCase) &&
-                    d.Confidence >= 0.6f);
-
-                if (detected)
-                {
-                    return new ViolationRecord
-                    {
-                        Timestamp = timestamp,
-                        Type = ViolationType.SkipStep,
-                        Description = $"可能跳过了步骤 '{step.StepName}'，直接进行 '{futureStep.StepName}'",
-                        StepId = step.StepId,
-                        Evidence = $"Skip_{step.StepId}_{futureStep.StepId}_{timestamp:HHmmss}"
-                    };
-                }
-            }
+                Timestamp = timestamp,
+                Type = ViolationType.SkipStep,
+                Description = $"可能跳过了步骤 '{step.StepName}'，直接满足下一步 '{nextStep.StepName}'",
+                StepId = step.StepId,
+                Evidence = $"Skip_{step.StepId}_{nextStep.StepId}_{timestamp:HHmmss}"
+            };
         }
 
         return null;

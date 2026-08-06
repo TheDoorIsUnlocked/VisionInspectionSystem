@@ -28,6 +28,7 @@
     <ProjectReference Include="..\..\Core\VisionInspection.Core\VisionInspection.Core.csproj" />
     <ProjectReference Include="..\..\Modules\VisionInspection.Modules.SOP\VisionInspection.Modules.SOP.csproj" />
     <ProjectReference Include="..\..\Modules\VisionInspection.Modules.Detection\VisionInspection.Modules.Detection.csproj" />
+    <ProjectReference Include="..\VisionInspection.Converters\VisionInspection.Converters.csproj" />
   </ItemGroup>
 
   <!-- 海康相机SDK引用 -->
@@ -45,21 +46,15 @@
     </None>
   </ItemGroup>
 
-  <!-- SOP配置文件 -->
+  <!-- SOP配置文件：用通配符包含 configs/sop 下所有 yaml，以后新增 SOP 不用改 csproj -->
   <ItemGroup>
     <None Update="configs\sop_config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="configs\sop\regions\phone_usage_regions.json">
+    <None Update="configs\sop\regions\*.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="configs\sop\sop_phone_usage.yaml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="configs\sop\sop_assembly_pose.yaml">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="configs\sop\sop_steering_housing.yaml">
+    <None Update="configs\sop\*.yaml">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
@@ -82,6 +77,16 @@
     </None>
     <None Include="..\..\..\..\Models\yolov11s-pose.onnx">
       <Link>Models\yolov11s-pose.onnx</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- SOP 音频反馈文件（ok.wav / ng.wav）：复制到输出目录，运行时由 MainViewModel 定位播放 -->
+  <ItemGroup>
+    <None Include="..\..\..\ok.wav">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="..\..\..\ng.wav">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

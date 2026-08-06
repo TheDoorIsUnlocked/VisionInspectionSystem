@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- 关键：保持与原有命名空间一致，避免改动 XAML 中的 clr-namespace；
+         同时 AssemblyName 与 XAML 中的 assembly=VisionInspection.Converters 对应。
+         该工程刻意不引用任何原生/非托管依赖（OnnxRuntime / OpenCvSharp / 相机SDK），
+         以便 VS XAML 设计器可在不加载原生库的情况下实例化 converter，消除设计期 XDG0003。 -->
+    <RootNamespace>VisionInspection.UI.Converters</RootNamespace>
+    <AssemblyName>VisionInspection.Converters</AssemblyName>
+  </PropertyGroup>
+
+</Project>

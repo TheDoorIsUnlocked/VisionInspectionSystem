@@ -1,0 +1,145 @@
+# 水杯使用场景 SOP 配置
+# 场景：拿起水杯 -> 用杯子喝水 -> 放回原位
+#
+# ⚠️ 生效路径说明（重要）：
+#   本文件源码位于 src/UI/VisionInspection.UI/configs/sop/ ，由 csproj 的
+#   CopyToOutputDirectory=PreserveNewest 复制到 bin/Debug/net8.0-windows/configs/sop/ ，
+#   程序运行时读的是【输出目录】里的副本。
+#   根目录 configs/sop/ 下的同名副本仅供在编辑器里查看，程序【不读】它，
+#   改根目录那份不会生效（这是之前踩过的坑）。
+#
+# ⚠️ 标定提醒（务必用「🎯 标定区域」工具按真机画面设置，否则步骤不会推进）：
+#   - cup_table  ：水杯平时放在桌面的位置（拿起/放下都以它为准）
+#   - mouth_region：喝水时杯子/手到达的"嘴边"位置（必须对准你的嘴，否则"喝水"永远超时）
+# 本示例不依赖专用模型：人在场用 COCO 通用模型(person)，拿起/放下/喝水用手部姿态(DWPose)。
+# 物料识别用 COCO 自带的 "cup" 类别（比 cell phone 更常见、识别更稳）。
+
+sop:
+  name: "水杯使用场景SOP"
+  version: "1.0"
+  description: "检测人员拿起水杯、用杯子喝水、把水杯放回原位的完整流程"
+
+  # 全局设置
+  settings:
+    detectionMode: "pose_based"  # 使用姿态检测模式
+    confidenceThreshold: 0.6
+    stableFrames: 3
+    enableTimeoutDetection: false   # 关闭每步超时限制（先不限制时间，动作做完才推进）
+
+  # 区域定义（坐标需在「🎯 标定区域」工具里按真机画面重新标定）
+  regions:
+    cup_table:
+      x1: 200
+      y1: 400
+      x2: 350
+      y2: 550
+      name: "水杯放置区"
+      description: "水杯放置的桌面区域（拿起=手离开此区；放下=手到达此区）"
+      color: "#4CAF50"
+
+    mouth_region:
+      x1: 430
+      y1: 220
+      x2: 540
+      y2: 320
+      name: "嘴边区域"
+      description: "喝水时手/杯子应到达的嘴边位置（务必对准你的嘴）"
+      color: "#2196F3"
+
+  # 步骤定义
+  steps:
+    # 步骤1: 等待状态（人在场才进入下一步）
+    - id: "idle"
+      name: "等待"
+      description: "等待人员开始操作"
+      transitions: ["pickup_cup"]
+      detection:
+        method: "person_present"
+        min_confidence: 0.6
+        description: "检测到人员在场（COCO person 类别）"
+
+    # 步骤2: 从桌上拿起水杯
+    - id: "pickup_cup"
+      name: "拿起水杯"
+      description: "从桌面拿起水杯"
+      transitions: ["drink_water"]
+      detection:
+        method: "hand_action"
+        action: "pickup"
+        hand: "any"
+        from_region: "cup_table"
+        target_object: "cup"   # 辅助判定：手拿着 cup 离开 cup_table 即视为拿起（cup 是 COCO 自带类别）
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手曾位于水杯放置区且现已离开，或检测到手拿着杯子离开放置区"
+
+    # 步骤3: 用杯子喝水
+    - id: "drink_water"
+      name: "用杯子喝水"
+      description: "将杯子送到嘴边喝水"
+      transitions: ["put_down_cup"]
+      detection:
+        method: "hand_in_region"
+        hand: "any"
+        region: "mouth_region"
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手在嘴边区域稳定停留（mouth_region 须对准嘴，杯子到嘴边即视为喝水）"
+
+    # 步骤4: 把水杯放回原位
+    - id: "put_down_cup"
+      name: "放回水杯"
+      description: "将水杯放回桌面原位"
+      transitions: ["complete"]
+      detection:
+        method: "hand_action"
+        action: "putdown"
+        hand: "any"
+        to_region: "cup_table"
+        target_object: "cup"   # 辅助判定：手拿着 cup 进入 cup_table 即视为放下
+        min_confidence: 0.6
+        stable_frames: 3
+        description: "手将水杯放回放置区"
+
+    # 步骤5: 完成
+    - id: "complete"
+      name: "完成"
+      description: "水杯使用流程完成"
+      transitions: ["idle"]
+      detection:
+        method: "time_elapsed"
+        duration_ms: 1000
+        description: "等待1秒后回到初始状态"
+
+  # 违规定义（仅作说明/展示，引擎主要靠超时与跳步判定）
+  violations:
+    - id: "cup_not_picked"
+      name: "未拿起水杯"
+      description: "在规定时间内没有拿起水杯"
+      severity: "warning"
+
+    - id: "drink_too_short"
+      name: "喝水时间过短"
+      description: "喝水停留时间少于1秒"
+      severity: "warning"
+
+    - id: "cup_not_returned"
+      name: "未放回水杯"
+      description: "没有将水杯放回指定位置"
+      severity: "error"
+
+  # 关键点配置（姿态检测用，COCO Pose 原生关键点）
+  keypoints:
+    required:
+      - "LeftWrist"
+      - "RightWrist"
+      - "Nose"
+
+  # 可视化配置
+  visualization:
+    show_regions: true
+    show_keypoints: true
+    show_skeleton: true
+    show_tracking_id: true
+    region_alpha: 0.3
+    keypoint_radius: 5

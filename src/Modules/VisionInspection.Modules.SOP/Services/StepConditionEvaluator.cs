@@ -364,24 +364,32 @@ public class StepConditionEvaluator
                 // 无目标区域：理解为"从起始区域离开"或"拿起目标物体"（pickup 语义）
                 if (hasFrom)
                 {
-                    // ⭐ 优先判定：手正拿着 target_object —— 直接视为拿起
-                    // 即使物体 BBox 仍与 from_region 有交叠（用户拿起后手臂可能仍覆盖该区域），
-                    // 只要手握着物体就算拿起成功。这是最贴近真实"拿起"动作的语义。
+                    // 必须先访问过起始区域，否则不能算"从该区域拿起"
+                    if (!visitedFrom)
+                    {
+                        return new ConditionCheckResult
+                        {
+                            IsMet = false,
+                            Message = $"手部尚未访问区域 {fromRegion}，不能判定拿起"
+                        };
+                    }
+
+                    // 判定 1：手已离开起始区域（拿起后离开）
+                    if (!inFrom)
+                        return new ConditionCheckResult { IsMet = true, Message = $"手部已离开区域 {fromRegion}" };
+
+                    // 判定 2：手仍在起始区域内，但已拿起目标物体（物体被握起）
                     if (handHoldingTarget)
                     {
                         return new ConditionCheckResult
                         {
                             IsMet = true,
-                            Message = $"手部已拿起 '{condition.TargetObject}'"
+                            Message = $"手部已在 {fromRegion} 内拿起 '{condition.TargetObject}'"
                         };
                     }
 
-                    // 备用判定 1：手曾位于起始区域且现已离开
-                    if (visitedFrom && !inFrom)
-                        return new ConditionCheckResult { IsMet = true, Message = $"手部已离开区域 {fromRegion}" };
-
-                    // 备用判定 2：手曾在起始区域，且物体已离开起始区域（最宽松）
-                    if (visitedFrom && !string.IsNullOrEmpty(condition.TargetObject))
+                    // 判定 3：手仍在起始区域内，但目标物体 bbox 已离开起始区域
+                    if (!string.IsNullOrEmpty(condition.TargetObject))
                     {
                         var targetObj = detections
                             .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
@@ -402,9 +410,7 @@ public class StepConditionEvaluator
                     return new ConditionCheckResult
                     {
                         IsMet = false,
-                        Message = visitedFrom
-                            ? $"手部仍在区域 {fromRegion} 内（未拿起目标 {condition.TargetObject}）"
-                            : $"手部尚未访问区域 {fromRegion}，且未拿起目标 {condition.TargetObject}"
+                        Message = $"手部仍在区域 {fromRegion} 内，尚未拿起目标 {condition.TargetObject}"
                     };
                 }
 

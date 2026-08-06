@@ -32,6 +32,7 @@ namespace VisionInspection.UI.Services
         private readonly string _dbPath;
         private readonly string _modelsDirectory;
         private readonly string _yoloModelsDirectory;
+        private readonly List<string> _yoloModelsDirectories = new();
         private ModelInfo? _currentModel;
 
         public ModelInfo? CurrentModel => _currentModel;
@@ -44,69 +45,126 @@ namespace VisionInspection.UI.Services
         {
             _dbPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", "models.db");
             _modelsDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models");
-            
-            // 使用项目根目录下的yolo_models文件夹（绝对路径）
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            // 从 bin\Debug\net8.0-windows 回退到项目根目录
-            var projectRoot = Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", ".."));
-            _yoloModelsDirectory = Path.Combine(projectRoot, "yolo_models");
+
+            // 关键修复：不再用固定层数 ".." 回退（少算一层会导致漏掉项目根的 yolo_models）。
+            // 改为从 BaseDirectory 向上逐级探测所有包含 yolo_models 子目录的祖先目录，
+            // 无论目录深度如何都能正确找到模型位置。
+            _yoloModelsDirectories = FindYoloModelsDirectories(AppDomain.CurrentDomain.BaseDirectory);
+            // 优先使用最靠近 BaseDirectory 的那个（通常是项目根 yolo_models）作为主目录
+            _yoloModelsDirectory = _yoloModelsDirectories.FirstOrDefault()
+                ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models");
 
             // 确保目录存在
             Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
             Directory.CreateDirectory(_modelsDirectory);
-            Directory.CreateDirectory(_yoloModelsDirectory);
+            foreach (var d in _yoloModelsDirectories)
+                Directory.CreateDirectory(d);
 
             InitializeDatabase();
         }
 
         /// <summary>
-        /// 获取YOLO模型文件夹路径
+        /// 从指定目录向上逐级查找所有含 yolo_models 子目录的祖先目录（去重、由近及远）。
+        /// </summary>
+        private static List<string> FindYoloModelsDirectories(string startDir)
+        {
+            var found = new List<string>();
+            var dir = new DirectoryInfo(startDir);
+            // 向上遍历，直到到达盘符根目录
+            while (dir != null && dir.Parent != null)
+            {
+                var candidate = Path.Combine(dir.FullName, "yolo_models");
+                if (Directory.Exists(candidate)
+                    && !found.Any(x => string.Equals(x, candidate, StringComparison.OrdinalIgnoreCase)))
+                {
+                    found.Add(candidate);
+                }
+                dir = dir.Parent;
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// 获取YOLO模型文件夹路径（主目录，通常为项目根 yolo_models）
         /// </summary>
         public string YoloModelsDirectory => _yoloModelsDirectory;
 
         /// <summary>
-        /// 扫描模型文件夹中的ONNX模型
+        /// 扫描模型文件夹中的ONNX模型（自动探测到的所有 yolo_models 目录，合并去重）
         /// </summary>
         public async Task<List<ModelScanResult>> ScanModelsDirectoryAsync(string? directoryPath = null)
         {
             return await Task.Run(() =>
             {
                 var results = new List<ModelScanResult>();
-                var targetDirectory = directoryPath ?? _yoloModelsDirectory;
+                var targetDirectories = new List<string>();
 
-                if (!Directory.Exists(targetDirectory))
+                if (!string.IsNullOrEmpty(directoryPath))
                 {
-                    return results;
+                    targetDirectories.Add(directoryPath);
+                }
+                else
+                {
+                    // 扫描所有探测到的 yolo_models 目录（合并去重）
+                    targetDirectories.AddRange(_yoloModelsDirectories);
                 }
 
-                // 获取所有ONNX文件
-                var onnxFiles = Directory.GetFiles(targetDirectory, "*.onnx", SearchOption.AllDirectories);
                 var existingModels = GetAllModelsAsync().Result;
-                var existingPaths = existingModels.ToDictionary(m => m.ModelPath, m => m.Id);
+                var existingPaths = existingModels.ToDictionary(m => Path.GetFullPath(m.ModelPath), m => m.Id);
+                var seenPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var filePath in onnxFiles)
+                foreach (var targetDirectory in targetDirectories)
                 {
-                    try
-                    {
-                        var result = AnalyzeModelFile(filePath);
-                        
-                        // 检查是否已在数据库中
-                        if (existingPaths.ContainsKey(filePath))
-                        {
-                            result.IsAlreadyInDatabase = true;
-                            result.ExistingModelId = existingPaths[filePath];
-                        }
+                    if (!Directory.Exists(targetDirectory))
+                        continue;
 
-                        results.Add(result);
-                    }
-                    catch (Exception ex)
+                    // 获取所有ONNX文件
+                    var onnxFiles = Directory.GetFiles(targetDirectory, "*.onnx", SearchOption.AllDirectories);
+
+                    foreach (var filePath in onnxFiles)
                     {
-                        System.Diagnostics.Debug.WriteLine($"分析模型文件失败 {filePath}: {ex.Message}");
+                        var fullPath = Path.GetFullPath(filePath);
+                        if (!seenPaths.Add(fullPath))
+                            continue;
+
+                        try
+                        {
+                            var result = AnalyzeModelFile(filePath);
+
+                            // 检查是否已在数据库中
+                            if (existingPaths.ContainsKey(fullPath))
+                            {
+                                result.IsAlreadyInDatabase = true;
+                                result.ExistingModelId = existingPaths[fullPath];
+                            }
+
+                            results.Add(result);
+                        }
+                        catch (Exception ex)
+                        {
+                            System.Diagnostics.Debug.WriteLine($"分析模型文件失败 {filePath}: {ex.Message}");
+                        }
                     }
                 }
 
                 return results;
             });
+        }
+
+        /// <summary>
+        /// 自动扫描默认目录并将尚未入库的模型补齐导入，恢复"开箱即用"。
+        /// 与"仅当 db 为空才导入"相比，此实现会把任何扫描到但不在 db 中的模型都补入，
+        /// 避免用户之前手动导入过少量模型后，新目录下的模型始终不被发现。
+        /// 返回本次新导入的模型数量。
+        /// </summary>
+        public async Task<int> EnsureDatabaseSeededAsync()
+        {
+            var scanResults = await ScanModelsDirectoryAsync();
+            var newModels = scanResults.Where(r => !r.IsAlreadyInDatabase).ToList();
+            if (newModels.Count == 0)
+                return 0;
+
+            return await ImportScannedModelsAsync(newModels);
         }
 
         /// <summary>
@@ -420,8 +478,8 @@ namespace VisionInspection.UI.Services
                         SmoothIouThreshold = reader.IsDBNull(reader.GetOrdinal("SmoothIouThreshold")) ? 0.3f : (float)reader.GetDouble(reader.GetOrdinal("SmoothIouThreshold")),
                         UseGpu = reader.GetInt32(reader.GetOrdinal("UseGpu")) == 1,
                         GpuId = reader.GetInt32(reader.GetOrdinal("GpuId")),
-                        CreatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreatedAt"))),
-                        UpdatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("UpdatedAt")))
+                        CreatedAt = DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedAt")), out var createdAt) ? createdAt : DateTime.MinValue,
+                        UpdatedAt = DateTime.TryParse(reader.GetString(reader.GetOrdinal("UpdatedAt")), out var updatedAt) ? updatedAt : DateTime.MinValue
                     };
                     models.Add(model);
                 }
@@ -463,8 +521,8 @@ namespace VisionInspection.UI.Services
                         SmoothIouThreshold = reader.IsDBNull(reader.GetOrdinal("SmoothIouThreshold")) ? 0.3f : (float)reader.GetDouble(reader.GetOrdinal("SmoothIouThreshold")),
                         UseGpu = reader.GetInt32(reader.GetOrdinal("UseGpu")) == 1,
                         GpuId = reader.GetInt32(reader.GetOrdinal("GpuId")),
-                        CreatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreatedAt"))),
-                        UpdatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("UpdatedAt")))
+                        CreatedAt = DateTime.TryParse(reader.GetString(reader.GetOrdinal("CreatedAt")), out var createdAt) ? createdAt : DateTime.MinValue,
+                        UpdatedAt = DateTime.TryParse(reader.GetString(reader.GetOrdinal("UpdatedAt")), out var updatedAt) ? updatedAt : DateTime.MinValue
                     };
                 }
 

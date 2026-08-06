@@ -570,9 +570,16 @@ public class DWPoseHandDetector : IDisposable
         DebugLog($"左手腕(91): x={keypoints[91, 0]:F1}, y={keypoints[91, 1]:F1}, score={keypoints[91, 2]:F3}");
         DebugLog($"右手腕(113): x={keypoints[113, 0]:F1}, y={keypoints[113, 1]:F1}, score={keypoints[113, 2]:F3}");
 
+        // 计算脸部区域，用于过滤"脸部被误判为手"的情况
+        var faceBox = ComputeFaceBox(keypoints);
+        if (faceBox != SKRect.Empty)
+        {
+            DebugLog($"脸部区域: [{faceBox.Left:F0},{faceBox.Top:F0}-{faceBox.Right:F0},{faceBox.Bottom:F0}]");
+        }
+
         // 提取左手
         var leftHand = ExtractSingleHand(keypoints, true, startId, personBox);
-        bool leftHandValid = leftHand != null && ValidateHandPose(leftHand);
+        bool leftHandValid = leftHand != null && ValidateHandPose(leftHand, faceBox);
         if (leftHandValid)
         {
             DebugLog($"左手检测成功，关键点数: {leftHand.Keypoints.Count}");
@@ -584,7 +591,7 @@ public class DWPoseHandDetector : IDisposable
 
         // 提取右手
         var rightHand = ExtractSingleHand(keypoints, false, startId + 1, personBox);
-        bool rightHandValid = rightHand != null && ValidateHandPose(rightHand);
+        bool rightHandValid = rightHand != null && ValidateHandPose(rightHand, faceBox);
         if (rightHandValid)
         {
             DebugLog($"右手检测成功，关键点数: {rightHand.Keypoints.Count}");
@@ -858,9 +865,9 @@ public class DWPoseHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 验证手部姿态是否合理 - 严格过滤防止误检
+    /// 验证手部姿态是否合理 - 严格过滤防止误检（包括脸部误识别为手）
     /// </summary>
-    private bool ValidateHandPose(HandPose handPose)
+    private bool ValidateHandPose(HandPose handPose, SKRect faceBox)
     {
         // 基本要求：至少检测到手腕和几根手指
         if (handPose.Keypoints.Count < 15) return false;
@@ -895,7 +902,65 @@ public class DWPoseHandDetector : IDisposable
         float avgConfidence = handPose.Keypoints.Average(k => k.Confidence);
         if (avgConfidence < 0.25f) return false;
 
+        // 新增：排除落在脸部区域的手（DWPose 常见误检：把面部关键点当手）
+        if (faceBox != SKRect.Empty)
+        {
+            var handCenter = new SKPoint(handPose.BoundingBox.MidX, handPose.BoundingBox.MidY);
+            var wristPoint = new SKPoint(wrist.X, wrist.Y);
+
+            // 若手部中心或手腕在脸框内，或手与脸 IoU 过高，视为假手
+            bool centerInFace = faceBox.Contains(handCenter);
+            bool wristInFace = faceBox.Contains(wristPoint);
+            float faceIoU = CalculateIoU(handPose.BoundingBox, faceBox);
+
+            if (centerInFace || wristInFace || faceIoU > 0.25f)
+            {
+                DebugLog($"  手部被判定为脸部误检，已过滤 (centerInFace={centerInFace}, wristInFace={wristInFace}, faceIoU={faceIoU:F2})");
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    /// <summary>
+    /// 从 COCO-WholeBody 关键点计算脸部区域（用于过滤手部误检）
+    /// </summary>
+    private static SKRect ComputeFaceBox(float[,] keypoints)
+    {
+        // 优先使用脸部网格关键点（23-90，共68点）
+        var faceMeshPoints = new List<SKPoint>();
+        for (int i = 23; i <= 90 && i < keypoints.GetLength(0); i++)
+        {
+            if (keypoints[i, 2] > 0.2f)
+            {
+                faceMeshPoints.Add(new SKPoint(keypoints[i, 0], keypoints[i, 1]));
+            }
+        }
+
+        // 备用：使用五官关键点（0=鼻子, 1/2=眼睛, 3/4=耳朵）
+        var faceFeaturePoints = new List<SKPoint>();
+        foreach (int i in new[] { 0, 1, 2, 3, 4 })
+        {
+            if (i < keypoints.GetLength(0) && keypoints[i, 2] > 0.3f)
+            {
+                faceFeaturePoints.Add(new SKPoint(keypoints[i, 0], keypoints[i, 1]));
+            }
+        }
+
+        var points = faceMeshPoints.Count >= 5 ? faceMeshPoints : faceFeaturePoints;
+        if (points.Count < 3) return SKRect.Empty;
+
+        float minX = points.Min(p => p.X);
+        float maxX = points.Max(p => p.X);
+        float minY = points.Min(p => p.Y);
+        float maxY = points.Max(p => p.Y);
+
+        // 添加适当边距：下巴、额头、耳朵两侧
+        float padX = Math.Max(20f, (maxX - minX) * 0.15f);
+        float padY = Math.Max(30f, (maxY - minY) * 0.25f);
+
+        return new SKRect(minX - padX, minY - padY, maxX + padX, maxY + padY);
     }
 
     /// <summary>

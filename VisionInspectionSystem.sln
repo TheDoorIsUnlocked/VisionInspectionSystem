@@ -21,6 +21,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionInspection.Modules.De
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionInspection.Modules.Cascade", "src\Modules\VisionInspection.Modules.Cascade\VisionInspection.Modules.Cascade.csproj", "{3AB4893A-FABB-4554-BF4B-095389186F41}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VisionInspection.Converters", "src\UI\VisionInspection.Converters\VisionInspection.Converters.csproj", "{5ED96450-5449-4071-8787-39E46BB0F437}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -91,6 +93,18 @@ Global
 		{3AB4893A-FABB-4554-BF4B-095389186F41}.Release|x64.Build.0 = Release|Any CPU
 		{3AB4893A-FABB-4554-BF4B-095389186F41}.Release|x86.ActiveCfg = Release|Any CPU
 		{3AB4893A-FABB-4554-BF4B-095389186F41}.Release|x86.Build.0 = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|x64.Build.0 = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Debug|x86.Build.0 = Debug|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|x64.ActiveCfg = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|x64.Build.0 = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|x86.ActiveCfg = Release|Any CPU
+		{5ED96450-5449-4071-8787-39E46BB0F437}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -104,5 +118,6 @@ Global
 		{6A83E8FD-8FB6-47C9-8CB4-5961C70B955A} = {EC447DCF-ABFA-6E24-52A5-D7FD48A5C558}
 		{4B968F2C-44C9-47B7-A8DC-798A9188F5E9} = {EC447DCF-ABFA-6E24-52A5-D7FD48A5C558}
 		{3AB4893A-FABB-4554-BF4B-095389186F41} = {EC447DCF-ABFA-6E24-52A5-D7FD48A5C558}
+		{5ED96450-5449-4071-8787-39E46BB0F437} = {BBB7B94B-6E11-D9F1-7BA6-9ECA82DB22BF}
 	EndGlobalSection
 EndGlobal

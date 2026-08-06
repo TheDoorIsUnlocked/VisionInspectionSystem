@@ -355,11 +355,11 @@ public static class HandSkeletonConnections
 
 /// <summary>
 /// 手部检测后端枚举。
-/// Auto=维持原有优先级(MediaPipe→YOLO→DWPose)；其余为强制指定方案。
+/// Auto=维持原有优先级(MediaPipe→YOLO-hand→YOLO-pose→DWPose)；其余为强制指定方案。
 /// </summary>
 public enum HandDetectionBackend
 {
-    /// <summary>自动：MediaPipe → YOLO → DWPose 兜底（向后兼容默认行为）</summary>
+    /// <summary>自动：MediaPipe → YOLO-hand → YOLO-pose → DWPose 兜底（向后兼容默认行为）</summary>
     Auto = 0,
 
     /// <summary>MediaPipe 两阶段手部关键点（握拳/横向手泛化好）</summary>
@@ -369,5 +369,8 @@ public enum HandDetectionBackend
     Yolo = 2,
 
     /// <summary>DWPose 全身姿态估计后提取 21 点手部关键点（最丝滑、遮挡/握拳更稳）</summary>
-    DWPose = 3
+    DWPose = 3,
+
+    /// <summary>YOLOv8-pose 检测手腕 + MediaPipe Landmark 精修手指关键点</summary>
+    YoloPose = 4
 }

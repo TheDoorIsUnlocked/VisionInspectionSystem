@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Win32;
 using SkiaSharp;
 using System.IO;
+using System.Media;
 using System.Threading.Channels;
 using System.Windows;
 using VisionInspection.Core.Interfaces;
@@ -824,9 +825,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     Color = SKColors.White,
                     TextSize = 20,
                     IsAntialias = true,
-                    FakeBoldText = true
+                    FakeBoldText = true,
+                    Typeface = SKTypeface.FromFamilyName("Microsoft YaHei")
                 };
-                canvas.DrawText($"⚠ 违规: {lastViolation.Description}", 15, info.Height - 18, warnText);
+                canvas.DrawText($"违规: {lastViolation.Description}", 15, info.Height - 18, warnText);
             }
         }
         catch (Exception ex)
@@ -1459,6 +1461,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentStep = e.CurrentStepId;
             SopStatus = $"步骤 {e.CurrentStepId}: {e.StepName}";
             Status = $"SOP 步骤推进: {e.PreviousStepId} → {e.CurrentStepId} ({e.StepName})";
+            // 每步完成后播放 ok.wav（初始 0→1 是"开始"，不算完成，不播）
+            if (e.PreviousStepId != 0)
+                PlayOkSound();
         });
     }
 
@@ -1469,6 +1474,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             if (_isDisposed) return;
             SopStatus = $"⚠ 违规: {e.Violation.Description}";
             Status = $"⚠ SOP 违规: [{e.Violation.Type}] {e.Violation.Description}";
+            // 跳步（中间跳了工序）→ 播放 ng.wav
+            if (e.Violation.Type == ViolationType.SkipStep)
+                PlayNgSound();
         });
     }
 
@@ -1482,8 +1490,79 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Status = isPass
                 ? $"SOP 完成: 全部 {TotalSteps} 步通过"
                 : $"SOP 完成: 有 {e.Violations.Count} 个违规";
+            // 最后一步完成也播放 ok.wav
+            PlayOkSound();
         });
     }
+
+    #region SOP 音频反馈（每步完成 ok.wav / 跳步 ng.wav）
+
+    private string? _okWavPath;
+    private string? _ngWavPath;
+
+    /// <summary>
+    /// 定位 ok.wav / ng.wav：优先程序运行目录，其次从程序目录向上逐层查找
+    /// （音频文件一般放在项目根目录，运行时工作目录可能是 bin/Debug/...）。
+    /// </summary>
+    private void EnsureSopAudioPaths()
+    {
+        if (_okWavPath != null && _ngWavPath != null) return;
+
+        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            AppContext.BaseDirectory,
+            AppDomain.CurrentDomain.BaseDirectory,
+            Directory.GetCurrentDirectory()
+        };
+
+        foreach (var root in roots)
+        {
+            var dir = root;
+            for (int i = 0; i < 8 && !string.IsNullOrEmpty(dir); i++)
+            {
+                TryResolveAudio(ref _okWavPath, Path.Combine(dir, "ok.wav"));
+                TryResolveAudio(ref _ngWavPath, Path.Combine(dir, "ng.wav"));
+                if (_okWavPath != null && _ngWavPath != null) return;
+                dir = Path.GetDirectoryName(dir);
+            }
+        }
+    }
+
+    private static void TryResolveAudio(ref string? store, string path)
+    {
+        if (store == null && File.Exists(path)) store = path;
+    }
+
+    /// <summary>
+    /// 播放音频（异步，不阻塞 UI）。文件不存在时静默跳过。
+    /// </summary>
+    private void PlaySopSound(string? path)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+        try
+        {
+            using var player = new SoundPlayer(path);
+            player.Play();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[SOP-Audio] 播放失败 '{path}': {ex.Message}");
+        }
+    }
+
+    private void PlayOkSound()
+    {
+        EnsureSopAudioPaths();
+        PlaySopSound(_okWavPath);
+    }
+
+    private void PlayNgSound()
+    {
+        EnsureSopAudioPaths();
+        PlaySopSound(_ngWavPath);
+    }
+
+    #endregion
 
     /// <summary>
     /// 模型加载告警：专用模型缺失/回退时弹窗提示，避免"什么都没识别到却无提示"

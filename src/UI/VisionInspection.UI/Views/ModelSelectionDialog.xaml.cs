@@ -26,18 +26,32 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 加载模型列表
+        /// 加载模型列表（若数据库为空则自动扫描默认目录并导入，恢复开箱即用）
         /// </summary>
         private async void LoadModels()
         {
             try
             {
+                // 数据库为空时自动扫描并导入，避免"找不到模型"的空列表
+                var existing = await _modelManager.GetAllModelsAsync();
+                if (existing.Count == 0)
+                {
+                    try
+                    {
+                        await _modelManager.EnsureDatabaseSeededAsync();
+                    }
+                    catch (Exception seedEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"自动导入模型失败: {seedEx.Message}");
+                    }
+                }
+
                 var models = await _modelManager.GetAllModelsAsync();
                 ModelsDataGrid.ItemsSource = models;
 
                 if (models.Count == 0)
                 {
-                    MessageBox.Show("数据库中没有模型，请先导入模型", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                    MessageBox.Show("数据库中没有模型，请先在「模型管理」中扫描并导入模型", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
             }
             catch (Exception ex)

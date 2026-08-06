@@ -35,7 +35,7 @@ public class SOPStateMachine
     public SOPStateMachine(IReadOnlyList<ZoneDefinition>? zones = null)
     {
         _conditionEvaluator = new StepConditionEvaluator(this, zones);
-        _violationDetector = new ViolationDetector(this, zones);
+        _violationDetector = new ViolationDetector(this, _conditionEvaluator, zones);
     }
 
     /// <summary>
@@ -72,7 +72,7 @@ public class SOPStateMachine
         UpdateTrackedObjects(detections, timestamp);
 
         // 检测违规
-        var violations = _violationDetector.DetectViolations(currentStep, detections, timestamp);
+        var violations = _violationDetector.DetectViolations(currentStep, detections, handResult, timestamp);
         foreach (var violation in violations)
         {
             RecordViolation(violation);

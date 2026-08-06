@@ -463,10 +463,12 @@ public class SOPModule : IDetectionModule
             }
 
             // 选择手部检测方案
-            // Backend=DWPose / MediaPipe / Yolo : 按配置强制使用该方案
-            // Backend=Auto（默认）              : MediaPipe → YOLO → DWPose 兜底（向后兼容）
+            // Backend=DWPose / MediaPipe / Yolo / YoloPose : 按配置强制使用该方案
+            // Backend=Auto（默认）                          : MediaPipe → YOLO-hand → YOLO-pose → DWPose 兜底（向后兼容）
             // DWPose 使用 DWPose-onnx/models 下的 yolox_l.onnx + dw-ll_ucoco_384.onnx，
             // 关键点更平滑、遮挡/握拳场景更稳，适合替代 MediaPipe。
+            // YoloPose 使用 yolov8s-pose/yolov11s-pose 检测手腕，再裁切用 MediaPipe Landmark 精修手指，
+            // 对横伸/远离躯干的手识别率通常比 DWPose 高。
 
             if (handConfig.Backend == HandDetectionBackend.DWPose)
             {
@@ -516,6 +518,42 @@ public class SOPModule : IDetectionModule
                     Log("Backend=Yolo 但模型文件缺失，手部检测未初始化");
                 }
             }
+            else if (handConfig.Backend == HandDetectionBackend.YoloPose)
+            {
+                string yoloPoseModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-pose.onnx";
+                if (!File.Exists(yoloPoseModelPath))
+                {
+                    yoloPoseModelPath = new[]
+                    {
+                        @"e:\yolo\YoloDotNet-master\yolo_models\yolov11s-pose.onnx",
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s-pose.onnx"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov11s-pose.onnx"),
+                    }.FirstOrDefault(File.Exists) ?? "";
+                }
+
+                string landmarkModelPath = @"e:\yolo\YoloDotNet-master\VisionInspectionSystem\src\UI\VisionInspection.UI\models\hand_landmark_sparse_Nx3x224x224.onnx";
+                if (!File.Exists(landmarkModelPath))
+                {
+                    landmarkModelPath = new[]
+                    {
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "hand_landmark_sparse_Nx3x224x224.onnx"),
+                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models", "hand_landmark_sparse_Nx3x224x224.onnx"),
+                    }.FirstOrDefault(File.Exists) ?? "";
+                }
+
+                if (!string.IsNullOrEmpty(yoloPoseModelPath) && !string.IsNullOrEmpty(landmarkModelPath))
+                {
+                    handConfig.PalmModelPath = yoloPoseModelPath;
+                    handConfig.LandmarkModelPath = landmarkModelPath;
+                    _handPoseService = new YoloPoseHandEstimationService();
+                    await _handPoseService.InitializeAsync(handConfig);
+                    Log($"手部姿态估计初始化成功（YoloPose 方案）, pose={yoloPoseModelPath}, landmark={landmarkModelPath}");
+                }
+                else
+                {
+                    Log($"Backend=YoloPose 但模型文件缺失，手部检测未初始化。poseExists={File.Exists(yoloPoseModelPath)}, landmarkExists={File.Exists(landmarkModelPath)}");
+                }
+            }
             else // Auto：维持原有优先级
             {
                 bool useMediaPipe = File.Exists(handConfig.PalmModelPath)
@@ -531,7 +569,7 @@ public class SOPModule : IDetectionModule
                 }
                 else
                 {
-                    // 回退方案: 尝试 YOLO，再失败则用 DWPose
+                    // 回退方案: 尝试 YOLO-hand → YOLO-pose(手腕+Landmark) → DWPose
                     string yoloHandModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8n-hand.onnx";
 
                     if (!File.Exists(yoloHandModelPath))
@@ -552,19 +590,52 @@ public class SOPModule : IDetectionModule
                         handConfig.PalmModelPath = yoloHandModelPath;
                         _handPoseService = new YoloHandDetectionService();
                         await _handPoseService.InitializeAsync(handConfig);
-                        Log($"手部姿态估计初始化成功（YOLO方案）, 模型: {yoloHandModelPath}");
+                        Log($"手部姿态估计初始化成功（YOLO-hand方案）, 模型: {yoloHandModelPath}");
                     }
                     else
                     {
-                        // DWPose 兜底
-                        string dwposeModelDir = string.IsNullOrEmpty(handConfig.DWPoseModelDir)
-                            ? @"e:\yolo\YoloDotNet-master\DWPose-onnx\models"
-                            : handConfig.DWPoseModelDir;
-                        handConfig.PalmModelPath = dwposeModelDir;
-                        handConfig.LandmarkModelPath = dwposeModelDir;
-                        _handPoseService = new DWPoseHandEstimationService();
-                        await _handPoseService.InitializeAsync(handConfig);
-                        Log($"手部姿态估计初始化成功（DWPose兜底方案）");
+                        // 尝试 YOLO-pose + MediaPipe Landmark：对横伸/远离躯干的手通常比 DWPose 好
+                        string yoloPoseModelPath = @"e:\yolo\YoloDotNet-master\yolo_models\yolov8s-pose.onnx";
+                        if (!File.Exists(yoloPoseModelPath))
+                        {
+                            yoloPoseModelPath = new[]
+                            {
+                                @"e:\yolo\YoloDotNet-master\yolo_models\yolov11s-pose.onnx",
+                                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov8s-pose.onnx"),
+                                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "yolo_models", "yolov11s-pose.onnx"),
+                            }.FirstOrDefault(File.Exists) ?? "";
+                        }
+
+                        string landmarkModelPath = @"e:\yolo\YoloDotNet-master\VisionInspectionSystem\src\UI\VisionInspection.UI\models\hand_landmark_sparse_Nx3x224x224.onnx";
+                        if (!File.Exists(landmarkModelPath))
+                        {
+                            landmarkModelPath = new[]
+                            {
+                                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", "hand_landmark_sparse_Nx3x224x224.onnx"),
+                                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Models", "hand_landmark_sparse_Nx3x224x224.onnx"),
+                            }.FirstOrDefault(File.Exists) ?? "";
+                        }
+
+                        if (!string.IsNullOrEmpty(yoloPoseModelPath) && !string.IsNullOrEmpty(landmarkModelPath))
+                        {
+                            handConfig.PalmModelPath = yoloPoseModelPath;
+                            handConfig.LandmarkModelPath = landmarkModelPath;
+                            _handPoseService = new YoloPoseHandEstimationService();
+                            await _handPoseService.InitializeAsync(handConfig);
+                            Log($"手部姿态估计初始化成功（YoloPose方案）, pose={yoloPoseModelPath}");
+                        }
+                        else
+                        {
+                            // DWPose 兜底
+                            string dwposeModelDir = string.IsNullOrEmpty(handConfig.DWPoseModelDir)
+                                ? @"e:\yolo\YoloDotNet-master\DWPose-onnx\models"
+                                : handConfig.DWPoseModelDir;
+                            handConfig.PalmModelPath = dwposeModelDir;
+                            handConfig.LandmarkModelPath = dwposeModelDir;
+                            _handPoseService = new DWPoseHandEstimationService();
+                            await _handPoseService.InitializeAsync(handConfig);
+                            Log($"手部姿态估计初始化成功（DWPose兜底方案）");
+                        }
                     }
                 }
             }

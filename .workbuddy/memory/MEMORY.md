@@ -27,3 +27,24 @@
 - ConditionType 枚举含 ObjectPresent/HandInRegion/HandMoveFromTo 等。
 - `hand_action` method 转成 `HandMoveFromTo` 条件类型；pickup=手握 target_object，putdown=target_object 到达 to_region。
 - 模型缺失时静默回退 COCO（yolov8s.onnx）；`SOPModule.ModelWarning` 事件弹窗告警。
+
+## VS 设计器 XDG0003 / XDG0010（Button 样式丢失）约定（重要！）
+- **根因**：主程序集 `VisionInspection.UI` 引用了 OnnxRuntime/OpenCvSharp 原生库/相机SDK。设计器实例化 converter（CLR 类型）需加载该 DLL → 连带原生依赖在设计师沙箱加载失败 → 报 XDG0003；资源若放在独立 `ResourceDictionary.xaml` 文件里，该文件单独加载失败会连锁 XDG0010（找不到 converter/样式、按钮无样式）。
+- **约定（已落地并验证）**：
+  1. **设计期需实例化的 CLR 类型（IValueConverter/IMultiValueConverter 等）必须放在独立轻量程序集 `VisionInspection.Converters`**（`src/UI/VisionInspection.Converters/`，net8.0-windows+UseWPF，**无原生依赖**），命名空间保持 `VisionInspection.UI.Converters`、AssemblyName=`VisionInspection.Converters`。XAML 用 `clr-namespace:VisionInspection.UI.Converters;assembly=VisionInspection.Converters` 引用。
+  2. **converter 实例 + 按钮样式（ButtonPrimary/Success/Danger/Info）等要内联进 `App.xaml` 的 `Application.Resources`**（全局资源，设计期最稳）。**不要**把资源放到"同项目内的独立 `ResourceDictionary.xaml` 文件 + App.xaml 用 `MergedDictionaries` 引用"——这种独立字典属于带原生依赖的 UI 项目，设计器单独加载它时常失败，导致 MainWindow 找不到里面的所有 converter/样式（连锁 XDG0010、按钮无样式）。`SharedResources.xaml` 已删除。
+  3. 新增/修改 converter：加到 `VisionInspection.Converters` 工程（一个 .cs 文件可定义多类，见 `BooleanToVisibilityConverter.cs` 内含 BooleanToVisibilityConverter/InverseBooleanToVisibilityConverter/BooleanAndConverter[多值]/Boolean2BooleanReConverter），不要放回主工程。
+  4. 用户"git 恢复"诉求的最佳实践：**不整体 revert（会丢功能），而是把资源组织方式恢复到 git 里验证过的结构**（如 `fa2e01b^` 的内联 App.xaml），同时保留后续功能与新增资源。
+  5. **删除 ResourceDictionary 文件后的致命坑（已踩过）**：只改 App.xaml 并删文件不够——**每个 xaml 的 `<Window.Resources>`/`<UserControl.Resources>` 里若用 `MergedDictionaries Source="...该文件"` 引用它，必须同步删掉这段本地引用**，否则运行时报 `XDG-0001 查找资源字典失败` → 整窗加载崩溃、程序直接起不来，并连锁所有 app 级资源"找不到"。排查时不要只信一次性 grep 结论，删文件后要逐一确认并立即 `dotnet build` 验证无"资源字典找不到"类错误。
+
+## 运行时资源/模型目录定位约定（重要！）
+- **绝不要用 `Path.Combine(BaseDirectory, ".."*N)` 硬编码回退层数来定位"项目根下的目录"**（如 `yolo_models`）。本会话实测：固定 5 层 `..` 从 `bin\Debug\net8.0-windows\` 回退会**少算一层**，落到 `E:\yolo\YoloDotNet-master\yolo_models`（只有 3 个无关模型），漏掉真正在 `VisionInspectionSystem\yolo_models\` 的 14 个标准 YOLO onnx → 模型扫不到、对话框无模型可选、"无法加载模型"。
+- **正确做法**：`FindYoloModelsDirectories(startDir)` 从 `AppDomain.CurrentDomain.BaseDirectory` 向上逐级遍历祖先目录，收集所有含 `yolo_models` 子目录的路径（去重、由近及远）。这样无论调试/发布目录深度如何都正确。
+- **"无法加载模型"排查优先级**：① db 是否空（`models.db` 不被 git 跟踪，程序长期崩会导致从未导入）；② 模型目录是否真的被扫到（用上述探测法）；③ VS 输出窗口的 `System.Text.Json` first-chance 异常通常只是 `ExtractClassNames` 解析 onnx 元数据的噪声，被 `catch{}` 兜底，**不是真因**，别被带偏。
+
+## 手部检测模型路径约定（重要！）
+- **`hand_landmark_sparse_Nx3x224x224.onnx`**（MediaPipe 手指精修）真正位于 **`VisionInspectionSystem/models/`（小写 `models/`）**，以及 `src/UI/VisionInspection.UI/models/` 和 bin 输出 `bin/Debug/net8.0-windows/models/`。**不是**上层 `E:\yolo\YoloDotNet-master\Models\`（大写 M，那是父项目的模型目录，只有 yolov8s-pose 等被 csproj 链接进来的）。
+- **`yolov8s-pose.onnx`**（YOLOv8-pose 找手腕）由 csproj 从 `..\..\..\..\Models\yolov8s-pose.onnx` 链接进输出 `Models\yolov8s-pose.onnx`（大写 M）。
+- 排查时**注意大小写 `models/` vs `Models/` 是不同目录**，别查错路径误以为模型缺失。
+- 手部检测后端枚举 `HandDetectionBackend`：`Auto`(MediaPipe→YOLO→YoloPose→DWPose) / `MediaPipe` / `Yolo` / `DWPose` / `YoloPose`(新增，默认)。`sop_config.json` 的 `HandDetectionBackend` 字段控制；改完需重启程序（DLL/配置被运行进程锁定）。
+- **YoloPose 局限**：首阶段仍依赖 yolov8-pose 检测手腕，手臂极度外伸/远距/遮挡时手腕可能漏检 → 仍会识别不到手。彻底方案是专用手部检测器（MediaPipe palm_detection / yolov8n-hand.onnx），项目目前缺失这些模型。
