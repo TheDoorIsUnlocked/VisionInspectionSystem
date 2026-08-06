@@ -66,9 +66,15 @@ namespace VisionInspection.Modules.Detection
 
                         _modelInfo = modelInfo;
 
+                        // 诊断日志
+                        System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] ====== InitializeAsync ======");
+                        System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 模型路径: {modelInfo.ModelPath}");
+                        System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 文件存在: {File.Exists(modelInfo.ModelPath)}");
+
                         // 检查模型文件是否存在
                         if (!File.Exists(modelInfo.ModelPath))
                         {
+                            System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 模型文件不存在!");
                             DetectionError?.Invoke(this, $"模型文件不存在: {modelInfo.ModelPath}");
                             return false;
                         }
@@ -83,12 +89,21 @@ namespace VisionInspection.Modules.Detection
                             SamplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None)
                         };
 
+                        System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 执行设备: {(modelInfo.UseGpu ? $"CUDA (GPU {modelInfo.GpuId})" : "CPU")}");
+
                         _yolo = new Yolo(options);
 
                         // 更新模型信息中的类别列表
                         if (_yolo.OnnxModel?.Labels != null)
                         {
                             _modelInfo.Classes = _yolo.OnnxModel.Labels.Select(l => l.Name).ToList();
+                            System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] Yolo实例创建成功, 标签数: {_modelInfo.Classes.Count}");
+                            if (_modelInfo.Classes.Count > 0)
+                                System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 前5个标签: {string.Join(", ", _modelInfo.Classes.Take(5))}");
+                        }
+                        else
+                        {
+                            System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] Yolo实例创建成功, 但无标签元数据");
                         }
 
                         return true;
@@ -96,6 +111,8 @@ namespace VisionInspection.Modules.Detection
                 }
                 catch (Exception ex)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] InitializeAsync 异常: {ex.GetType().Name}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"[YoloDetectionService] 堆栈: {ex.StackTrace}");
                     DetectionError?.Invoke(this, $"初始化YOLO模型失败: {ex.Message}");
                     return false;
                 }

@@ -54,6 +54,26 @@ namespace VisionInspection.Core.Services
         public float IouThreshold { get; set; } = 0.45f;
 
         /// <summary>
+        /// 实时检测平滑系数（EMA）：越小轨迹越稳，越大越跟手。范围 0.05~0.5
+        /// </summary>
+        public float SmoothEma { get; set; } = 0.2f;
+
+        /// <summary>
+        /// 实时检测稳定帧数：新目标连续命中多少帧后才显示。越大越能过滤单帧噪点。
+        /// </summary>
+        public int SmoothConfirmHits { get; set; } = 2;
+
+        /// <summary>
+        /// 实时检测丢失保持帧数：目标丢失后仍保持显示的帧数。越大越不容易忽隐忽现。
+        /// </summary>
+        public int SmoothMaxMissed { get; set; } = 5;
+
+        /// <summary>
+        /// 实时检测跟踪 IoU 阈值：相邻帧两个框 IoU 大于此值才认为是同一目标。
+        /// </summary>
+        public float SmoothIouThreshold { get; set; } = 0.3f;
+
+        /// <summary>
         /// 是否使用GPU
         /// </summary>
         public bool UseGpu { get; set; } = true;

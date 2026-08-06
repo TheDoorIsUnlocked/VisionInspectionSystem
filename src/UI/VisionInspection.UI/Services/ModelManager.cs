@@ -320,6 +320,10 @@ namespace VisionInspection.UI.Services
                     InputSize = scanResult.InputSize,
                     ConfidenceThreshold = 0.5f,
                     IouThreshold = 0.45f,
+                    SmoothEma = 0.2f,
+                    SmoothConfirmHits = 2,
+                    SmoothMaxMissed = 5,
+                    SmoothIouThreshold = 0.3f,
                     UseGpu = true,
                     GpuId = 0
                 };
@@ -349,6 +353,10 @@ namespace VisionInspection.UI.Services
                     InputSize INTEGER DEFAULT 640,
                     ConfidenceThreshold REAL DEFAULT 0.5,
                     IouThreshold REAL DEFAULT 0.45,
+                    SmoothEma REAL DEFAULT 0.2,
+                    SmoothConfirmHits INTEGER DEFAULT 2,
+                    SmoothMaxMissed INTEGER DEFAULT 5,
+                    SmoothIouThreshold REAL DEFAULT 0.3,
                     UseGpu INTEGER DEFAULT 1,
                     GpuId INTEGER DEFAULT 0,
                     CreatedAt TEXT NOT NULL,
@@ -357,6 +365,25 @@ namespace VisionInspection.UI.Services
 
             using var command = new SqliteCommand(createTableSql, connection);
             command.ExecuteNonQuery();
+
+            // 兼容旧数据库：添加平滑参数列
+            EnsureColumnExists(connection, "SmoothEma", "REAL DEFAULT 0.2");
+            EnsureColumnExists(connection, "SmoothConfirmHits", "INTEGER DEFAULT 2");
+            EnsureColumnExists(connection, "SmoothMaxMissed", "INTEGER DEFAULT 5");
+            EnsureColumnExists(connection, "SmoothIouThreshold", "REAL DEFAULT 0.3");
+        }
+
+        private void EnsureColumnExists(SqliteConnection connection, string columnName, string columnDef)
+        {
+            using var command = new SqliteCommand(
+                "SELECT COUNT(*) FROM pragma_table_info('Models') WHERE name = @name", connection);
+            command.Parameters.AddWithValue("@name", columnName);
+            var count = (long)(command.ExecuteScalar() ?? 0L);
+            if (count == 0)
+            {
+                using var alter = new SqliteCommand($"ALTER TABLE Models ADD COLUMN {columnName} {columnDef}", connection);
+                alter.ExecuteNonQuery();
+            }
         }
 
         public async Task<List<ModelInfo>> GetAllModelsAsync()
@@ -376,19 +403,25 @@ namespace VisionInspection.UI.Services
                 {
                     var model = new ModelInfo
                     {
-                        Id = reader.GetString(0),
-                        Name = reader.GetString(1),
-                        Description = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                        ModelPath = reader.GetString(3),
-                        Type = (ModelType)reader.GetInt32(4),
-                        Classes = reader.IsDBNull(5) ? new List<string>() : JsonSerializer.Deserialize<List<string>>(reader.GetString(5)) ?? new List<string>(),
-                        InputSize = reader.GetInt32(6),
-                        ConfidenceThreshold = (float)reader.GetDouble(7),
-                        IouThreshold = (float)reader.GetDouble(8),
-                        UseGpu = reader.GetInt32(9) == 1,
-                        GpuId = reader.GetInt32(10),
-                        CreatedAt = DateTime.Parse(reader.GetString(11)),
-                        UpdatedAt = DateTime.Parse(reader.GetString(12))
+                        Id = reader.GetString(reader.GetOrdinal("Id")),
+                        Name = reader.GetString(reader.GetOrdinal("Name")),
+                        Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? "" : reader.GetString(reader.GetOrdinal("Description")),
+                        ModelPath = reader.GetString(reader.GetOrdinal("ModelPath")),
+                        Type = (ModelType)reader.GetInt32(reader.GetOrdinal("Type")),
+                        Classes = reader.IsDBNull(reader.GetOrdinal("Classes"))
+                            ? new List<string>()
+                            : JsonSerializer.Deserialize<List<string>>(reader.GetString(reader.GetOrdinal("Classes"))) ?? new List<string>(),
+                        InputSize = reader.GetInt32(reader.GetOrdinal("InputSize")),
+                        ConfidenceThreshold = (float)reader.GetDouble(reader.GetOrdinal("ConfidenceThreshold")),
+                        IouThreshold = (float)reader.GetDouble(reader.GetOrdinal("IouThreshold")),
+                        SmoothEma = reader.IsDBNull(reader.GetOrdinal("SmoothEma")) ? 0.2f : (float)reader.GetDouble(reader.GetOrdinal("SmoothEma")),
+                        SmoothConfirmHits = reader.IsDBNull(reader.GetOrdinal("SmoothConfirmHits")) ? 2 : reader.GetInt32(reader.GetOrdinal("SmoothConfirmHits")),
+                        SmoothMaxMissed = reader.IsDBNull(reader.GetOrdinal("SmoothMaxMissed")) ? 5 : reader.GetInt32(reader.GetOrdinal("SmoothMaxMissed")),
+                        SmoothIouThreshold = reader.IsDBNull(reader.GetOrdinal("SmoothIouThreshold")) ? 0.3f : (float)reader.GetDouble(reader.GetOrdinal("SmoothIouThreshold")),
+                        UseGpu = reader.GetInt32(reader.GetOrdinal("UseGpu")) == 1,
+                        GpuId = reader.GetInt32(reader.GetOrdinal("GpuId")),
+                        CreatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreatedAt"))),
+                        UpdatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("UpdatedAt")))
                     };
                     models.Add(model);
                 }
@@ -413,19 +446,25 @@ namespace VisionInspection.UI.Services
                 {
                     return new ModelInfo
                     {
-                        Id = reader.GetString(0),
-                        Name = reader.GetString(1),
-                        Description = reader.IsDBNull(2) ? "" : reader.GetString(2),
-                        ModelPath = reader.GetString(3),
-                        Type = (ModelType)reader.GetInt32(4),
-                        Classes = reader.IsDBNull(5) ? new List<string>() : JsonSerializer.Deserialize<List<string>>(reader.GetString(5)) ?? new List<string>(),
-                        InputSize = reader.GetInt32(6),
-                        ConfidenceThreshold = (float)reader.GetDouble(7),
-                        IouThreshold = (float)reader.GetDouble(8),
-                        UseGpu = reader.GetInt32(9) == 1,
-                        GpuId = reader.GetInt32(10),
-                        CreatedAt = DateTime.Parse(reader.GetString(11)),
-                        UpdatedAt = DateTime.Parse(reader.GetString(12))
+                        Id = reader.GetString(reader.GetOrdinal("Id")),
+                        Name = reader.GetString(reader.GetOrdinal("Name")),
+                        Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? "" : reader.GetString(reader.GetOrdinal("Description")),
+                        ModelPath = reader.GetString(reader.GetOrdinal("ModelPath")),
+                        Type = (ModelType)reader.GetInt32(reader.GetOrdinal("Type")),
+                        Classes = reader.IsDBNull(reader.GetOrdinal("Classes"))
+                            ? new List<string>()
+                            : JsonSerializer.Deserialize<List<string>>(reader.GetString(reader.GetOrdinal("Classes"))) ?? new List<string>(),
+                        InputSize = reader.GetInt32(reader.GetOrdinal("InputSize")),
+                        ConfidenceThreshold = (float)reader.GetDouble(reader.GetOrdinal("ConfidenceThreshold")),
+                        IouThreshold = (float)reader.GetDouble(reader.GetOrdinal("IouThreshold")),
+                        SmoothEma = reader.IsDBNull(reader.GetOrdinal("SmoothEma")) ? 0.2f : (float)reader.GetDouble(reader.GetOrdinal("SmoothEma")),
+                        SmoothConfirmHits = reader.IsDBNull(reader.GetOrdinal("SmoothConfirmHits")) ? 2 : reader.GetInt32(reader.GetOrdinal("SmoothConfirmHits")),
+                        SmoothMaxMissed = reader.IsDBNull(reader.GetOrdinal("SmoothMaxMissed")) ? 5 : reader.GetInt32(reader.GetOrdinal("SmoothMaxMissed")),
+                        SmoothIouThreshold = reader.IsDBNull(reader.GetOrdinal("SmoothIouThreshold")) ? 0.3f : (float)reader.GetDouble(reader.GetOrdinal("SmoothIouThreshold")),
+                        UseGpu = reader.GetInt32(reader.GetOrdinal("UseGpu")) == 1,
+                        GpuId = reader.GetInt32(reader.GetOrdinal("GpuId")),
+                        CreatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("CreatedAt"))),
+                        UpdatedAt = DateTime.Parse(reader.GetString(reader.GetOrdinal("UpdatedAt")))
                     };
                 }
 
@@ -444,9 +483,9 @@ namespace VisionInspection.UI.Services
 
                     string insertSql = @"
                         INSERT INTO Models (Id, Name, Description, ModelPath, Type, Classes, InputSize, 
-                            ConfidenceThreshold, IouThreshold, UseGpu, GpuId, CreatedAt, UpdatedAt)
+                            ConfidenceThreshold, IouThreshold, SmoothEma, SmoothConfirmHits, SmoothMaxMissed, SmoothIouThreshold, UseGpu, GpuId, CreatedAt, UpdatedAt)
                         VALUES (@Id, @Name, @Description, @ModelPath, @Type, @Classes, @InputSize,
-                            @ConfidenceThreshold, @IouThreshold, @UseGpu, @GpuId, @CreatedAt, @UpdatedAt)";
+                            @ConfidenceThreshold, @IouThreshold, @SmoothEma, @SmoothConfirmHits, @SmoothMaxMissed, @SmoothIouThreshold, @UseGpu, @GpuId, @CreatedAt, @UpdatedAt)";
 
                     using var command = new SqliteCommand(insertSql, connection);
                     command.Parameters.AddWithValue("@Id", model.Id);
@@ -458,6 +497,10 @@ namespace VisionInspection.UI.Services
                     command.Parameters.AddWithValue("@InputSize", model.InputSize);
                     command.Parameters.AddWithValue("@ConfidenceThreshold", model.ConfidenceThreshold);
                     command.Parameters.AddWithValue("@IouThreshold", model.IouThreshold);
+                    command.Parameters.AddWithValue("@SmoothEma", model.SmoothEma);
+                    command.Parameters.AddWithValue("@SmoothConfirmHits", model.SmoothConfirmHits);
+                    command.Parameters.AddWithValue("@SmoothMaxMissed", model.SmoothMaxMissed);
+                    command.Parameters.AddWithValue("@SmoothIouThreshold", model.SmoothIouThreshold);
                     command.Parameters.AddWithValue("@UseGpu", model.UseGpu ? 1 : 0);
                     command.Parameters.AddWithValue("@GpuId", model.GpuId);
                     command.Parameters.AddWithValue("@CreatedAt", model.CreatedAt.ToString("O"));
@@ -495,6 +538,10 @@ namespace VisionInspection.UI.Services
                             InputSize = @InputSize,
                             ConfidenceThreshold = @ConfidenceThreshold,
                             IouThreshold = @IouThreshold,
+                            SmoothEma = @SmoothEma,
+                            SmoothConfirmHits = @SmoothConfirmHits,
+                            SmoothMaxMissed = @SmoothMaxMissed,
+                            SmoothIouThreshold = @SmoothIouThreshold,
                             UseGpu = @UseGpu,
                             GpuId = @GpuId,
                             UpdatedAt = @UpdatedAt
@@ -510,6 +557,10 @@ namespace VisionInspection.UI.Services
                     command.Parameters.AddWithValue("@InputSize", model.InputSize);
                     command.Parameters.AddWithValue("@ConfidenceThreshold", model.ConfidenceThreshold);
                     command.Parameters.AddWithValue("@IouThreshold", model.IouThreshold);
+                    command.Parameters.AddWithValue("@SmoothEma", model.SmoothEma);
+                    command.Parameters.AddWithValue("@SmoothConfirmHits", model.SmoothConfirmHits);
+                    command.Parameters.AddWithValue("@SmoothMaxMissed", model.SmoothMaxMissed);
+                    command.Parameters.AddWithValue("@SmoothIouThreshold", model.SmoothIouThreshold);
                     command.Parameters.AddWithValue("@UseGpu", model.UseGpu ? 1 : 0);
                     command.Parameters.AddWithValue("@GpuId", model.GpuId);
                     command.Parameters.AddWithValue("@UpdatedAt", DateTime.Now.ToString("O"));

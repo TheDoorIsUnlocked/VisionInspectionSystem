@@ -156,6 +156,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 检测框时序平滑器：IOU 跟踪 + EMA 位置平滑 + 确认/保持机制，消除检测框闪烁与跳动。
     // 仅在推理产生新结果时 Update，渲染时读取 GetActiveBoxes。
     private readonly DetectionTrackSmoother _detectionSmoother = new();
+
+    // 实时检测专用平滑器（与 SOP 的 _detectionSmoother 隔离，避免状态互相污染）
+    // 参数从当前加载的 ModelInfo 读取，模型管理对话框可调。
+    private DetectionTrackSmoother _realtimeSmoother = new(ema: 0.2f, maxMissed: 5);
+
+    // 实时检测结果缓存：最近一次平滑后的检测对象，由 OnCameraImageGrabbed 在最新相机帧上叠加渲染。
+    // 与 SOP 的 _lastSopResult 同理，避免「无框原始帧」与「有框帧」交替造成的闪烁。
+    private List<DetectedObject>? _lastRealtimeObjects;
+    private int _noRealtimeResultFrameCount;
+    private const int MaxNoRealtimeResultFrames = 15; // 连续多少帧无新实时结果则清空缓存
     
     // 修复：添加异步推理队列 - 改为可重新创建
     private Channel<SKBitmap> _inferenceQueue;
@@ -245,6 +255,28 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 {
                     using var canvas = new SKCanvas(skBitmap);
                     DrawHandPoses(canvas, cachedHand);
+                }
+            }
+
+            // 实时检测：在最新相机帧上叠加缓存的实时检测结果（与 SOP 同一架构，保证每帧都有框、丝滑不闪）
+            if (IsRealTimeDetecting && _lastRealtimeObjects != null)
+            {
+                try
+                {
+                    using var canvas = new SKCanvas(skBitmap);
+                    DrawDetectedObjects(canvas, _lastRealtimeObjects, 32f);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[OnCameraImageGrabbed] 叠加实时结果异常: {ex.Message}");
+                }
+
+                // 老化计数：连续 N 帧没新检测结果则清空缓存，避免残留旧框
+                _noRealtimeResultFrameCount++;
+                if (_noRealtimeResultFrameCount >= MaxNoRealtimeResultFrames)
+                {
+                    _lastRealtimeObjects = null;
+                    _noRealtimeResultFrameCount = 0;
                 }
             }
 
@@ -369,6 +401,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             _isProcessingFrame = true;
 
+            // 首帧诊断：输出当前推理使用的模型信息
+            if (_inferenceFrameCount == 0)
+            {
+                var classes = _detectionService.GetClasses();
+                System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] ====== 首帧推理诊断 ======");
+                System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 已加载模型: {LoadedModelName}");
+                System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 检测服务已初始化: {_detectionService.IsInitialized}");
+                System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 实际类别数: {classes.Count}");
+                if (classes.Count > 0)
+                    System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 前5个类别: {string.Join(", ", classes.Take(5))}");
+            }
+
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
             // 执行检测：有ROI则检测ROI区域，无ROI则检测全图
@@ -400,6 +444,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 result = await _detectionService.DetectAsync(bitmap);
             }
 
+            // 首帧诊断：输出关键点是否被提取（确认 pose 绘制有数据可画）
+            if (_inferenceFrameCount == 0)
+            {
+                var kpObj = result.Objects.FirstOrDefault(o => o.KeyPoints != null && o.KeyPoints.Count > 0);
+                if (kpObj != null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 带关键点的对象: {kpObj.ClassName}, 关键点数: {kpObj.KeyPoints!.Count}");
+                    System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 首个关键点: X={kpObj.KeyPoints[0].X:F1}, Y={kpObj.KeyPoints[0].Y:F1}, Conf={kpObj.KeyPoints[0].Confidence:F2}");
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[RealTimeDetection] 注意: 本帧未检测到带关键点的对象（pose 骨骼不会显示）。对象总数={result.Objects.Count}");
+                }
+            }
+
             stopwatch.Stop();
 
             // 更新UI
@@ -407,15 +466,17 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             {
                 if (!_isDisposed)
                 {
-                    DetectionResults = result.Objects;
-                    HighConfidenceCount = result.Objects.Count(o => o.Confidence >= 0.5);
+                    // 时序平滑：消除逐帧 bbox 闪烁/抖动（pose 关键点与 seg 掩膜一并保留，关键点也做 EMA 平滑）
+                    _realtimeSmoother.Update(result.Objects);
+                    var smoothed = _realtimeSmoother.GetActiveObjects();
 
-                    // 绘制检测结果到图像并更新显示
-                    var resultBitmap = DrawDetectionResults(bitmap, result);
-                    if (resultBitmap != null && RoiEditorViewModel != null)
-                    {
-                        RoiEditorViewModel.CurrentImage = resultBitmap;
-                    }
+                    DetectionResults = smoothed;
+                    HighConfidenceCount = smoothed.Count(o => o.Confidence >= 0.5);
+
+                    // 缓存最近一次平滑结果，交由 OnCameraImageGrabbed 在最新相机帧上叠加渲染
+                    // （与 SOP 保持同一架构，避免「无框原始帧」与「有框帧」交替造成的闪烁）
+                    _lastRealtimeObjects = smoothed;
+                    _noRealtimeResultFrameCount = 0;
 
                     // 计算推理FPS
                     _inferenceFrameCount++;
@@ -511,6 +572,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     
                     // 绘制标签文字
                     canvas.DrawText(label, labelX, labelY, textPaint);
+
+                    // 绘制人体姿态骨骼（仅姿态估计模型会带 KeyPoints）
+                    if (obj.KeyPoints != null && obj.KeyPoints.Count > 0)
+                    {
+                        DrawPoseSkeleton(canvas, obj.KeyPoints);
+                    }
+
+                    // 绘制实例分割掩膜（仅分割模型会带 Mask）
+                    if (obj.Mask != null)
+                    {
+                        var color = SEG_MASK_COLORS[obj.ClassId % SEG_MASK_COLORS.Length];
+                        DrawSegmentationMask(canvas, obj.Mask,
+                            (int)obj.BoundingBox[0], (int)obj.BoundingBox[1],
+                            (int)obj.BoundingBox[2], (int)obj.BoundingBox[3], color);
+                    }
                 }
             }
             
@@ -1571,16 +1647,42 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 return;
             }
 
+            // 诊断日志：输出选中模型的完整信息
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] ====== 模型加载开始 ======");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 选中模型名称: {_loadedModel.Name}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 模型文件路径: {_loadedModel.ModelPath}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 文件是否存在: {File.Exists(_loadedModel.ModelPath)}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 模型类型: {_loadedModel.Type}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 使用GPU: {_loadedModel.UseGpu}, GPU ID: {_loadedModel.GpuId}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 置信度阈值: {_loadedModel.ConfidenceThreshold}, IoU阈值: {_loadedModel.IouThreshold}");
+            System.Diagnostics.Debug.WriteLine($"[LoadModel] 平滑参数: EMA={_loadedModel.SmoothEma:F2}, Confirm={_loadedModel.SmoothConfirmHits}, MaxMissed={_loadedModel.SmoothMaxMissed}, Iou={_loadedModel.SmoothIouThreshold:F2}");
+
             // 初始化检测服务
             if (await _detectionService.InitializeAsync(_loadedModel))
             {
                 IsModelLoaded = true;
                 LoadedModelName = _loadedModel.Name;
-                Status = $"模型加载成功: {_loadedModel.Name} | 类型: {_loadedModel.Type} | 类别数: {_loadedModel.Classes.Count}";
+
+                // 根据当前模型配置的平滑参数重建实时检测平滑器
+                _realtimeSmoother = new DetectionTrackSmoother(
+                    iouThreshold: _loadedModel.SmoothIouThreshold,
+                    ema: _loadedModel.SmoothEma,
+                    confirmHits: _loadedModel.SmoothConfirmHits,
+                    maxMissed: _loadedModel.SmoothMaxMissed);
+
+                var actualClasses = _detectionService.GetClasses();
+                Status = $"模型加载成功: {_loadedModel.Name} | 路径: {_loadedModel.ModelPath} | 实际类别数: {actualClasses.Count}";
+                System.Diagnostics.Debug.WriteLine($"[LoadModel] 初始化成功! 实际类别数: {actualClasses.Count}");
+                if (actualClasses.Count > 0)
+                    System.Diagnostics.Debug.WriteLine($"[LoadModel] 前5个类别: {string.Join(", ", actualClasses.Take(5))}");
             }
             else
             {
-                Status = "模型加载失败，请检查模型文件";
+                // 修复：加载失败时必须重置 IsModelLoaded，否则会残留上一次成功加载的状态
+                IsModelLoaded = false;
+                LoadedModelName = "未加载模型";
+                Status = $"模型加载失败: {_loadedModel.Name} | 路径: {_loadedModel.ModelPath}";
+                System.Diagnostics.Debug.WriteLine($"[LoadModel] 初始化失败! 路径: {_loadedModel.ModelPath}");
             }
         }
         catch (Exception ex)
@@ -1642,12 +1744,47 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 绘制检测结果到图像
     /// </summary>
-    private SKBitmap DrawDetectionResults(SKBitmap originalImage, List<DetectedObject> objects)
+    // COCO 17关键点骨骼连接（0-indexed：nose, left_eye, right_eye, left_ear, right_ear,
+    // left_shoulder, right_shoulder, left_elbow, right_elbow, left_wrist, right_wrist,
+    // left_hip, right_hip, left_knee, right_knee, left_ankle, right_ankle）
+    private static readonly int[][] COCO_SKELETON =
+    {
+        new[] { 15, 13 }, new[] { 13, 11 }, new[] { 16, 14 }, new[] { 14, 12 },
+        new[] { 11, 12 }, new[] { 5, 11 }, new[] { 6, 12 }, new[] { 5, 6 },
+        new[] { 5, 7 }, new[] { 7, 9 }, new[] { 6, 8 }, new[] { 8, 10 },
+        new[] { 1, 3 }, new[] { 0, 2 }, new[] { 0, 1 }, new[] { 2, 4 }, new[] { 3, 5 }
+    };
+    // 关键点绘制的最低置信度
+    private const float POSE_KEYPOINT_CONF = 0.3f;
+    // 分割掩膜颜色调色板（按类别索引取色，半透明叠加）
+    private static readonly SKColor[] SEG_MASK_COLORS =
+    {
+        new SKColor(0, 200, 255, 110),   // 青
+        new SKColor(255, 120, 0, 110),   // 橙
+        new SKColor(0, 220, 120, 110),   // 绿
+        new SKColor(255, 80, 160, 110),  // 粉
+        new SKColor(180, 120, 255, 110), // 紫
+        new SKColor(255, 220, 0, 110),   // 黄
+        new SKColor(80, 160, 255, 110),  // 蓝
+        new SKColor(255, 80, 80, 110)    // 红
+    };
+
+    private SKBitmap DrawDetectionResults(SKBitmap originalImage, List<DetectedObject> objects, float textSize = 24f)
     {
         // 创建副本
         var resultBitmap = originalImage.Copy();
         using var canvas = new SKCanvas(resultBitmap);
+        DrawDetectedObjects(canvas, objects, textSize);
+        return resultBitmap;
+    }
 
+    /// <summary>
+    /// 在已有画布上叠加绘制检测结果（边界框 + 标签 + 姿态骨骼 + 分割掩膜）。
+    /// <para>提取自 <see cref="DrawDetectionResults"/>，便于在相机最新帧上直接叠加（与 SOP 渲染架构一致），
+    /// 避免「无框原始帧」与「有框帧」交替造成的实时检测闪烁。</para>
+    /// </summary>
+    private void DrawDetectedObjects(SKCanvas canvas, List<DetectedObject> objects, float textSize = 24f)
+    {
         foreach (var obj in objects)
         {
             // 根据置信度选择颜色
@@ -1657,7 +1794,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             using var paint = new SKPaint
             {
                 Color = color,
-                StrokeWidth = 3,
+                StrokeWidth = 4,
                 IsAntialias = true,
                 Style = SKPaintStyle.Stroke
             };
@@ -1669,7 +1806,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             using var textPaint = new SKPaint
             {
                 Color = color,
-                TextSize = 16,
+                TextSize = textSize,
                 IsAntialias = true
             };
 
@@ -1696,9 +1833,118 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 obj.PixelBoundingBox.Left + 4,
                 obj.PixelBoundingBox.Top - 4,
                 textPaint);
+
+            // 绘制人体姿态骨骼（仅姿态估计模型会带 KeyPoints）
+            if (obj.KeyPoints != null && obj.KeyPoints.Count > 0)
+            {
+                DrawPoseSkeleton(canvas, obj.KeyPoints);
+            }
+
+            // 绘制实例分割掩膜（仅分割模型会带 Mask）
+            if (obj.Mask != null)
+            {
+                var maskColor = SEG_MASK_COLORS[obj.ClassId % SEG_MASK_COLORS.Length];
+                DrawSegmentationMask(canvas, obj.Mask,
+                    obj.PixelBoundingBox.Left, obj.PixelBoundingBox.Top,
+                    obj.PixelBoundingBox.Width, obj.PixelBoundingBox.Height, maskColor);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 在画布上绘制 COCO 姿态关键点与骨骼连线
+    /// </summary>
+    private void DrawPoseSkeleton(SKCanvas canvas, List<KeyPoint> kps)
+    {
+        // 按置信度过滤不可靠的关键点
+        var valid = kps.Where(k => k.Confidence >= POSE_KEYPOINT_CONF).ToList();
+        if (valid.Count == 0) return;
+
+        // 先绘制骨骼连线
+        using var linePaint = new SKPaint
+        {
+            Color = SKColors.Lime,
+            StrokeWidth = 3,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+        foreach (var pair in COCO_SKELETON)
+        {
+            var a = valid.FirstOrDefault(k => k.Index == pair[0]);
+            var b = valid.FirstOrDefault(k => k.Index == pair[1]);
+            if (a != null && b != null)
+            {
+                canvas.DrawLine(a.X, a.Y, b.X, b.Y, linePaint);
+            }
         }
 
-        return resultBitmap;
+        // 再绘制关键点（黄点 + 黑色描边）
+        using var pointPaint = new SKPaint
+        {
+            Color = SKColors.Yellow,
+            IsAntialias = true,
+            Style = SKPaintStyle.Fill
+        };
+        using var pointOutline = new SKPaint
+        {
+            Color = SKColors.Black,
+            StrokeWidth = 1.5f,
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke
+        };
+        foreach (var k in valid)
+        {
+            canvas.DrawCircle(k.X, k.Y, 4, pointPaint);
+            canvas.DrawCircle(k.X, k.Y, 4, pointOutline);
+        }
+    }
+
+    /// <summary>
+    /// 在画布上叠加实例分割掩膜（半透明着色区域）
+    /// </summary>
+    private void DrawSegmentationMask(SKCanvas canvas, byte[]? packedMask, int boxX, int boxY, int boxW, int boxH, SKColor color)
+    {
+        if (packedMask == null || packedMask.Length == 0 || boxW <= 0 || boxH <= 0)
+            return;
+
+        // 将位打包掩膜解包为彩色半透明位图，并绘制到边界框位置
+        using var maskBmp = UnpackSegmentationMask(packedMask, boxW, boxH, color);
+        canvas.DrawBitmap(maskBmp, boxX, boxY);
+    }
+
+    /// <summary>
+    /// 把 YoloDotNet 的位打包像素掩膜解包为彩色半透明 SKBitmap（尺寸 = 边界框宽高）。
+    /// 位序与 YoloDotNet 一致：byteIndex = i&gt;&gt;3, bitIndex = i &amp; 7。
+    /// </summary>
+    private unsafe SKBitmap UnpackSegmentationMask(byte[] packed, int w, int h, SKColor color)
+    {
+        var bmp = new SKBitmap(w, h, SKColorType.Bgra8888, SKAlphaType.Premul);
+        int total = w * h;
+        byte* ptr = (byte*)bmp.GetPixels().ToPointer();
+
+        for (int i = 0; i < total; i++)
+        {
+            int byteIndex = i >> 3;     // i / 8
+            int bitIndex = i & 7;       // i % 8
+            bool isOn = (packed[byteIndex] & (1 << bitIndex)) != 0;
+
+            int offset = i * 4;
+            if (isOn)
+            {
+                ptr[offset] = color.Blue;
+                ptr[offset + 1] = color.Green;
+                ptr[offset + 2] = color.Red;
+                ptr[offset + 3] = color.Alpha;
+            }
+            else
+            {
+                ptr[offset] = 0;
+                ptr[offset + 1] = 0;
+                ptr[offset + 2] = 0;
+                ptr[offset + 3] = 0;
+            }
+        }
+        return bmp;
     }
 
     [RelayCommand]
@@ -2038,6 +2284,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             IsRealTimeDetecting = false;
+            _realtimeSmoother.Clear();
+            _lastRealtimeObjects = null;
+            _noRealtimeResultFrameCount = 0;
             InferenceFps = 0;
             Status = "实时检测已停止";
         }

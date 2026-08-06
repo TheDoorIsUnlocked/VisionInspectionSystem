@@ -9,13 +9,8 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/SkinDefault.xaml"/>
                 <ResourceDictionary Source="pack://application:,,,/HandyControl;component/Themes/Theme.xaml"/>
+                <ResourceDictionary Source="Resources/SharedResources.xaml"/>
             </ResourceDictionary.MergedDictionaries>
-
-            <!-- 转换器 -->
-            <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
-            <converters:InverseBooleanToVisibilityConverter x:Key="InverseBooleanToVisibilityConverter"/>
-            <converters:BooleanAndConverter x:Key="BooleanAndConverter"/>
-            <converters:Boolean2BooleanReConverter x:Key="Boolean2BooleanReConverter"/>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

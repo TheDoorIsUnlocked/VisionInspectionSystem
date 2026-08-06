@@ -66,7 +66,7 @@ namespace VisionInspection.Core.Services
         public SKRectI PixelBoundingBox { get; set; }
 
         /// <summary>
-        /// 分割掩码（仅分割模型）
+        /// 分割掩码（仅分割模型，位打包像素掩码 byte[]，可用 UnpackToBitmap 解包为 SKBitmap）
         /// </summary>
         public byte[]? Mask { get; set; }
 

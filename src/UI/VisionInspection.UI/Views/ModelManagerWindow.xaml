@@ -159,6 +159,52 @@
                                    HorizontalAlignment="Center"
                                    Margin="0,0,0,15"/>
 
+                        <!-- 实时显示平滑参数 -->
+                        <GroupBox Header="实时显示平滑（防闪烁）" Margin="0,0,0,15" Padding="10,5">
+                            <StackPanel>
+                                <TextBlock Text="平滑系数（越小越稳，越大越跟手）" Margin="0,0,0,5" ToolTip="EMA：新帧对轨迹位置的影响权重"/>
+                                <Slider x:Name="SmoothEmaSlider" 
+                                        Minimum="0.05" Maximum="0.5" Value="0.2"
+                                        TickFrequency="0.01"
+                                        Margin="0,0,0,2"/>
+                                <TextBlock x:Name="SmoothEmaValueText" 
+                                           Text="0.20" 
+                                           HorizontalAlignment="Center"
+                                           Margin="0,0,0,10"/>
+
+                                <TextBlock Text="稳定帧数（连续命中多少帧才显示）" Margin="0,0,0,5" ToolTip="过滤单帧误检"/>
+                                <Slider x:Name="SmoothConfirmHitsSlider" 
+                                        Minimum="1" Maximum="10" Value="2"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Margin="0,0,0,2"/>
+                                <TextBlock x:Name="SmoothConfirmHitsValueText" 
+                                           Text="2" 
+                                           HorizontalAlignment="Center"
+                                           Margin="0,0,0,10"/>
+
+                                <TextBlock Text="丢失保持帧数（丢失后仍显示多少帧）" Margin="0,0,0,5" ToolTip="减少短暂漏检导致的忽隐忽现"/>
+                                <Slider x:Name="SmoothMaxMissedSlider" 
+                                        Minimum="0" Maximum="15" Value="5"
+                                        TickFrequency="1"
+                                        IsSnapToTickEnabled="True"
+                                        Margin="0,0,0,2"/>
+                                <TextBlock x:Name="SmoothMaxMissedValueText" 
+                                           Text="5" 
+                                           HorizontalAlignment="Center"
+                                           Margin="0,0,0,10"/>
+
+                                <TextBlock Text="跟踪 IoU 阈值（相邻帧框重合度）" Margin="0,0,0,5" ToolTip="两帧框 IoU 大于此值才认为是同一目标"/>
+                                <Slider x:Name="SmoothIouSlider" 
+                                        Minimum="0.05" Maximum="0.8" Value="0.3"
+                                        TickFrequency="0.01"
+                                        Margin="0,0,0,2"/>
+                                <TextBlock x:Name="SmoothIouValueText" 
+                                           Text="0.30" 
+                                           HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </GroupBox>
+
                         <TextBlock Text="类别列表" Margin="0,0,0,5"/>
                         <TextBox x:Name="ClassesTextBox" 
                                  IsReadOnly="True"

@@ -32,6 +32,14 @@ namespace VisionInspection.UI.Views
                 ConfidenceValueText.Text = ConfidenceSlider.Value.ToString("F2");
             IouSlider.ValueChanged += (s, e) =>
                 IouValueText.Text = IouSlider.Value.ToString("F2");
+            SmoothEmaSlider.ValueChanged += (s, e) =>
+                SmoothEmaValueText.Text = SmoothEmaSlider.Value.ToString("F2");
+            SmoothConfirmHitsSlider.ValueChanged += (s, e) =>
+                SmoothConfirmHitsValueText.Text = SmoothConfirmHitsSlider.Value.ToString("F0");
+            SmoothMaxMissedSlider.ValueChanged += (s, e) =>
+                SmoothMaxMissedValueText.Text = SmoothMaxMissedSlider.Value.ToString("F0");
+            SmoothIouSlider.ValueChanged += (s, e) =>
+                SmoothIouValueText.Text = SmoothIouSlider.Value.ToString("F2");
 
             LoadModels();
         }
@@ -62,6 +70,10 @@ namespace VisionInspection.UI.Views
             UseGpuCheckBox.IsChecked = model.UseGpu;
             ConfidenceSlider.Value = model.ConfidenceThreshold;
             IouSlider.Value = model.IouThreshold;
+            SmoothEmaSlider.Value = model.SmoothEma;
+            SmoothConfirmHitsSlider.Value = model.SmoothConfirmHits;
+            SmoothMaxMissedSlider.Value = model.SmoothMaxMissed;
+            SmoothIouSlider.Value = model.SmoothIouThreshold;
             ClassesTextBox.Text = string.Join(", ", model.Classes);
         }
 
@@ -104,7 +116,11 @@ namespace VisionInspection.UI.Views
                 GpuId = int.TryParse(GpuIdTextBox.Text, out var gpuId) ? gpuId : 0,
                 UseGpu = UseGpuCheckBox.IsChecked ?? true,
                 ConfidenceThreshold = (float)ConfidenceSlider.Value,
-                IouThreshold = (float)IouSlider.Value
+                IouThreshold = (float)IouSlider.Value,
+                SmoothEma = (float)SmoothEmaSlider.Value,
+                SmoothConfirmHits = (int)SmoothConfirmHitsSlider.Value,
+                SmoothMaxMissed = (int)SmoothMaxMissedSlider.Value,
+                SmoothIouThreshold = (float)SmoothIouSlider.Value
             };
 
             // 尝试加载模型获取类别信息
@@ -151,6 +167,10 @@ namespace VisionInspection.UI.Views
             _selectedModel.UseGpu = UseGpuCheckBox.IsChecked ?? true;
             _selectedModel.ConfidenceThreshold = (float)ConfidenceSlider.Value;
             _selectedModel.IouThreshold = (float)IouSlider.Value;
+            _selectedModel.SmoothEma = (float)SmoothEmaSlider.Value;
+            _selectedModel.SmoothConfirmHits = (int)SmoothConfirmHitsSlider.Value;
+            _selectedModel.SmoothMaxMissed = (int)SmoothMaxMissedSlider.Value;
+            _selectedModel.SmoothIouThreshold = (float)SmoothIouSlider.Value;
 
             if (await _modelManager.UpdateModelAsync(_selectedModel))
             {
@@ -284,6 +304,10 @@ namespace VisionInspection.UI.Views
             UseGpuCheckBox.IsChecked = true;
             ConfidenceSlider.Value = 0.5;
             IouSlider.Value = 0.45;
+            SmoothEmaSlider.Value = 0.2;
+            SmoothConfirmHitsSlider.Value = 2;
+            SmoothMaxMissedSlider.Value = 5;
+            SmoothIouSlider.Value = 0.3;
             ClassesTextBox.Clear();
         }
 
