@@ -336,13 +336,14 @@ public class StepConditionEvaluator
                         if (targetObj != null)
                         {
                             bool objInTo = toRect != SKRect.Empty && IsInZone(targetObj.BoundingBox, zoneTo!);
-                            // 物体已放入目标区域（无论手当前是否还握着，都视为放下）
-                            if (objInTo)
+                            // 若指定了起始区域，要求手曾访问过起始区域，才能算“从该区域放到目标区域”。
+                            // 否则会出现：杯子本来就在目标区域（如拿起前已在桌面），被误判为“已经放下”。
+                            if (objInTo && (!hasFrom || visitedFrom))
                             {
                                 return new ConditionCheckResult
                                 {
                                     IsMet = true,
-                                    Message = $"目标物体 '{condition.TargetObject}' 已到达区域 {toRegion}"
+                                    Message = $"目标物体 '{condition.TargetObject}' 已从 {(hasFrom ? fromRegion : "手中")} 到达区域 {toRegion}"
                                 };
                             }
                         }

@@ -95,11 +95,12 @@ sop:
         method: "hand_action"
         action: "putdown"
         hand: "any"
+        from_region: "mouth_region"   # 必须先到过嘴边（喝过水），再回到桌面才算真正放回；避免拿起阶段杯子已在桌面被误判为放回
         to_region: "cup_table"
         target_object: "cup"   # 辅助判定：手拿着 cup 进入 cup_table 即视为放下
         min_confidence: 0.6
         stable_frames: 3
-        description: "手将水杯放回放置区"
+        description: "手将水杯从嘴边放回放置区"
 
     # 步骤5: 完成
     - id: "complete"
