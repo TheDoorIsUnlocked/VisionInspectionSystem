@@ -178,7 +178,7 @@ public class SOPModule : IDetectionModule
                 };
             }
 
-            // 读取手部检测后端选择（Auto / MediaPipe / Yolo / DWPose）
+            // 读取手部检测后端选择（Auto / MediaPipe / YoloPose）
             var backendStr = sopSection["HandDetectionBackend"];
             if (!string.IsNullOrEmpty(backendStr)
                 && System.Enum.TryParse<HandDetectionBackend>(backendStr, true, out var parsedBackend))
@@ -736,7 +736,7 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 统一检测模式处理：物体检测（YOLO）+ 手部姿态（DWPose），结果一并喂给状态机
+    /// 统一检测模式处理：物体检测（YOLO）+ 手部姿态（MediaPipe），结果一并喂给状态机
     /// </summary>
     private List<ObjectDetection> ProcessUnifiedDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
     {
