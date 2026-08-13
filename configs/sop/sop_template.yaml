@@ -16,7 +16,7 @@ sop:
 
   # ---------------- 全局检测设置 ----------------
   settings:
-    detectionMode: "UnifiedDetection"   # 统一检测（YOLO 物体 + DWPose 手部）
+    detectionMode: "UnifiedDetection"   # 统一检测（YOLO 物体 + 手部姿态）
     confidenceThreshold: 0.5            # 检测置信度阈值 (0-1)
     stableFrames: 3                     # 状态稳定所需连续帧数
     timeoutSeconds: 30                  # 单步默认超时（秒）

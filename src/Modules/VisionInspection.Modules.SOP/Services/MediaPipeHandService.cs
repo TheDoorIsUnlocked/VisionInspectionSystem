@@ -30,32 +30,11 @@ public class MediaPipeHandService : IHandPoseEstimationService
         {
             lock (_lock)
             {
-                var palmPath = config.PalmModelPath;
-                var landmarkPath = config.LandmarkModelPath;
-
-                if (string.IsNullOrEmpty(palmPath) || !File.Exists(palmPath))
-                {
-                    var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                    palmPath = Path.Combine(baseDir, "models", "palm_detection_full_Nx3x192x192_post.onnx");
-                    landmarkPath = Path.Combine(baseDir, "models", "hand_landmark_sparse_Nx3x224x224.onnx");
-                }
-
-                if (string.IsNullOrEmpty(landmarkPath) || !File.Exists(landmarkPath))
-                {
-                    var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-                    landmarkPath = Path.Combine(baseDir, "models", "hand_landmark_sparse_Nx3x224x224.onnx");
-                }
-
-                Console.WriteLine($"[MediaPipeHand] Palm: {palmPath} (exists={File.Exists(palmPath)})");
-                Console.WriteLine($"[MediaPipeHand] Landmark: {landmarkPath} (exists={File.Exists(landmarkPath)})");
                 Console.WriteLine($"[MediaPipeHand] *** 将使用 MediaPipe 手部检测方案 (非阻塞模式) ***");
+                Console.WriteLine($"[MediaPipeHand] Palm: {config.PalmModelPath}");
+                Console.WriteLine($"[MediaPipeHand] Landmark: {config.LandmarkModelPath}");
 
-                _detector = new MediaPipeHandDetector(
-                    palmPath,
-                    landmarkPath,
-                    Math.Max(config.ConfidenceThreshold, 0.2f),
-                    config.MaxNumHands);
-
+                _detector = new MediaPipeHandDetector(config);
                 _detector.Initialize();
                 Console.WriteLine($"[MediaPipeHand] 初始化完成, IsInitialized={_detector.IsInitialized}");
             }

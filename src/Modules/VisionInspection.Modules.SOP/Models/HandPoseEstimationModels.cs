@@ -9,31 +9,31 @@ public enum HandKeypointType
 {
     // 手腕
     Wrist = 0,
-    
+
     // 拇指 (1-4)
     ThumbCMC = 1,    // 拇指掌指关节
     ThumbMCP = 2,    // 拇指近端指间关节
     ThumbIP = 3,     // 拇指远端指间关节
     ThumbTip = 4,    // 拇指指尖
-    
+
     // 食指 (5-8)
     IndexFingerMCP = 5,   // 食指掌指关节
     IndexFingerPIP = 6,   // 食指近端指间关节
     IndexFingerDIP = 7,   // 食指远端指间关节
     IndexFingerTip = 8,   // 食指指尖
-    
+
     // 中指 (9-12)
     MiddleFingerMCP = 9,  // 中指掌指关节
     MiddleFingerPIP = 10, // 中指近端指间关节
     MiddleFingerDIP = 11, // 中指远端指间关节
     MiddleFingerTip = 12, // 中指指尖
-    
+
     // 无名指 (13-16)
     RingFingerMCP = 13,   // 无名指掌指关节
     RingFingerPIP = 14,   // 无名指近端指间关节
     RingFingerDIP = 15,   // 无名指远端指间关节
     RingFingerTip = 16,   // 无名指指尖
-    
+
     // 小指 (17-20)
     PinkyMCP = 17,        // 小指掌指关节
     PinkyPIP = 18,        // 小指近端指间关节
@@ -108,7 +108,7 @@ public class HandPose
     public SKPoint GetCenter()
     {
         if (Keypoints.Count == 0) return new SKPoint(0, 0);
-        
+
         float avgX = Keypoints.Average(k => k.X);
         float avgY = Keypoints.Average(k => k.Y);
         return new SKPoint(avgX, avgY);
@@ -254,31 +254,15 @@ public class HandPoseEstimationConfig
     /// </summary>
     public bool UseGpu { get; set; } = true;
 
-    // ========== DWPose（全身姿态→手部关键点）后端选项 ==========
+    // ========== 手部检测后端选项 ==========
 
     /// <summary>
     /// 手部检测后端选择。
-    /// Auto   : 维持原有优先级 MediaPipe → YOLO → DWPose 兜底（向后兼容）
-    /// MediaPipe / Yolo / DWPose : 强制使用该方案
-    /// 说明：DWPose 关键点更平滑、遮挡与握拳场景更稳，可替代 MediaPipe。
+    /// Auto   : MediaPipe → YOLO-pose 兜底（向后兼容）
+    /// MediaPipe : 强制使用 MediaPipe 两阶段方案（默认、最稳健）
+    /// YoloPose  : 强制使用 YOLOv8-pose + MediaPipe Landmark 方案
     /// </summary>
-    public HandDetectionBackend Backend { get; set; } = HandDetectionBackend.Auto;
-
-    /// <summary>
-    /// DWPose 人体检测模型(yolox_l.onnx)显式路径。为空则用 DWPoseModelDir 下的默认文件名。
-    /// </summary>
-    public string DWPoseDetModelPath { get; set; } = "";
-
-    /// <summary>
-    /// DWPose 全身姿态模型(dw-ll_ucoco_384.onnx)显式路径。为空则用 DWPoseModelDir 下的默认文件名。
-    /// </summary>
-    public string DWPosePoseModelPath { get; set; } = "";
-
-    /// <summary>
-    /// DWPose 模型目录（含 yolox_l.onnx 与 dw-ll_ucoco_384.onnx）。
-    /// 默认指向已下载好的目录。
-    /// </summary>
-    public string DWPoseModelDir { get; set; } = @"e:\yolo\YoloDotNet-master\DWPose-onnx\models";
+    public HandDetectionBackend Backend { get; set; } = HandDetectionBackend.MediaPipe;
 
     // ========== 面部过滤参数 ==========
 
@@ -325,27 +309,27 @@ public static class HandSkeletonConnections
         (HandKeypointType.Wrist, HandKeypointType.MiddleFingerMCP),
         (HandKeypointType.Wrist, HandKeypointType.RingFingerMCP),
         (HandKeypointType.Wrist, HandKeypointType.PinkyMCP),
-        
+
         // 拇指
         (HandKeypointType.ThumbCMC, HandKeypointType.ThumbMCP),
         (HandKeypointType.ThumbMCP, HandKeypointType.ThumbIP),
         (HandKeypointType.ThumbIP, HandKeypointType.ThumbTip),
-        
+
         // 食指
         (HandKeypointType.IndexFingerMCP, HandKeypointType.IndexFingerPIP),
         (HandKeypointType.IndexFingerPIP, HandKeypointType.IndexFingerDIP),
         (HandKeypointType.IndexFingerDIP, HandKeypointType.IndexFingerTip),
-        
+
         // 中指
         (HandKeypointType.MiddleFingerMCP, HandKeypointType.MiddleFingerPIP),
         (HandKeypointType.MiddleFingerPIP, HandKeypointType.MiddleFingerDIP),
         (HandKeypointType.MiddleFingerDIP, HandKeypointType.MiddleFingerTip),
-        
+
         // 无名指
         (HandKeypointType.RingFingerMCP, HandKeypointType.RingFingerPIP),
         (HandKeypointType.RingFingerPIP, HandKeypointType.RingFingerDIP),
         (HandKeypointType.RingFingerDIP, HandKeypointType.RingFingerTip),
-        
+
         // 小指
         (HandKeypointType.PinkyMCP, HandKeypointType.PinkyPIP),
         (HandKeypointType.PinkyPIP, HandKeypointType.PinkyDIP),
@@ -359,17 +343,11 @@ public static class HandSkeletonConnections
 /// </summary>
 public enum HandDetectionBackend
 {
-    /// <summary>自动：MediaPipe → YOLO-hand → YOLO-pose → DWPose 兜底（向后兼容默认行为）</summary>
+    /// <summary>自动：MediaPipe → YOLO-pose 兜底（向后兼容默认行为）</summary>
     Auto = 0,
 
-    /// <summary>MediaPipe 两阶段手部关键点（握拳/横向手泛化好）</summary>
+    /// <summary>MediaPipe 两阶段手部关键点（握拳/横向手泛化好，默认方案）</summary>
     MediaPipe = 1,
-
-    /// <summary>YOLO 单/双阶段手部检测</summary>
-    Yolo = 2,
-
-    /// <summary>DWPose 全身姿态估计后提取 21 点手部关键点（最丝滑、遮挡/握拳更稳）</summary>
-    DWPose = 3,
 
     /// <summary>YOLOv8-pose 检测手腕 + MediaPipe Landmark 精修手指关键点</summary>
     YoloPose = 4

@@ -1,7 +1,7 @@
 sop:
   name: "手部动作MVP演示"
   version: "1.0"
-  description: "验证 DWPose 手部结果接入状态机：取料→放料→压合"
+  description: "验证 手部姿态结果接入状态机：取料→放料→压合"
   settings:
     detectionMode: "UnifiedDetection"
     confidenceThreshold: 0.5

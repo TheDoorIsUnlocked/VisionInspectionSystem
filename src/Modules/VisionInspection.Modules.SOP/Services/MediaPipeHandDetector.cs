@@ -25,13 +25,19 @@ public class MediaPipeHandDetector : IDisposable
     private const int PalmInputSize = 192;
     private const int LandmarkInputSize = 224;
 
-    // 平滑处理参数
-    private HandPose? _lastHandPose;
+    // 平滑处理参数（EMA 权重，last 占 _smoothingFactor）
     private readonly float _smoothingFactor = 0.7f;
 
-    // 历史记录用于多帧平滑
-    private readonly Queue<HandPose> _handHistory = new Queue<HandPose>(3);
-    private const int HistorySize = 3;
+    // 多手时间平滑状态：按稳定 TrackId 维护最近帧手部姿态
+    private readonly object _trackLock = new();
+    private readonly Dictionary<int, HandPose> _trackedHands = new();
+    private int _nextTrackId = 0;
+
+    // 阈值与过滤参数（运行时从配置读取，支持界面调节并持久化）
+    private readonly float _keypointConfidenceThreshold;  // 关键点平均置信度阈值
+    private readonly float _minBoxAreaRatio;              // 最小检测框面积比例
+    private readonly bool _enableFaceFilter;              // 是否启用面部过滤
+    private readonly float _faceFilterUpperRatio;         // 面部过滤画面上边界比例
 
     // 日志（仅控制台，不写文件避免 I/O 卡顿）
     private static void DebugLog(string message)
@@ -41,13 +47,16 @@ public class MediaPipeHandDetector : IDisposable
 
     public bool IsInitialized => _palmSession != null && _landmarkSession != null;
 
-    public MediaPipeHandDetector(string palmModelPath, string landmarkModelPath, 
-        float confidenceThreshold = 0.5f, int maxNumHands = 2)
+    public MediaPipeHandDetector(HandPoseEstimationConfig config)
     {
-        _palmModelPath = palmModelPath;
-        _landmarkModelPath = landmarkModelPath;
-        _confidenceThreshold = confidenceThreshold;
-        _maxNumHands = maxNumHands;
+        _palmModelPath = config.PalmModelPath;
+        _landmarkModelPath = config.LandmarkModelPath;
+        _confidenceThreshold = config.DetectionConfidenceThreshold;   // 手掌检测置信度阈值
+        _keypointConfidenceThreshold = config.ConfidenceThreshold;     // 关键点平均置信度阈值
+        _maxNumHands = config.MaxNumHands;
+        _minBoxAreaRatio = config.MinBoxAreaRatio;
+        _enableFaceFilter = config.EnableFaceFilter;
+        _faceFilterUpperRatio = config.FaceFilterUpperRatio;
     }
 
     /// <summary>
@@ -130,9 +139,8 @@ public class MediaPipeHandDetector : IDisposable
 
             if (palmDetections.Count == 0)
             {
-                // 无检测，清空历史
-                _handHistory.Clear();
-                _lastHandPose = null;
+                // 无检测，清空多手跟踪状态
+                lock (_trackLock) _trackedHands.Clear();
                 return new List<HandPose>();
             }
 
@@ -147,8 +155,7 @@ public class MediaPipeHandDetector : IDisposable
 
             if (hands.Count == 0)
             {
-                _handHistory.Clear();
-                _lastHandPose = null;
+                lock (_trackLock) _trackedHands.Clear();
                 return new List<HandPose>();
             }
 
@@ -158,7 +165,7 @@ public class MediaPipeHandDetector : IDisposable
                 ? hand.Keypoints.Average(kp => kp.Confidence)
                 : 0;
 
-            if (avgConfidence < 0.3f)
+            if (avgConfidence < _keypointConfidenceThreshold)
             {
                 DebugLog($"置信度太低({avgConfidence:F3})，丢弃");
                 return new List<HandPose>();
@@ -183,52 +190,69 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 应用平滑处理减少闪烁
+    /// 应用多手时间平滑：按稳定 TrackId 维护最近一帧的手部姿态。
+    /// 用包围盒中心点最近邻匹配跨帧 ID，EMA 平滑关键点与包围盒，支持双手输出且跨帧 ID 稳定。
     /// </summary>
     private List<HandPose> ApplySmoothing(List<HandPose> currentHands)
     {
         if (currentHands.Count == 0)
             return new List<HandPose>();
 
-        var currentHand = currentHands[0];
-
-        // 添加到历史记录
-        _handHistory.Enqueue(currentHand);
-        while (_handHistory.Count > HistorySize)
-            _handHistory.Dequeue();
-
-        // 如果没有历史记录，初始化并返回当前结果
-        if (_lastHandPose == null || _lastHandPose.Keypoints.Count != currentHand.Keypoints.Count)
+        lock (_trackLock)
         {
-            _lastHandPose = currentHand;
-            return currentHands;
+            var matchedIds = new HashSet<int>();
+            var result = new List<HandPose>();
+
+            foreach (var cur in currentHands)
+            {
+                int bestId = -1;
+                float bestDist = float.MaxValue;
+                var curCenter = BoxCenter(cur.BoundingBox);
+                foreach (var kv in _trackedHands)
+                {
+                    var prevCenter = BoxCenter(kv.Value.BoundingBox);
+                    float dx = prevCenter.X - curCenter.X;
+                    float dy = prevCenter.Y - curCenter.Y;
+                    float d = dx * dx + dy * dy;
+                    float maxDist = Math.Max(cur.BoundingBox.Width, kv.Value.BoundingBox.Width) * 1.6f + 30f;
+                    if (d < bestDist && MathF.Sqrt(d) < maxDist)
+                    {
+                        bestDist = d;
+                        bestId = kv.Key;
+                    }
+                }
+
+                HandPose smoothed;
+                if (bestId >= 0)
+                {
+                    var prev = _trackedHands[bestId];
+                    smoothed = new HandPose
+                    {
+                        TrackId = bestId,
+                        HandType = cur.HandType,
+                        BoundingBox = EmaRect(prev.BoundingBox, cur.BoundingBox),
+                        Keypoints = EmaKeypoints(prev.Keypoints, cur.Keypoints),
+                        Timestamp = cur.Timestamp
+                    };
+                    _trackedHands[bestId] = smoothed;
+                }
+                else
+                {
+                    int newId = _nextTrackId++;
+                    cur.TrackId = newId;
+                    smoothed = cur;
+                    _trackedHands[newId] = cur;
+                }
+
+                matchedIds.Add(smoothed.TrackId);
+                result.Add(smoothed);
+            }
+
+            foreach (var staleId in _trackedHands.Keys.Where(k => !matchedIds.Contains(k)).ToList())
+                _trackedHands.Remove(staleId);
+
+            return result;
         }
-
-        // 使用历史平均值进行平滑
-        var smoothedHand = new HandPose
-        {
-            TrackId = currentHand.TrackId,
-            HandType = currentHand.HandType,
-            BoundingBox = SmoothRectWithHistory(currentHand.BoundingBox),
-            Keypoints = new List<HandKeypoint>(),
-            Timestamp = currentHand.Timestamp
-        };
-
-        for (int i = 0; i < currentHand.Keypoints.Count; i++)
-        {
-            var currKp = currentHand.Keypoints[i];
-            var (avgX, avgY, avgZ) = CalculateHistoryAverage(i);
-            smoothedHand.Keypoints.Add(new HandKeypoint(
-                currKp.Type,
-                SmoothValue(avgX, currKp.X),
-                SmoothValue(avgY, currKp.Y),
-                SmoothValue(avgZ, currKp.Z),
-                currKp.Confidence
-            ));
-        }
-
-        _lastHandPose = smoothedHand;
-        return new List<HandPose> { smoothedHand };
     }
 
     /// <summary>
@@ -312,63 +336,47 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 计算历史平均值
+    /// 计算包围盒中心点
     /// </summary>
-    private (float x, float y, float z) CalculateHistoryAverage(int keypointIndex)
+    private static SKPoint BoxCenter(SKRect r)
+        => new SKPoint((r.Left + r.Right) / 2f, (r.Top + r.Bottom) / 2f);
+
+    /// <summary>
+    /// 对两个包围盒做 EMA 平滑（last 权重 _smoothingFactor，current 权重 1-_smoothingFactor）
+    /// </summary>
+    private SKRect EmaRect(SKRect prev, SKRect cur)
     {
-        if (_handHistory.Count == 0) return (0, 0, 0);
-        
-        float sumX = 0, sumY = 0, sumZ = 0;
-        int count = 0;
-        
-        foreach (var hand in _handHistory)
-        {
-            if (keypointIndex < hand.Keypoints.Count)
-            {
-                var kp = hand.Keypoints[keypointIndex];
-                sumX += kp.X;
-                sumY += kp.Y;
-                sumZ += kp.Z;
-                count++;
-            }
-        }
-        
-        return count > 0 ? (sumX / count, sumY / count, sumZ / count) : (0, 0, 0);
+        return new SKRect(
+            SmoothValue(prev.Left, cur.Left),
+            SmoothValue(prev.Top, cur.Top),
+            SmoothValue(prev.Right, cur.Right),
+            SmoothValue(prev.Bottom, cur.Bottom));
     }
 
     /// <summary>
-    /// 使用历史记录平滑矩形
+    /// 对两组（同序）关键点做 EMA 平滑（按索引对齐；数量不一致时多余关键点直接采用当前帧）
     /// </summary>
-    private SKRect SmoothRectWithHistory(SKRect current)
+    private List<HandKeypoint> EmaKeypoints(List<HandKeypoint> prev, List<HandKeypoint> cur)
     {
-        if (_handHistory.Count < 2) return current;
-        
-        float sumLeft = 0, sumTop = 0, sumRight = 0, sumBottom = 0;
-        int count = 0;
-        
-        foreach (var hand in _handHistory)
+        var outList = new List<HandKeypoint>();
+        int n = Math.Min(prev.Count, cur.Count);
+        for (int i = 0; i < n; i++)
         {
-            sumLeft += hand.BoundingBox.Left;
-            sumTop += hand.BoundingBox.Top;
-            sumRight += hand.BoundingBox.Right;
-            sumBottom += hand.BoundingBox.Bottom;
-            count++;
+            var p = prev[i];
+            var c = cur[i];
+            outList.Add(new HandKeypoint(
+                c.Type,
+                SmoothValue(p.X, c.X),
+                SmoothValue(p.Y, c.Y),
+                SmoothValue(p.Z, c.Z),
+                c.Confidence));
         }
-        
-        var avgRect = new SKRect(
-            sumLeft / count,
-            sumTop / count,
-            sumRight / count,
-            sumBottom / count
-        );
-        
-        return new SKRect(
-            SmoothValue(avgRect.Left, current.Left),
-            SmoothValue(avgRect.Top, current.Top),
-            SmoothValue(avgRect.Right, current.Right),
-            SmoothValue(avgRect.Bottom, current.Bottom)
-        );
+        for (int i = n; i < cur.Count; i++)
+            outList.Add(cur[i]);
+        return outList;
     }
+
+
 
     /// <summary>
     /// 平滑单个值
@@ -512,80 +520,86 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 解析单阶段手部检测模型的输出
-    /// 输出格式: [score, cx, cy, w, wrist_x, wrist_y, middle_x, middle_y]
+    /// 解析单阶段手部检测模型输出。
+    /// 模型输出张量维度为 [N, 8]，N 是动态检测数量（模型原生支持多手），
+    /// 每行 [score, cx, cy, w, wrist_x, wrist_y, middle_x, middle_y]（归一化到 192×192）。
+    /// 遍历全部 N 行，按手掌置信度阈值过滤，做最小框面积过滤 + NMS(IoU>0.5) 后再返回。
+    /// 早期版本误把特征维 8 当作检测数、且固定读第 0 行，导致永远只返回 1 只手。
     /// </summary>
     private List<PalmDetection> ParseSingleStagePalmOutput(Tensor<float> scores, int imageWidth, int imageHeight)
     {
-        var detections = new List<PalmDetection>();
+        var raw = new List<PalmDetection>();
+        if (scores == null) return raw;
 
-        DebugLog($"解析单阶段模型输出，维度: [{string.Join(",", scores.Dimensions.ToArray())}]");
+        int n = scores.Dimensions[0];
+        int feat = scores.Dimensions.Length > 1 ? scores.Dimensions[1] : 0;
 
-        // 模型输出格式: [score, cx, cy, w, wrist_x, wrist_y, middle_x, middle_y]
-        // 所有值都是归一化的（0-1，相对于 192×192 正方形输入）
-        int numDetections = scores.Dimensions.Length > 1 ? scores.Dimensions[1] : scores.Dimensions[0];
+        DebugLog($"解析单阶段模型输出，N={n} feat={feat}");
 
-        if (numDetections >= 8)
+        if (feat < 8)
         {
-            int idx = scores.Dimensions.Length > 1 ? 0 : 0;
-
-            float score = scores[idx, 0];
-            float cx = scores[idx, 1];
-            float cy = scores[idx, 2];
-            float w = scores[idx, 3];
-            float wristX = numDetections >= 5 ? scores[idx, 4] : -1;
-            float wristY = numDetections >= 6 ? scores[idx, 5] : -1;
-            float middleX = numDetections >= 7 ? scores[idx, 6] : -1;
-            float middleY = numDetections >= 8 ? scores[idx, 7] : -1;
-
-            DebugLog($"检测到: score={score:F3}, cx={cx:F3}, cy={cy:F3}, w={w:F3}");
-            DebugLog($"wrist=({wristX:F3},{wristY:F3}) middle=({middleX:F3},{middleY:F3})");
-
-            if (score > _confidenceThreshold)
-            {
-                // 模型输入是 192×192 正方形，w 在两个方向相同
-                // 分别乘 imageWidth/imageHeight 映射回原始图像
-                float width = w * imageWidth * 1.25f;
-                float height = w * imageHeight * 1.25f;
-
-                float centerX = cx * imageWidth;
-                float centerY = cy * imageHeight;
-
-                float x = Math.Max(0, centerX - width / 2);
-                float y = Math.Max(0, centerY - height / 2);
-
-                if (x + width > imageWidth) width = imageWidth - x;
-                if (y + height > imageHeight) height = imageHeight - y;
-
-                detections.Add(new PalmDetection
-                {
-                    X = x,
-                    Y = y,
-                    Width = width,
-                    Height = height,
-                    Confidence = score
-                });
-
-                DebugLog($"palm box: X={x:F0} Y={y:F0} W={width:F0} H={height:F0} (w_norm={w:F3})");
-            }
-            else
-            {
-                DebugLog($"置信度 {score:F3} 低于阈值 {_confidenceThreshold}，跳过");
-            }
-        }
-        else
-        {
-            DebugLog($"输出维度 {numDetections} 不符合预期 (需要 >= 8)");
+            DebugLog($"输出特征维度 {feat} 不符合预期 (需要 >= 8)");
+            return raw;
         }
 
-        return detections;
+        float minArea = _minBoxAreaRatio * imageWidth * imageHeight;
+
+        for (int i = 0; i < n; i++)
+        {
+            float score = scores[i, 0];
+            float cx = scores[i, 1];
+            float cy = scores[i, 2];
+            float w = scores[i, 3];
+
+            if (score <= _confidenceThreshold)
+                continue;
+
+            float width = w * imageWidth * 1.25f;
+            float height = w * imageHeight * 1.25f;
+            float centerX = cx * imageWidth;
+            float centerY = cy * imageHeight;
+
+            float x = Math.Max(0, centerX - width / 2);
+            float y = Math.Max(0, centerY - height / 2);
+            if (x + width > imageWidth) width = imageWidth - x;
+            if (y + height > imageHeight) height = imageHeight - y;
+
+            float area = width * height;
+            if (area < minArea)
+            {
+                DebugLog($"第{i}个候选框面积太小({area:F0} < {minArea:F0})，丢弃");
+                continue;
+            }
+
+            raw.Add(new PalmDetection
+            {
+                X = x,
+                Y = y,
+                Width = width,
+                Height = height,
+                Confidence = score
+            });
+
+            DebugLog($"palm[{i}] box: X={x:F0} Y={y:F0} W={width:F0} H={height:F0} score={score:F3}");
+        }
+
+        var result = NmsPalmDetections(raw, 0.5f);
+        DebugLog($"单阶段解析得到 {result.Count} 个手掌（NMS 后，N={n}）");
+        return result;
     }
 
     /// <summary>
-    /// 过滤面部误检测 — 与 YOLO IsLikelyFace 相同的逻辑
+    /// 过滤面部误检测。仅当启用面部过滤（EnableFaceFilter）时生效。
+    /// 启发式：竖长脸(宽高比 0.55~0.9 且偏上)、横宽脸局部(>1.5 且很靠上)、
+    /// 近似正方且很靠上(squareHigh) 视为面部丢弃。
+    /// 用 FaceFilterUpperRatio 控制"画面上方"的判定边界（值越大过滤越激进）。
     /// </summary>
     private List<PalmDetection> FilterFaceDetections(List<PalmDetection> detections, int imageWidth, int imageHeight)
     {
+        if (!_enableFaceFilter)
+            return detections;
+
+        float upper = _faceFilterUpperRatio;
         var filtered = new List<PalmDetection>();
         foreach (var d in detections)
         {
@@ -595,16 +609,18 @@ public class MediaPipeHandDetector : IDisposable
             float aspectRatio = boxW / boxH;
             float centerY = d.Y + boxH / 2f;
 
-            // 竖长形 → 整张脸（宽高比 0.55~0.9，在上方）
             bool tallFace = aspectRatio >= 0.55f && aspectRatio <= 0.9f
-                && centerY < imageHeight * 0.38f;
+                && centerY < imageHeight * upper;
 
-            // 横宽形 → 面部局部（宽高比 > 1.5，在很上方）
-            bool wideFacePart = aspectRatio > 1.5f && centerY < imageHeight * 0.28f;
+            bool wideFacePart = aspectRatio > 1.5f
+                && centerY < imageHeight * Math.Min(upper, 0.28f);
 
-            if (tallFace || wideFacePart)
+            bool squareHigh = aspectRatio > 0.9f && aspectRatio <= 1.3f
+                && centerY < imageHeight * 0.18f;
+
+            if (tallFace || wideFacePart || squareHigh)
             {
-                DebugLog($"FilterFace: 丢弃面部误检 aspect={aspectRatio:F2} tallFace={tallFace} wideFacePart={wideFacePart}");
+                DebugLog($"FilterFace: 丢弃面部误检 aspect={aspectRatio:F2} tall={tallFace} wide={wideFacePart} sqHigh={squareHigh}");
                 continue;
             }
             filtered.Add(d);
@@ -725,10 +741,10 @@ public class MediaPipeHandDetector : IDisposable
             // 格式2: [21, 3] - 无batch维度
             // 格式3: [1, 63] - 扁平化 (21*3)
             // 格式4: [63] - 完全扁平化
-            
+
             bool isFlattened = landmarks.Dimensions.Length == 2 && dim1 == 63;
             bool isFullyFlattened = landmarks.Dimensions.Length == 1 && dim1 == 63;
-            
+
             DebugLog($"格式判断: isFlattened={isFlattened}, isFullyFlattened={isFullyFlattened}");
 
             try
@@ -736,21 +752,21 @@ public class MediaPipeHandDetector : IDisposable
                 // 关键点模型输入尺寸是 224x224，输出坐标是相对于这个输入尺寸的（0-1范围）
                 // 需要将坐标转换回原始图像坐标
                 float inputSize = LandmarkInputSize; // 224
-                
+
                 if (isFlattened || isFullyFlattened)
                 {
                     // 扁平化格式 [1, 63] 或 [63]
                     DebugLog("使用扁平化格式解析 [1,63]");
-                    
+
                     // 记录原始值用于调试
                     float rawX0 = isFlattened ? landmarks[0, 0] : landmarks[0];
                     float rawY0 = isFlattened ? landmarks[0, 1] : landmarks[1];
                     DebugLog($"原始关键点0: rawX={rawX0:F3}, rawY={rawY0:F3}, palm=({palm.X:F1},{palm.Y:F1},{palm.Width:F1},{palm.Height:F1})");
-                    
+
                     for (int i = 0; i < 21; i++)
                     {
                         float nx, ny, z;
-                        
+
                         if (isFlattened)
                         {
                             nx = landmarks[0, i * 3 + 0];
@@ -795,7 +811,7 @@ public class MediaPipeHandDetector : IDisposable
                     // 格式 [1, 21, 3] 或 [21, 3]
                     int batchIdx = landmarks.Dimensions.Length > 2 ? 0 : -1;
                     DebugLog($"使用3D格式解析，batchIdx={batchIdx}");
-                    
+
                     for (int i = 0; i < Math.Min(21, dim1); i++)
                     {
                         float nx, ny, z;
@@ -921,7 +937,7 @@ public class MediaPipeHandDetector : IDisposable
         var cropped = new SKBitmap(width, height);
         using (var canvas = new SKCanvas(cropped))
         {
-            canvas.DrawBitmap(image, 
+            canvas.DrawBitmap(image,
                 new SKRect(x, y, x + width, y + height),
                 new SKRect(0, 0, width, height));
         }
@@ -935,7 +951,7 @@ public class MediaPipeHandDetector : IDisposable
     private List<HandPose> SimulateHandDetection(SKBitmap image)
     {
         var hands = new List<HandPose>();
-        
+
         // 在图像中心生成模拟手部
         float centerX = image.Width / 2f;
         float centerY = image.Height / 2f;
@@ -960,35 +976,35 @@ public class MediaPipeHandDetector : IDisposable
     private List<HandKeypoint> GenerateSimulatedKeypoints(float centerX, float centerY, float scale)
     {
         var keypoints = new List<HandKeypoint>();
-        
+
         // 模拟21个关键点（张开的手掌姿势）
         // 手腕
         keypoints.Add(new HandKeypoint(HandKeypointType.Wrist, centerX, centerY + scale * 0.8f, 0, 0.95f));
-        
+
         // 拇指
         keypoints.Add(new HandKeypoint(HandKeypointType.ThumbCMC, centerX - scale * 0.3f, centerY + scale * 0.6f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.ThumbMCP, centerX - scale * 0.5f, centerY + scale * 0.4f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.ThumbIP, centerX - scale * 0.7f, centerY + scale * 0.2f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.ThumbTip, centerX - scale * 0.9f, centerY, 0, 0.95f));
-        
+
         // 食指
         keypoints.Add(new HandKeypoint(HandKeypointType.IndexFingerMCP, centerX - scale * 0.2f, centerY + scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.IndexFingerPIP, centerX - scale * 0.2f, centerY, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.IndexFingerDIP, centerX - scale * 0.2f, centerY - scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.IndexFingerTip, centerX - scale * 0.2f, centerY - scale * 0.6f, 0, 0.95f));
-        
+
         // 中指
         keypoints.Add(new HandKeypoint(HandKeypointType.MiddleFingerMCP, centerX, centerY + scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.MiddleFingerPIP, centerX, centerY, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.MiddleFingerDIP, centerX, centerY - scale * 0.35f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.MiddleFingerTip, centerX, centerY - scale * 0.7f, 0, 0.95f));
-        
+
         // 无名指
         keypoints.Add(new HandKeypoint(HandKeypointType.RingFingerMCP, centerX + scale * 0.2f, centerY + scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.RingFingerPIP, centerX + scale * 0.2f, centerY, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.RingFingerDIP, centerX + scale * 0.2f, centerY - scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.RingFingerTip, centerX + scale * 0.2f, centerY - scale * 0.6f, 0, 0.95f));
-        
+
         // 小指
         keypoints.Add(new HandKeypoint(HandKeypointType.PinkyMCP, centerX + scale * 0.4f, centerY + scale * 0.3f, 0, 0.95f));
         keypoints.Add(new HandKeypoint(HandKeypointType.PinkyPIP, centerX + scale * 0.5f, centerY + scale * 0.05f, 0, 0.95f));
@@ -1004,6 +1020,51 @@ public class MediaPipeHandDetector : IDisposable
         _landmarkSession?.Dispose();
         _palmSession = null;
         _landmarkSession = null;
+        lock (_trackLock) _trackedHands.Clear();
+    }
+
+    /// <summary>
+    /// 在图像上涂黑指定手掌区域，用于多遍抑制重跑（把已检出的手压掉，逼出第 2 只手）
+    /// </summary>
+    private static void MaskRegion(SKBitmap image, PalmDetection d)
+    {
+        using var paint = new SKPaint { Color = SKColors.Black };
+        using var canvas = new SKCanvas(image);
+        canvas.DrawRect(d.X, d.Y, d.Width, d.Height, paint);
+    }
+
+    /// <summary>
+    /// 计算两个手掌检测框的交并比（IoU）
+    /// </summary>
+    private static float PalmIoU(PalmDetection a, PalmDetection b)
+    {
+        float ax2 = a.X + a.Width, ay2 = a.Y + a.Height;
+        float bx2 = b.X + b.Width, by2 = b.Y + b.Height;
+        float ix1 = Math.Max(a.X, b.X), iy1 = Math.Max(a.Y, b.Y);
+        float ix2 = Math.Min(ax2, bx2), iy2 = Math.Min(ay2, by2);
+        float iw = Math.Max(0, ix2 - ix1), ih = Math.Max(0, iy2 - iy1);
+        float inter = iw * ih;
+        float areaA = a.Width * a.Height;
+        float areaB = b.Width * b.Height;
+        float union = areaA + areaB - inter;
+        return union > 0 ? inter / union : 0f;
+    }
+
+    /// <summary>
+    /// 对棕榈检测框做非极大值抑制（按置信度降序，IoU 超过阈值的低分框被丢弃）
+    /// </summary>
+    private static List<PalmDetection> NmsPalmDetections(List<PalmDetection> detections, float iouThreshold)
+    {
+        var ordered = detections.OrderByDescending(d => d.Confidence).ToList();
+        var keep = new List<PalmDetection>();
+        while (ordered.Count > 0)
+        {
+            var best = ordered[0];
+            keep.Add(best);
+            ordered.RemoveAt(0);
+            ordered.RemoveAll(d => PalmIoU(best, d) > iouThreshold);
+        }
+        return keep;
     }
 
     /// <summary>
