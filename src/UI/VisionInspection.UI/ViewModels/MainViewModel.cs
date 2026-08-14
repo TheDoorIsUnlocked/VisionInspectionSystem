@@ -838,7 +838,38 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 绘制手部姿态（骨架线+关键点）
+    /// 仅绘制的关键手部关键点（约 50% 降采样：手腕 + 5 个掌指关节 MCP + 5 个指尖 = 11 点）。
+    /// 去掉 PIP/DIP 等中间关节，减少视觉杂乱，同时保留手势结构所需的全部关键位置。
+    /// </summary>
+    private static readonly HandKeypointType[] KeyHandLandmarks = new[]
+    {
+        HandKeypointType.Wrist,
+        HandKeypointType.ThumbMCP, HandKeypointType.ThumbTip,
+        HandKeypointType.IndexFingerMCP, HandKeypointType.IndexFingerTip,
+        HandKeypointType.MiddleFingerMCP, HandKeypointType.MiddleFingerTip,
+        HandKeypointType.RingFingerMCP, HandKeypointType.RingFingerTip,
+        HandKeypointType.PinkyMCP, HandKeypointType.PinkyTip
+    };
+
+    /// <summary>
+    /// 简化骨架连线（星形：手腕→各 MCP→各指尖），配合关键关键点绘制，减少凌乱感。
+    /// </summary>
+    private static readonly (HandKeypointType, HandKeypointType)[] ReducedHandSkeleton = new[]
+    {
+        (HandKeypointType.Wrist, HandKeypointType.ThumbMCP),
+        (HandKeypointType.ThumbMCP, HandKeypointType.ThumbTip),
+        (HandKeypointType.Wrist, HandKeypointType.IndexFingerMCP),
+        (HandKeypointType.IndexFingerMCP, HandKeypointType.IndexFingerTip),
+        (HandKeypointType.Wrist, HandKeypointType.MiddleFingerMCP),
+        (HandKeypointType.MiddleFingerMCP, HandKeypointType.MiddleFingerTip),
+        (HandKeypointType.Wrist, HandKeypointType.RingFingerMCP),
+        (HandKeypointType.RingFingerMCP, HandKeypointType.RingFingerTip),
+        (HandKeypointType.Wrist, HandKeypointType.PinkyMCP),
+        (HandKeypointType.PinkyMCP, HandKeypointType.PinkyTip)
+    };
+
+    /// <summary>
+    /// 绘制手部姿态（简化骨架线 + 关键关键点）
     /// </summary>
     private void DrawHandPoses(SKCanvas canvas, HandPoseEstimationResult handResult)
     {
@@ -924,23 +955,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var bbox = hand.BoundingBox;
             canvas.DrawRect(bbox, handBoxPaint);
 
-            // 绘制完整骨架线
+            // 绘制简化骨架线（星形，仅关键连接）
             DrawHandSkeleton(canvas, hand, skeletonPaint);
 
-            // 绘制全部 21 个关键点：手腕青色、指尖红色、关节黄色
-            foreach (var kp in hand.Keypoints)
+            // 仅绘制 11 个关键关键点（手腕 + 5 MCP + 5 指尖），约减少 50% 绘制点
+            foreach (var type in KeyHandLandmarks)
             {
-                if (kp.Confidence < SkeletonConfidenceThreshold) continue;
+                var kp = hand.GetKeypoint(type);
+                if (kp == null || kp.Confidence < SkeletonConfidenceThreshold) continue;
 
-                bool isTip = kp.Type == HandKeypointType.ThumbTip ||
-                             kp.Type == HandKeypointType.IndexFingerTip ||
-                             kp.Type == HandKeypointType.MiddleFingerTip ||
-                             kp.Type == HandKeypointType.RingFingerTip ||
-                             kp.Type == HandKeypointType.PinkyTip;
+                bool isTip = type == HandKeypointType.ThumbTip ||
+                             type == HandKeypointType.IndexFingerTip ||
+                             type == HandKeypointType.MiddleFingerTip ||
+                             type == HandKeypointType.RingFingerTip ||
+                             type == HandKeypointType.PinkyTip;
 
-                bool isWrist = kp.Type == HandKeypointType.Wrist;
-
-                float radius = isTip ? 7 : (isWrist ? 8 : 5);
+                bool isWrist = type == HandKeypointType.Wrist;
+                // MCP 略小于指尖，便于区分层级
+                float radius = isTip ? 7 : (isWrist ? 8 : 6);
                 var paint = isTip ? tipPaint : (isWrist ? wristPaint : jointPaint);
 
                 // 绘制关键点外圈（白色描边）
@@ -951,7 +983,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // 只在指尖旁边绘制标签，避免杂乱
                 if (isTip)
                 {
-                    canvas.DrawText(kp.Type.ToString(), kp.X + 10, kp.Y, labelPaint);
+                    canvas.DrawText(type.ToString(), kp.X + 10, kp.Y, labelPaint);
                 }
             }
         }
@@ -961,14 +993,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 绘制手部骨架线（使用 HandSkeletonConnections 完整 21 点连接）
+    /// 绘制手部骨架线（使用 ReducedHandSkeleton 简化连接，仅关键关键点之间）
     /// </summary>
     // 骨架绘制置信度阈值（低于此值的关键点不绘制，减少闪烁）
     public float SkeletonConfidenceThreshold { get; set; } = 0.1f;
 
     private void DrawHandSkeleton(SKCanvas canvas, HandPose hand, SKPaint paint)
     {
-        foreach (var (startType, endType) in HandSkeletonConnections.Connections)
+        foreach (var (startType, endType) in ReducedHandSkeleton)
         {
             var start = hand.GetKeypoint(startType);
             var end = hand.GetKeypoint(endType);

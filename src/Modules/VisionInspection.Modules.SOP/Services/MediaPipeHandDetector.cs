@@ -25,8 +25,8 @@ public class MediaPipeHandDetector : IDisposable
     private const int PalmInputSize = 192;
     private const int LandmarkInputSize = 224;
 
-    // 平滑处理参数（EMA 权重，last 占 _smoothingFactor）
-    private readonly float _smoothingFactor = 0.7f;
+    // 平滑处理参数（EMA 权重，last 占 _smoothingFactor；0.6 在稳定与跟手之间取平衡，减少跨帧漂移）
+    private readonly float _smoothingFactor = 0.6f;
 
     // 多手时间平滑状态：按稳定 TrackId 维护最近帧手部姿态
     private readonly object _trackLock = new();
@@ -232,7 +232,11 @@ public class MediaPipeHandDetector : IDisposable
 
     /// <summary>
     /// 应用多手时间平滑：按稳定 TrackId 维护最近一帧的手部姿态。
-    /// 用包围盒中心点最近邻匹配跨帧 ID，EMA 平滑关键点与包围盒，支持双手输出且跨帧 ID 稳定。
+    /// 用包围盒中心点 + 手型一致性做跨帧 ID 匹配，EMA 平滑关键点与包围盒，支持双手输出且跨帧 ID 稳定。
+    ///
+    /// 关键修复：采用 1:1 贪心匹配（一个 track 只能分配给一只当前手，反之亦然）。
+    /// 旧实现里每只当前手各自找最近 track，没有互斥约束，两只真手可能同时匹配到同一个 track，
+    /// 导致 EMA 把两只不同位置的手取平均 → 姿态"画到中间、不落在手上"。
     /// </summary>
     private List<HandPose> ApplySmoothing(List<HandPose> currentHands)
     {
@@ -241,55 +245,71 @@ public class MediaPipeHandDetector : IDisposable
 
         lock (_trackLock)
         {
-            var matchedIds = new HashSet<int>();
             var result = new List<HandPose>();
+            var assignedTracks = new HashSet<int>();
+            var assignedCur = new HashSet<int>();
 
-            foreach (var cur in currentHands)
+            // 收集所有候选配对 (curIdx, trackId, 距离)；距离按手型一致性做偏置
+            var pairs = new List<(int curIdx, int trackId, float dist)>();
+            for (int ci = 0; ci < currentHands.Count; ci++)
             {
-                int bestId = -1;
-                float bestDist = float.MaxValue;
+                var cur = currentHands[ci];
                 var curCenter = BoxCenter(cur.BoundingBox);
                 foreach (var kv in _trackedHands)
                 {
                     var prevCenter = BoxCenter(kv.Value.BoundingBox);
                     float dx = prevCenter.X - curCenter.X;
                     float dy = prevCenter.Y - curCenter.Y;
-                    float d = dx * dx + dy * dy;
+                    float d = MathF.Sqrt(dx * dx + dy * dy);
                     float maxDist = Math.Max(cur.BoundingBox.Width, kv.Value.BoundingBox.Width) * 1.6f + 30f;
-                    if (d < bestDist && MathF.Sqrt(d) < maxDist)
-                    {
-                        bestDist = d;
-                        bestId = kv.Key;
-                    }
-                }
+                    if (d >= maxDist) continue;
 
-                HandPose smoothed;
-                if (bestId >= 0)
-                {
-                    var prev = _trackedHands[bestId];
-                    smoothed = new HandPose
-                    {
-                        TrackId = bestId,
-                        HandType = cur.HandType,
-                        BoundingBox = EmaRect(prev.BoundingBox, cur.BoundingBox),
-                        Keypoints = EmaKeypoints(prev.Keypoints, cur.Keypoints),
-                        Timestamp = cur.Timestamp
-                    };
-                    _trackedHands[bestId] = smoothed;
-                }
-                else
-                {
-                    int newId = _nextTrackId++;
-                    cur.TrackId = newId;
-                    smoothed = cur;
-                    _trackedHands[newId] = cur;
-                }
+                    // 手型都已知且不一致 → 加巨大偏置，强制不配对（左/右手不会混淆）
+                    float adj = d;
+                    if (cur.HandType != HandType.Unknown && kv.Value.HandType != HandType.Unknown
+                        && cur.HandType != kv.Value.HandType)
+                        adj += 1e6f;
 
-                matchedIds.Add(smoothed.TrackId);
+                    pairs.Add((ci, kv.Key, adj));
+                }
+            }
+
+            // 距离升序贪心分配，保证 1:1
+            pairs.Sort((a, b) => a.dist.CompareTo(b.dist));
+            foreach (var p in pairs)
+            {
+                if (assignedTracks.Contains(p.trackId) || assignedCur.Contains(p.curIdx))
+                    continue;
+                assignedTracks.Add(p.trackId);
+                assignedCur.Add(p.curIdx);
+
+                var prev = _trackedHands[p.trackId];
+                var cur = currentHands[p.curIdx];
+                var smoothed = new HandPose
+                {
+                    TrackId = p.trackId,
+                    HandType = cur.HandType,
+                    BoundingBox = EmaRect(prev.BoundingBox, cur.BoundingBox),
+                    Keypoints = EmaKeypoints(prev.Keypoints, cur.Keypoints),
+                    Timestamp = cur.Timestamp
+                };
+                _trackedHands[p.trackId] = smoothed;
                 result.Add(smoothed);
             }
 
-            foreach (var staleId in _trackedHands.Keys.Where(k => !matchedIds.Contains(k)).ToList())
+            // 未配对的当前手：新建独立 track（不做 EMA，直接落到真实检测位置，避免漂移）
+            for (int ci = 0; ci < currentHands.Count; ci++)
+            {
+                if (assignedCur.Contains(ci)) continue;
+                var cur = currentHands[ci];
+                int newId = _nextTrackId++;
+                cur.TrackId = newId;
+                _trackedHands[newId] = cur;
+                result.Add(cur);
+            }
+
+            // 清理本轮未匹配到的旧 track
+            foreach (var staleId in _trackedHands.Keys.Where(k => !assignedTracks.Contains(k)).ToList())
                 _trackedHands.Remove(staleId);
 
             return result;
@@ -670,16 +690,32 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 计算裁剪区域（与 CropHandRegion 保持一致）
+    /// 计算方形裁剪区域（与 CropHandRegion 保持一致）。
+    /// 关键点模型要求输入为方形（MediaPipe 约定），若直接裁非正方形再拉伸到 224×224，
+    /// 会破坏长宽比、把指尖坐标拉歪（表现为手指点"堆在手掌/手腕"）。
+    /// 这里取手掌框外接正方形的边长，以手掌中心为基准，避免形变。
     /// </summary>
-    private (float cropX, float cropY, float cropW, float cropH) GetCropRect(SKBitmap image, PalmDetection palm)
+    private (float cropX, float cropY, float cropSide) GetSquareCropRect(SKBitmap image, PalmDetection palm)
     {
-        int margin = 20;
-        float x = Math.Max(0, palm.X - margin);
-        float y = Math.Max(0, palm.Y - margin);
-        float w = Math.Min(palm.Width + margin * 2, image.Width - x);
-        float h = Math.Min(palm.Height + margin * 2, image.Height - y);
-        return (x, y, w, h);
+        float margin = 20;
+        float w = palm.Width + margin * 2;
+        float h = palm.Height + margin * 2;
+        float side = Math.Max(w, h);
+        float cx = palm.X + palm.Width / 2f;
+        float cy = palm.Y + palm.Height / 2f;
+
+        float x = cx - side / 2f;
+        float y = cy - side / 2f;
+
+        // 保证裁剪框不超出图像边界
+        if (x + side > image.Width) x = image.Width - side;
+        if (y + side > image.Height) y = image.Height - side;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+
+        side = Math.Min(side, image.Width);
+        side = Math.Min(side, image.Height);
+        return (x, y, side);
     }
 
     /// <summary>
@@ -687,8 +723,8 @@ public class MediaPipeHandDetector : IDisposable
     /// </summary>
     private HandPose? DetectHandLandmarks(SKBitmap image, PalmDetection palm)
     {
-        // 获取裁剪区域参数（用于后续坐标映射）
-        var (cropX, cropY, cropW, cropH) = GetCropRect(image, palm);
+        // 获取裁剪区域参数（用于后续坐标映射；方形裁剪以保持长宽比，避免关键点被拉伸）
+        var (cropX, cropY, cropSide) = GetSquareCropRect(image, palm);
 
         // 裁剪手掌区域
         var handImage = CropHandRegion(image, palm);
@@ -822,20 +858,20 @@ public class MediaPipeHandDetector : IDisposable
                         }
 
                         // 转换回原始图像坐标
-                        // 模型输入是 crop 区域 resize 到 224x224 的结果
-                        // 所以输出坐标需要映射回 crop 区域，再加回 crop 偏移
+                        // 模型输入是方形 crop 区域 resize 到 224x224 的结果
+                        // 所以输出坐标需要映射回方形 crop 区域，再加回 crop 偏移
                         float x, y;
                         if (nx > 1.0f || ny > 1.0f)
                         {
                             // 输出是像素坐标（相对于 224x224）
-                            x = (nx / inputSize) * cropW + cropX;
-                            y = (ny / inputSize) * cropH + cropY;
+                            x = (nx / inputSize) * cropSide + cropX;
+                            y = (ny / inputSize) * cropSide + cropY;
                         }
                         else
                         {
                             // 输出是 0-1 归一化坐标（相对于 224x224 输入）
-                            x = nx * cropW + cropX;
-                            y = ny * cropH + cropY;
+                            x = nx * cropSide + cropX;
+                            y = ny * cropSide + cropY;
                         }
 
                         handPose.Keypoints.Add(new HandKeypoint(
@@ -872,9 +908,9 @@ public class MediaPipeHandDetector : IDisposable
                             z = landmarks[i, 2];
                         }
 
-                        // 转换回原始图像坐标（使用 crop 区域参数）
-                        float x = nx * cropW + cropX;
-                        float y = ny * cropH + cropY;
+                        // 转换回原始图像坐标（使用方形 crop 区域参数）
+                        float x = nx * cropSide + cropX;
+                        float y = ny * cropSide + cropY;
 
                         handPose.Keypoints.Add(new HandKeypoint(
                             (HandKeypointType)i,
@@ -897,6 +933,26 @@ public class MediaPipeHandDetector : IDisposable
                 // 如果已经解析了一些关键点，仍然返回
                 if (handPose.Keypoints.Count == 0)
                     return null;
+            }
+
+            // 解析手型（lefthand_0_or_righthand_1: 0=左手, 1=右手），用于双手下区分左右、稳定跟踪。
+            // 模型第三个输出即为此分支概率；解析失败则保留 Unknown，不影响关键点。
+            try
+            {
+                var handed = results.ElementAtOrDefault(2);
+                if (handed != null)
+                {
+                    var ht = handed.AsTensor<float>();
+                    if (ht != null)
+                    {
+                        float v = ht.Dimensions.Length >= 2 ? ht[0, 0] : ht[0];
+                        handPose.HandType = v >= 0.5f ? HandType.Right : HandType.Left;
+                    }
+                }
+            }
+            catch (Exception hEx)
+            {
+                DebugLog($"手型解析跳过: {hEx.Message}");
             }
 
         return handPose;
@@ -961,26 +1017,30 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 裁剪手掌区域
+    /// 裁剪手掌区域（正方形，保持长宽比，供关键点模型使用）。
+    /// 裁剪区域与 GetSquareCropRect 完全一致，保证坐标映射正确。
     /// </summary>
     private SKBitmap? CropHandRegion(SKBitmap image, PalmDetection palm)
     {
-        // 添加一些边距
-        int margin = 20;
-        int x = Math.Max(0, (int)palm.X - margin);
-        int y = Math.Max(0, (int)palm.Y - margin);
-        int width = Math.Min((int)palm.Width + margin * 2, image.Width - x);
-        int height = Math.Min((int)palm.Height + margin * 2, image.Height - y);
+        var (x, y, side) = GetSquareCropRect(image, palm);
+        int ix = (int)Math.Round(x);
+        int iy = (int)Math.Round(y);
+        int iside = (int)Math.Round(side);
 
-        if (width <= 0 || height <= 0) return null;
+        // 再次夹紧，确保不越界
+        if (ix < 0) ix = 0;
+        if (iy < 0) iy = 0;
+        if (ix + iside > image.Width) iside = image.Width - ix;
+        if (iy + iside > image.Height) iside = image.Height - iy;
+        if (iside <= 0) return null;
 
-        // 创建裁剪后的图像
-        var cropped = new SKBitmap(width, height);
+        // 创建正方形裁剪图像
+        var cropped = new SKBitmap(iside, iside);
         using (var canvas = new SKCanvas(cropped))
         {
             canvas.DrawBitmap(image,
-                new SKRect(x, y, x + width, y + height),
-                new SKRect(0, 0, width, height));
+                new SKRect(ix, iy, ix + iside, iy + iside),
+                new SKRect(0, 0, iside, iside));
         }
 
         return cropped;
