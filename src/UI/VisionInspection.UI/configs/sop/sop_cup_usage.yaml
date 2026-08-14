@@ -9,8 +9,9 @@
 #   改根目录那份不会生效（这是之前踩过的坑）。
 #
 # ⚠️ 标定提醒（务必用「🎯 标定区域」工具按真机画面设置，否则步骤不会推进）：
-#   - cup_table  ：水杯平时放在桌面的位置（拿起/放下都以它为准）
-#   - mouth_region：喝水时杯子/手到达的"嘴边"位置（必须对准你的嘴，否则"喝水"永远超时）
+#   - cup_table        ：拿起水杯的位置（手从此区离开即视为拿起）
+#   - return_cup_table ：放回水杯的位置（手把杯子放到此区即视为放回，可与 cup_table 相同或不同）
+#   - mouth_region     ：喝水时杯子/手到达的"嘴边"位置（必须对准你的嘴，否则"喝水"永远超时）
 # 本示例不依赖专用模型：人在场用 COCO 通用模型(person)，拿起/放下/喝水用手部姿态(MediaPipe)。
 # 物料识别用 COCO 自带的 "cup" 类别（比 cell phone 更常见、识别更稳）。
 
@@ -33,9 +34,18 @@ sop:
       y1: 400
       x2: 350
       y2: 550
-      name: "水杯放置区"
-      description: "水杯放置的桌面区域（拿起=手离开此区；放下=手到达此区）"
+      name: "拿起水杯区"
+      description: "拿起水杯的起始位置（手从此区离开即视为拿起）"
       color: "#4CAF50"
+
+    return_cup_table:
+      x1: 300
+      y1: 400
+      x2: 450
+      y2: 550
+      name: "放回水杯区"
+      description: "喝水后把水杯放回的位置（手把杯子放到此区即视为放回，可与 cup_table 重叠）"
+      color: "#FF9800"
 
     mouth_region:
       x1: 430
@@ -96,11 +106,11 @@ sop:
         action: "putdown"
         hand: "any"
         from_region: "mouth_region"   # 必须先到过嘴边（喝过水），再回到桌面才算真正放回；避免拿起阶段杯子已在桌面被误判为放回
-        to_region: "cup_table"
-        target_object: "cup"   # 辅助判定：手拿着 cup 进入 cup_table 即视为放下
+        to_region: "return_cup_table"
+        target_object: "cup"   # 辅助判定：手拿着 cup 进入 return_cup_table 即视为放下
         min_confidence: 0.6
         stable_frames: 3
-        description: "手将水杯从嘴边放回放置区"
+        description: "手将水杯从嘴边放回 return_cup_table 区"
 
     # 步骤5: 完成
     - id: "complete"

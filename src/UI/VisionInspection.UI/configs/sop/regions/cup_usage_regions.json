@@ -1,6 +1,6 @@
 {
-  "name": "水杯使用场景 - 区域定义",
-  "description": "定义拿起水杯、喝水、放回水杯场景中的关键区域（坐标须用「🎯 标定区域」工具按真机画面重设）",
+      "name": "水杯使用场景 - 区域定义",
+      "description": "定义拿起水杯、喝水、放回水杯场景中的关键区域：cup_table(拿起区)、return_cup_table(放回区)、mouth_region(嘴边区)。坐标须用「🎯 标定区域」工具按真机画面重设。",
   "version": "1.0",
   "imageSize": {
     "width": 1280,
@@ -9,8 +9,8 @@
   "regions": {
     "cup_table": {
       "id": "cup_table",
-      "name": "水杯放置区",
-      "description": "水杯平时放在桌面的位置（拿起=手离开此区；放下=手到达此区）",
+      "name": "拿起水杯区",
+      "description": "拿起水杯的起始位置（手从此区离开即视为拿起）",
       "type": "rectangle",
       "coordinates": {
         "x1": 200,
@@ -19,7 +19,21 @@
         "y2": 550
       },
       "color": "#4CAF50",
-      "allowedActions": ["放置水杯", "拿起水杯"]
+      "allowedActions": ["拿起水杯"]
+    },
+    "return_cup_table": {
+      "id": "return_cup_table",
+      "name": "放回水杯区",
+      "description": "喝水后把水杯放回的位置（手把杯子放到此区即视为放回，可与 cup_table 重叠）",
+      "type": "rectangle",
+      "coordinates": {
+        "x1": 300,
+        "y1": 400,
+        "x2": 450,
+        "y2": 550
+      },
+      "color": "#FF9800",
+      "allowedActions": ["放置水杯"]
     },
     "mouth_region": {
       "id": "mouth_region",
@@ -87,21 +101,21 @@
     "put_down_cup": {
       "id": "put_down_cup",
       "name": "放回水杯",
-      "description": "手将水杯从嘴边放回放置区",
+      "description": "手将水杯从嘴边放回 return_cup_table 区",
       "conditions": [
         {
           "type": "hand_in_region",
           "hand": "any",
-          "region": "cup_table",
-          "duration": 500,
-          "description": "手在放置区停留500ms"
+        "region": "return_cup_table",
+        "duration": 500,
+        "description": "手在放回区停留500ms"
         }
       ]
     }
   },
   "forbiddenZones": {},
   "calibration": {
-    "note": "这些坐标基于1280x720分辨率的摄像头，为默认模板，须按真机画面重新标定",
+    "note": "这些坐标基于1280x720分辨率的摄像头，为默认模板，须按真机画面重新标定。注意：return_cup_table 可与 cup_table 重合，也可根据实际动作单独设定。",
     "adjustmentGuide": "如果实际摄像头分辨率不同，请按比例调整坐标；请用程序内「🎯 标定区域」工具可视化重设"
   }
 }
