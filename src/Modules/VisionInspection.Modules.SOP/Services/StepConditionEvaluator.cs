@@ -52,6 +52,8 @@ public class StepConditionEvaluator
     {
         // 先更新手部跨帧跟踪状态（用于稳定/移动判断）
         UpdateHandTracks(handResult);
+        // 同步更新物体跨帧区域访问记录（用于放回等步骤的 from_region 约束）
+        UpdateObjectRegions(detections);
 
         if (step.PassConditions.Count == 0)
         {
@@ -148,6 +150,11 @@ public class StepConditionEvaluator
 
     private readonly Dictionary<int, HandTrackState> _handTracks = new();
 
+    // 物体（按标签）最近访问过的区域记录——用于 HandMoveFromTo 的 from_region 约束。
+    // 例如喝水步骤里判定的是"杯子到达嘴边"（物体而非手），所以 from_region(mouth_region)
+    // 的访问证据应来自物体轨迹，否则放回步骤会卡死在 visitedFrom=false。
+    private readonly Dictionary<string, HashSet<string>> _objectVisitedRegions = new(StringComparer.OrdinalIgnoreCase);
+
     private void UpdateHandTracks(HandPoseEstimationResult? handResult)
     {
         if (handResult == null) return;
@@ -186,6 +193,33 @@ public class StepConditionEvaluator
         foreach (var id in _handTracks.Keys.ToList())
         {
             if (!alive.Contains(id)) _handTracks.Remove(id);
+        }
+    }
+
+    /// <summary>
+    /// 记录每个物体标签最近访问过的区域（用于 from_region 约束）。
+    /// 物体没有稳定 TrackId，按标签聚合即可（同一场景通常只有一种物料）。
+    /// 判定标准与 CheckObjectInZone 的 IsInZone 一致：bbox 与区域相交即记为访问过。
+    /// </summary>
+    private void UpdateObjectRegions(List<ObjectDetection> detections)
+    {
+        foreach (var det in detections)
+        {
+            var label = det.Label?.Name;
+            if (string.IsNullOrEmpty(label)) continue;
+            if (!_objectVisitedRegions.TryGetValue(label, out var set))
+            {
+                set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _objectVisitedRegions[label] = set;
+            }
+            foreach (var zone in _zones.Values)
+            {
+                var zoneRect = new SKRectI((int)zone.X, (int)zone.Y, (int)(zone.X + zone.Width), (int)(zone.Y + zone.Height));
+                if (det.BoundingBox.IntersectsWith(zoneRect))
+                {
+                    set.Add(zone.ZoneId);
+                }
+            }
         }
     }
 
@@ -275,9 +309,16 @@ public class StepConditionEvaluator
 
                 bool inFrom = zoneFrom != null && fromRect.Contains(center);
                 bool inTo = zoneTo != null && toRect.Contains(center);
-                bool visitedFrom = hasFrom
-                    && _handTracks.TryGetValue(hand.TrackId, out var t2)
+                // from_region 约束：手或目标物体曾访问过起始区域都算数。
+                // 例如喝水 SOP 里起始区域是 mouth_region，但"喝水"这一步判定的是
+                // "杯子到达嘴边"（物体而非手），手轨迹里可能没有 mouth_region，
+                // 必须借助物体区域访问记录，否则放回步骤会一直卡在 visitedFrom=false。
+                bool visitedFromByHand = _handTracks.TryGetValue(hand.TrackId, out var t2)
                     && t2.RecentRegions.Contains(fromRegion);
+                bool visitedFromByObject = !string.IsNullOrEmpty(condition.TargetObject)
+                    && _objectVisitedRegions.TryGetValue(condition.TargetObject, out var objRegions)
+                    && objRegions.Contains(fromRegion);
+                bool visitedFrom = hasFrom && (visitedFromByHand || visitedFromByObject);
 
                 // [DEBUG] HandMoveFromTo 入口摘要：所有输入一目了然
                 Dbg(
