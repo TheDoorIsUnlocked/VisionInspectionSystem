@@ -158,9 +158,9 @@
                 <Setter Property="BorderThickness" Value="1"/>
                 <Setter Property="Padding" Value="0"/>
                 <Setter Property="Cursor" Value="Hand"/>
-                <Setter Property="MinWidth" Value="38"/>
-                <Setter Property="MinHeight" Value="32"/>
-                <Setter Property="FontSize" Value="15"/>
+                <Setter Property="Width" Value="32"/>
+                <Setter Property="Height" Value="32"/>
+                <Setter Property="FontSize" Value="13"/>
                 <Setter Property="FontWeight" Value="Bold"/>
                 <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
                 <Setter Property="Template">
