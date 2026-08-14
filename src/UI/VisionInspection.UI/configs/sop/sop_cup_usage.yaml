@@ -89,12 +89,11 @@ sop:
       description: "将杯子送到嘴边喝水"
       transitions: ["put_down_cup"]
       detection:
-        method: "hand_in_region"
-        hand: "any"
+        method: "object_in_zone"
+        target_object: "cup"
         region: "mouth_region"
         min_confidence: 0.6
-        stable_frames: 3
-        description: "手在嘴边区域稳定停留（mouth_region 须对准嘴，杯子到嘴边即视为喝水）"
+        description: "杯子（手拿着）到达嘴边区域即视为喝水——要求杯子确实出现在嘴边，而非仅有手部进入该区域"
 
     # 步骤4: 把水杯放回原位
     - id: "put_down_cup"

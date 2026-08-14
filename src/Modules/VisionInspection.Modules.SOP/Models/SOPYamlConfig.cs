@@ -664,7 +664,9 @@ public static class SOPYamlConverter
                 }
                 else if (action == "putdown")
                 {
-                    condition.Parameters["FromRegion"] = "";
+                    // 保留 FromRegion（如 mouth_region）：要求手曾访问过起始区域，
+                    // 避免"杯子本来就在桌面"被误判为已放下，也避免手空着碰目标区就判定放回。
+                    condition.Parameters["FromRegion"] = detection.FromRegion ?? "";
                     condition.Parameters["ToRegion"] = detection.ToRegion ?? "";
                     condition.TargetObject = detection.TargetObject ?? "";
                 }

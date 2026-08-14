@@ -324,7 +324,7 @@ public class StepConditionEvaluator
 
                 if (hasTo)
                 {
-                    // 放下：目标物体已到达目标区域（最直接的语义）
+                    // 主判据：目标物体（杯子）已到达目标区域（放下的最直接证据）
                     if (!string.IsNullOrEmpty(condition.TargetObject))
                     {
                         var targetObj = detections
@@ -343,26 +343,33 @@ public class StepConditionEvaluator
                                 return new ConditionCheckResult
                                 {
                                     IsMet = true,
-                                    Message = $"目标物体 '{condition.TargetObject}' 已从 {(hasFrom ? fromRegion : "手中")} 到达区域 {toRegion}"
+                                    Message = $"目标物体 '{condition.TargetObject}' 已到达区域 {toRegion}"
                                 };
                             }
                         }
                     }
 
-                    // 放下：手到达目标区域（指定起始区域时需曾访问过）
-                    if (inTo && (!hasFrom || visitedFrom))
-                        return new ConditionCheckResult { IsMet = true, Message = $"手部已到达区域 {toRegion}" };
+                    // 辅助判据：手到达目标区域 且 正握着目标物体（手把杯子放到该区域，
+                    // 而非空手碰一下就判定放回）
+                    if (inTo && (!hasFrom || visitedFrom) && handHoldingTarget)
+                        return new ConditionCheckResult
+                        {
+                            IsMet = true,
+                            Message = $"手部携带 '{condition.TargetObject}' 已到达区域 {toRegion}"
+                        };
 
                     return new ConditionCheckResult
                     {
                         IsMet = false,
                         Message = hasFrom
-                            ? $"手部尚未从 {fromRegion} 到达 {toRegion}"
-                            : $"手部尚未进入目标区域 {toRegion}"
+                            ? $"手部/物体尚未从 {fromRegion} 到达 {toRegion}（需携带 '{condition.TargetObject}'）"
+                            : $"'{condition.TargetObject}' 尚未进入目标区域 {toRegion}（需携带杯子）"
                     };
                 }
 
-                // 无目标区域：理解为"从起始区域离开"或"拿起目标物体"（pickup 语义）
+                // 无目标区域：理解为"从起始区域拿起目标物体"（pickup 语义）
+                // ⚠️ 修复：必须以"目标物体（杯子）确实被拿起"为判据，
+                //   不能再允许"手空着进入/离开起始区域"就判定拿起（杯子根本没出现）。
                 if (hasFrom)
                 {
                     // 必须先访问过起始区域，否则不能算"从该区域拿起"
@@ -375,11 +382,7 @@ public class StepConditionEvaluator
                         };
                     }
 
-                    // 判定 1：手已离开起始区域（拿起后离开）
-                    if (!inFrom)
-                        return new ConditionCheckResult { IsMet = true, Message = $"手部已离开区域 {fromRegion}" };
-
-                    // 判定 2：手仍在起始区域内，但已拿起目标物体（物体被握起）
+                    // 判定 1：手正握着目标物体（物体被握起）——最直接的"拿起"证据
                     if (handHoldingTarget)
                     {
                         return new ConditionCheckResult
@@ -389,7 +392,7 @@ public class StepConditionEvaluator
                         };
                     }
 
-                    // 判定 3：手仍在起始区域内，但目标物体 bbox 已离开起始区域
+                    // 判定 2：目标物体已离开起始区域（被拿走）——要求能检测到目标物体
                     if (!string.IsNullOrEmpty(condition.TargetObject))
                     {
                         var targetObj = detections
@@ -411,7 +414,7 @@ public class StepConditionEvaluator
                     return new ConditionCheckResult
                     {
                         IsMet = false,
-                        Message = $"手部仍在区域 {fromRegion} 内，尚未拿起目标 {condition.TargetObject}"
+                        Message = $"手部在区域 {fromRegion} 内，但未检测到 '{condition.TargetObject}' 被拿起（杯子需被拿起）"
                     };
                 }
 
