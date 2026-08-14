@@ -78,11 +78,6 @@
                 <MenuItem Header="📂 切换SOP工作流" Command="{Binding SwitchSOPWorkflowCommand}"/>
             </MenuItem>
             
-            <MenuItem Header="视图">
-                <MenuItem Header="📋 ROI列表" IsCheckable="True" IsChecked="True" 
-                         x:Name="ShowROIPanelMenuItem" Click="ShowROIPanelMenuItem_Click"/>
-            </MenuItem>
-            
             <MenuItem Header="配置">
                 <MenuItem Header="相机配置" Click="CameraConfigMenuItem_Click"/>
                 <MenuItem Header="模型管理" Click="ModelManagementMenuItem_Click"/>
@@ -123,6 +118,10 @@
                         </Style>
                     </ToggleButton.Style>
                 </ToggleButton>
+                <Button ToolTip="删除选中的ROI" Padding="8,4" Margin="2"
+                        Style="{StaticResource ButtonDanger}"
+                        Command="{Binding RoiEditorViewModel.DeleteSelectedROICommand}"
+                        Content="🗑"/>
                 <ComboBox Width="80" VerticalAlignment="Center" Margin="2" ToolTip="ROI形状"
                          SelectedIndex="0" SelectionChanged="ShapeComboBox_SelectionChanged">
                     <ComboBoxItem Content="矩形"/>
@@ -311,59 +310,6 @@
 
             <!-- 右侧面板 -->
             <DockPanel x:Name="RightPanel" Grid.Column="2" Margin="5,0,0,0" LastChildFill="True">
-                <!-- ROI列表 - 停靠在顶部 -->
-                <hc:Card x:Name="ROIPanel" DockPanel.Dock="Top" Header="ROI列表" Margin="0,0,0,5" Height="120">
-                    <ListBox ItemsSource="{Binding RoiEditorViewModel.ROIs}"
-                            SelectedItem="{Binding RoiEditorViewModel.SelectedROI}"
-                            BorderThickness="0">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="{Binding ROIName}" FontWeight="Bold" Margin="0,0,5,0"/>
-                                    <TextBlock Text="[" Opacity="0.5"/>
-                                    <TextBlock Text="{Binding ShapeType}" Opacity="0.5"/>
-                                    <TextBlock Text="]" Opacity="0.5"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </hc:Card>
-
-                <!-- 分隔条: ROI列表和SOP模块之间 -->
-                <GridSplitter x:Name="ROISplitter" DockPanel.Dock="Top" 
-                              Height="6"
-                              HorizontalAlignment="Stretch"
-                              VerticalAlignment="Center"
-                              Background="Transparent"
-                              ShowsPreview="False">
-                    <GridSplitter.Template>
-                        <ControlTemplate TargetType="GridSplitter">
-                            <Border Background="{TemplateBinding Background}" 
-                                    Height="6"
-                                    Cursor="SizeNS">
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal"/>
-                                        <VisualState x:Name="MouseOver">
-                                            <Storyboard>
-                                                <ColorAnimation Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                              To="#2196F3" Duration="0:0:0.2"/>
-                                            </Storyboard>
-                                        </VisualState>
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
-                                <Rectangle Width="40" 
-                                          Height="2" 
-                                          Fill="#CCCCCC" 
-                                          HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          RadiusX="1"
-                                          RadiusY="1"/>
-                            </Border>
-                        </ControlTemplate>
-                    </GridSplitter.Template>
-                </GridSplitter>
-
                 <!-- SOP流程显示 - 填充剩余空间 -->
                 <views:SOPModuleView x:Name="SOPModule" Margin="0,0,0,5"/>
 
