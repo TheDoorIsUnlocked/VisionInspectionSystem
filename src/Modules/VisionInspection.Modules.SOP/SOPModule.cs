@@ -567,7 +567,6 @@ public class SOPModule : IDetectionModule
                     }
                 }
             }
-            }
         }
         catch (Exception ex)
         {
