@@ -285,49 +285,115 @@ namespace VisionInspection.UI.Services
         }
 
         /// <summary>
-        /// 从模型中提取类别名称
+        /// 从模型中提取类别名称。
+        /// 兼容性要点（修复"扫描模型"报 JsonException）：
+        /// Ultralytics 导出的某些 ONNX 会把 names/classes/labels 元数据写成形如
+        /// {0: 'person'} 的单引号 Python 字典——这不是合法 JSON，直接 Deserialize 必抛 JsonException。
+        /// 以前即使有 catch{} 也会触发调试器 first-chance 异常弹窗。
+        /// 现改为：仅当值以 { 或 [ 开头才尝试 JSON 解析；非法 JSON 退化走逗号拆分；
+        /// 同时兼容「字典」与「数组」两种结构，value 为数字也能正确取出。
         /// </summary>
         private List<string> ExtractClassNames(InferenceSession session)
         {
             var classes = new List<string>();
-            
+
             try
             {
-                // 尝试从模型元数据获取类别信息
                 var metadata = session.ModelMetadata.CustomMetadataMap;
                 foreach (var kvp in metadata)
                 {
                     var key = kvp.Key.ToLower();
-                    if (key.Contains("names") || 
-                        key.Contains("classes") ||
-                        key.Contains("labels"))
+                    if (!key.Contains("names") && !key.Contains("classes") && !key.Contains("labels"))
+                        continue;
+
+                    var value = kvp.Value;
+                    if (string.IsNullOrWhiteSpace(value))
+                        continue;
+
+                    var trimmed = value.Trim();
+                    // 只对明显是 JSON（以 { 或 [ 开头）的值尝试解析，避免对普通文本/非法 JSON 触发 JsonException
+                    if (trimmed.StartsWith("{") || trimmed.StartsWith("["))
                     {
-                        var value = kvp.Value;
-                        // 尝试解析JSON格式的类别列表
-                        if (value.StartsWith("{") && value.EndsWith("}"))
+                        try
                         {
-                            try
+                            using var doc = JsonDocument.Parse(value);
+                            if (doc.RootElement.ValueKind == JsonValueKind.Object)
                             {
-                                var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(value);
-                                if (dict != null)
+                                var dict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(value);
+                                if (dict != null && dict.Count > 0)
                                 {
-                                    classes = dict.Values.ToList();
+                                    classes = dict.Values
+                                        .Select(v => v.ValueKind == JsonValueKind.String ? v.GetString()! : v.ToString())
+                                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                                        .ToList();
                                     return classes;
                                 }
                             }
-                            catch { }
+                            else if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                            {
+                                var arr = JsonSerializer.Deserialize<List<JsonElement>>(value);
+                                if (arr != null && arr.Count > 0)
+                                {
+                                    classes = arr
+                                        .Select(v => v.ValueKind == JsonValueKind.String ? v.GetString()! : v.ToString())
+                                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                                        .ToList();
+                                    return classes;
+                                }
+                            }
                         }
-                        
-                        // 尝试解析逗号分隔的列表
-                        classes = value.Split(',').Select(s => s.Trim()).Where(s => !string.IsNullOrEmpty(s)).ToList();
-                        if (classes.Count > 0)
-                            return classes;
+                        catch { }
                     }
+
+                    // 退化：按逗号拆分（容忍引号/空白）
+                    classes = value.Split(',')
+                        .Select(s => s.Trim().Trim('"', '\'').Trim())
+                        .Where(s => s.Length > 0)
+                        .ToList();
+                    if (classes.Count > 0)
+                        return classes;
                 }
             }
             catch { }
 
             return classes;
+        }
+
+        /// <summary>
+        /// 安全反序列化 Classes 字段（数据库存的是 JSON 数组字符串）。
+        /// 兼容脏数据：NULL / 空字符串 / 旧版本写入的非数组 JSON（如字典）都不会抛异常，
+        /// 失败时尽量按逗号拆分兜底，实在无法解析则返回空列表。
+        /// 这是修复"扫描模型"因 JsonException 崩溃的关键容错。
+        /// </summary>
+        private static List<string> SafeDeserializeClasses(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return new List<string>();
+
+            try
+            {
+                var list = JsonSerializer.Deserialize<List<string>>(raw);
+                if (list != null)
+                    return list;
+            }
+            catch (JsonException)
+            {
+                // 字段可能不是数组（例如旧版本写入的字典 {"0":"person"}），尝试按字典解析
+                try
+                {
+                    var dict = JsonSerializer.Deserialize<Dictionary<string, string>>(raw);
+                    if (dict != null && dict.Count > 0)
+                        return dict.Values.ToList();
+                }
+                catch (JsonException) { }
+            }
+
+            // 最后兜底：按逗号拆分（容忍引号/空白）
+            var fallback = raw.Split(',')
+                .Select(s => s.Trim().Trim('"', '\'').Trim())
+                .Where(s => s.Length > 0)
+                .ToList();
+            return fallback;
         }
 
         /// <summary>
@@ -466,9 +532,10 @@ namespace VisionInspection.UI.Services
                         Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? "" : reader.GetString(reader.GetOrdinal("Description")),
                         ModelPath = reader.GetString(reader.GetOrdinal("ModelPath")),
                         Type = (ModelType)reader.GetInt32(reader.GetOrdinal("Type")),
-                        Classes = reader.IsDBNull(reader.GetOrdinal("Classes"))
-                            ? new List<string>()
-                            : JsonSerializer.Deserialize<List<string>>(reader.GetString(reader.GetOrdinal("Classes"))) ?? new List<string>(),
+                        Classes = SafeDeserializeClasses(
+                            reader.IsDBNull(reader.GetOrdinal("Classes"))
+                                ? null
+                                : reader.GetString(reader.GetOrdinal("Classes"))),
                         InputSize = reader.GetInt32(reader.GetOrdinal("InputSize")),
                         ConfidenceThreshold = (float)reader.GetDouble(reader.GetOrdinal("ConfidenceThreshold")),
                         IouThreshold = (float)reader.GetDouble(reader.GetOrdinal("IouThreshold")),
@@ -509,9 +576,10 @@ namespace VisionInspection.UI.Services
                         Description = reader.IsDBNull(reader.GetOrdinal("Description")) ? "" : reader.GetString(reader.GetOrdinal("Description")),
                         ModelPath = reader.GetString(reader.GetOrdinal("ModelPath")),
                         Type = (ModelType)reader.GetInt32(reader.GetOrdinal("Type")),
-                        Classes = reader.IsDBNull(reader.GetOrdinal("Classes"))
-                            ? new List<string>()
-                            : JsonSerializer.Deserialize<List<string>>(reader.GetString(reader.GetOrdinal("Classes"))) ?? new List<string>(),
+                        Classes = SafeDeserializeClasses(
+                            reader.IsDBNull(reader.GetOrdinal("Classes"))
+                                ? null
+                                : reader.GetString(reader.GetOrdinal("Classes"))),
                         InputSize = reader.GetInt32(reader.GetOrdinal("InputSize")),
                         ConfidenceThreshold = (float)reader.GetDouble(reader.GetOrdinal("ConfidenceThreshold")),
                         IouThreshold = (float)reader.GetDouble(reader.GetOrdinal("IouThreshold")),
