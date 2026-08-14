@@ -62,6 +62,16 @@
                                         <Button Content="删除" Tag="{Binding}" Click="DeleteRegion_Click"
                                                 Margin="10,0,0,0" Padding="8,1" FontSize="11"/>
                                     </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                        <TextBlock Text="X" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="0,0,2,0"/>
+                                        <TextBox Text="{Binding Left, UpdateSourceTrigger=LostFocus}" Width="45" FontSize="11" Padding="2,1"/>
+                                        <TextBlock Text="Y" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                                        <TextBox Text="{Binding Top, UpdateSourceTrigger=LostFocus}" Width="45" FontSize="11" Padding="2,1"/>
+                                        <TextBlock Text="W" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                                        <TextBox Text="{Binding Width, UpdateSourceTrigger=LostFocus}" Width="45" FontSize="11" Padding="2,1"/>
+                                        <TextBlock Text="H" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                                        <TextBox Text="{Binding Height, UpdateSourceTrigger=LostFocus}" Width="45" FontSize="11" Padding="2,1"/>
+                                    </StackPanel>
                                 </StackPanel>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

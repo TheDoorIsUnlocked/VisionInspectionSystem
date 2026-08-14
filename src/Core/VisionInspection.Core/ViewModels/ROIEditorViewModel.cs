@@ -78,6 +78,15 @@ public partial class ROIEditorViewModel : ViewModelBase
         OnPropertyChanged(nameof(ROIs));
     }
 
+    /// <summary>
+    /// 转发 ROI 集合变化事件（Added/Removed/Modified/Cleared）
+    /// </summary>
+    public event EventHandler<ROIChangedEventArgs>? ROIChanged
+    {
+        add => _roiManager.ROIChanged += value;
+        remove => _roiManager.ROIChanged -= value;
+    }
+
     [RelayCommand]
     public void StartDrawing(SKPoint point)
     {
@@ -170,6 +179,14 @@ public partial class ROIEditorViewModel : ViewModelBase
         {
             CurrentShapeType = type;
         }
+    }
+
+    /// <summary>
+    /// 通知某个 ROI 的属性已变更（如 Rect 被拖拽调整），让界面重新绑定刷新
+    /// </summary>
+    public void NotifyROIPropertyChanged(ROI roi)
+    {
+        _roiManager.NotifyROIChanged(roi);
     }
 
     [RelayCommand]

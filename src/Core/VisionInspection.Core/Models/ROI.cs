@@ -1,4 +1,5 @@
 using SkiaSharp;
+using System.ComponentModel;
 
 namespace VisionInspection.Core.Models;
 
@@ -35,17 +36,101 @@ public abstract class ROI
 }
 
 /// <summary>
-/// 矩形 ROI
+/// 矩形 ROI（支持属性变更通知，供标定界面 X/Y/W/H 输入框双向绑定）
 /// </summary>
-public class RectangleROI : ROI
+public class RectangleROI : ROI, INotifyPropertyChanged
 {
-    public SKRectI Rect { get; set; }
+    private SKRectI _rect;
+
+    public SKRectI Rect
+    {
+        get => _rect;
+        set
+        {
+            if (_rect == value) return;
+            _rect = value;
+            OnPropertyChanged(nameof(Rect));
+            OnPropertyChanged(nameof(Left));
+            OnPropertyChanged(nameof(Top));
+            OnPropertyChanged(nameof(Right));
+            OnPropertyChanged(nameof(Bottom));
+            OnPropertyChanged(nameof(Width));
+            OnPropertyChanged(nameof(Height));
+        }
+    }
+
+    // 可绑定坐标/尺寸属性（同步 Rect）
+    public int Left
+    {
+        get => _rect.Left;
+        set
+        {
+            if (_rect.Left == value) return;
+            Rect = new SKRectI(value, _rect.Top, value + _rect.Width, _rect.Bottom);
+        }
+    }
+
+    public int Top
+    {
+        get => _rect.Top;
+        set
+        {
+            if (_rect.Top == value) return;
+            Rect = new SKRectI(_rect.Left, value, _rect.Right, value + _rect.Height);
+        }
+    }
+
+    public int Right
+    {
+        get => _rect.Right;
+        set
+        {
+            if (_rect.Right == value) return;
+            Rect = new SKRectI(_rect.Left, _rect.Top, value, _rect.Bottom);
+        }
+    }
+
+    public int Bottom
+    {
+        get => _rect.Bottom;
+        set
+        {
+            if (_rect.Bottom == value) return;
+            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Right, value);
+        }
+    }
+
+    public int Width
+    {
+        get => _rect.Width;
+        set
+        {
+            if (_rect.Width == value) return;
+            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Left + value, _rect.Bottom);
+        }
+    }
+
+    public int Height
+    {
+        get => _rect.Height;
+        set
+        {
+            if (_rect.Height == value) return;
+            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Right, _rect.Top + value);
+        }
+    }
+
     public float Rotation { get; set; }
 
     public RectangleROI()
     {
         ShapeType = ROIShapeType.Rectangle;
     }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected void OnPropertyChanged(string propertyName)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 
     public override SKPath GetPath()
     {

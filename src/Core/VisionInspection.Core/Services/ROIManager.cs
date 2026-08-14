@@ -77,6 +77,14 @@ public class ROIManager
     }
 
     /// <summary>
+    /// 通知指定 ROI 已被修改（属性变更，如 Rect/名称等）
+    /// </summary>
+    public void NotifyROIChanged(ROI roi)
+    {
+        ROIChanged?.Invoke(this, new ROIChangedEventArgs(roi, ROIChangeType.Modified));
+    }
+
+    /// <summary>
     /// 在指定 ROI 区域内进行检测
     /// </summary>
     public SKBitmap ExtractROIImage(SKBitmap image, string roiId)

@@ -1,9 +1,11 @@
 using SkiaSharp;
 using SkiaSharp.Views.WPF;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using VisionInspection.Core.Models;
+using VisionInspection.Core.Services;
 using VisionInspection.Core.ViewModels;
 
 namespace VisionInspection.UI.Controls;
@@ -56,6 +58,12 @@ public partial class ROIEditorControl : SKElement
     private SKPoint _dragStart;
     private ROI? _draggedROI;
 
+    // ROI 大小调整相关
+    private bool _isResizing;
+    private RectangleROI? _resizedROI;
+    private ResizeHandle _resizeHandle = ResizeHandle.None;
+    private SKRect _resizeStartRect;
+
     // 平移拖动相关
     private bool _isPanning;
     private SKPoint _panStart;
@@ -72,6 +80,15 @@ public partial class ROIEditorControl : SKElement
     // 双击检测
     private DateTime _lastClickTime;
     private const int DoubleClickInterval = 300; // 毫秒
+
+    // 缩放调整手柄枚举
+    private enum ResizeHandle
+    {
+        None,
+        TopLeft, TopCenter, TopRight,
+        MiddleLeft, MiddleRight,
+        BottomLeft, BottomCenter, BottomRight
+    }
 
     public ROIEditorControl()
     {
@@ -156,15 +173,83 @@ public partial class ROIEditorControl : SKElement
             if (e.OldValue is ROIEditorViewModel oldViewModel)
             {
                 oldViewModel.PropertyChanged -= control.OnViewModelPropertyChanged;
+                oldViewModel.ROIChanged -= control.OnViewModelROIChanged;
+                control.UnsubscribeROIs(oldViewModel.ROIs);
             }
             
             // 订阅新ViewModel的事件
             if (e.NewValue is ROIEditorViewModel newViewModel)
             {
                 newViewModel.PropertyChanged += control.OnViewModelPropertyChanged;
+                newViewModel.ROIChanged += control.OnViewModelROIChanged;
+                control.SubscribeROIs(newViewModel.ROIs);
             }
             
             control.InvalidateVisual();
+        }
+    }
+
+    private void OnViewModelROIChanged(object? sender, ROIChangedEventArgs e)
+    {
+        // ROI 集合/属性变化时重绘，并刷新单个属性的订阅
+        if (e.ChangeType == ROIChangeType.Added)
+            SubscribeROIs(ViewModel?.ROIs);
+        else if (e.ChangeType == ROIChangeType.Removed)
+        {
+            if (e.ROI is INotifyPropertyChanged npc)
+                npc.PropertyChanged -= OnROIPropertyChanged;
+        }
+        else if (e.ChangeType == ROIChangeType.Cleared)
+            UnsubscribeROIs(ViewModel?.ROIs);
+        InvalidateVisual();
+    }
+
+    private readonly Dictionary<ROI, PropertyChangedEventHandler> _roiPropertyHandlers = new();
+
+    private void SubscribeROIs(IReadOnlyList<ROI>? rois)
+    {
+        if (rois == null) return;
+        foreach (var roi in rois)
+        {
+            if (roi is not INotifyPropertyChanged npc || _roiPropertyHandlers.ContainsKey(roi))
+                continue;
+            PropertyChangedEventHandler handler = (s, e) => OnROIPropertyChanged(s, e);
+            _roiPropertyHandlers[roi] = handler;
+            npc.PropertyChanged += handler;
+        }
+    }
+
+    private void UnsubscribeROIs(IReadOnlyList<ROI>? rois)
+    {
+        if (rois == null)
+        {
+            foreach (var kv in _roiPropertyHandlers)
+            {
+                if (kv.Key is INotifyPropertyChanged npc)
+                    npc.PropertyChanged -= kv.Value;
+            }
+            _roiPropertyHandlers.Clear();
+            return;
+        }
+        foreach (var roi in rois)
+        {
+            if (_roiPropertyHandlers.TryGetValue(roi, out var handler) && roi is INotifyPropertyChanged npc)
+            {
+                npc.PropertyChanged -= handler;
+                _roiPropertyHandlers.Remove(roi);
+            }
+        }
+    }
+
+    private void OnROIPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // ROI 的 Rect/名称等属性变化时重绘画布
+        if (sender is ROI roi)
+        {
+            InvalidateVisual();
+            // Rect 整体变化时，刷新右侧列表的坐标摘要显示（只触发一次，避免 Left/Top/Width/Height 连发）
+            if (e.PropertyName == nameof(RectangleROI.Rect) && roi == ViewModel?.SelectedROI)
+                ViewModel.NotifyROIPropertyChanged(roi);
         }
     }
 
@@ -395,6 +480,91 @@ public partial class ROIEditorControl : SKElement
         canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Top - handleSize/2, bbox.Right + handleSize/2, bbox.Top + handleSize/2), handlePaint);
         canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, bbox.Bottom - handleSize/2, bbox.Left + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
         canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Bottom - handleSize/2, bbox.Right + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
+
+        // 四条边中点（共 8 个手柄）
+        float midX = (bbox.Left + bbox.Right) / 2;
+        float midY = (bbox.Top + bbox.Bottom) / 2;
+        canvas.DrawRect(new SKRect(midX - handleSize/2, bbox.Top - handleSize/2, midX + handleSize/2, bbox.Top + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(midX - handleSize/2, bbox.Bottom - handleSize/2, midX + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, midY - handleSize/2, bbox.Left + handleSize/2, midY + handleSize/2), handlePaint);
+        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, midY - handleSize/2, bbox.Right + handleSize/2, midY + handleSize/2), handlePaint);
+    }
+
+    /// <summary>
+    /// 检测鼠标是否落在某个缩放调整手柄上
+    /// </summary>
+    private ResizeHandle GetResizeHandleAtPoint(SKPoint point, RectangleROI roi)
+    {
+        var bbox = roi.GetBoundingBox();
+        float hitRadius = 10 / _zoomScale; // 手柄有效半径随缩放变化
+        float midX = (bbox.Left + bbox.Right) / 2f;
+        float midY = (bbox.Top + bbox.Bottom) / 2f;
+
+        if (Distance(point, new SKPoint(bbox.Left, bbox.Top)) < hitRadius) return ResizeHandle.TopLeft;
+        if (Distance(point, new SKPoint(midX, bbox.Top)) < hitRadius) return ResizeHandle.TopCenter;
+        if (Distance(point, new SKPoint(bbox.Right, bbox.Top)) < hitRadius) return ResizeHandle.TopRight;
+        if (Distance(point, new SKPoint(bbox.Left, midY)) < hitRadius) return ResizeHandle.MiddleLeft;
+        if (Distance(point, new SKPoint(bbox.Right, midY)) < hitRadius) return ResizeHandle.MiddleRight;
+        if (Distance(point, new SKPoint(bbox.Left, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomLeft;
+        if (Distance(point, new SKPoint(midX, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomCenter;
+        if (Distance(point, new SKPoint(bbox.Right, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomRight;
+
+        return ResizeHandle.None;
+    }
+
+    private static float Distance(SKPoint a, SKPoint b)
+    {
+        float dx = a.X - b.X;
+        float dy = a.Y - b.Y;
+        return MathF.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>
+    /// 根据目标手柄和鼠标当前图像坐标，更新 ROI 矩形
+    /// </summary>
+    private void UpdateResizedRect(SKPoint currentPoint)
+    {
+        if (_resizedROI == null || _resizeHandle == ResizeHandle.None) return;
+
+        float left = _resizeStartRect.Left;
+        float top = _resizeStartRect.Top;
+        float right = _resizeStartRect.Right;
+        float bottom = _resizeStartRect.Bottom;
+
+        switch (_resizeHandle)
+        {
+            case ResizeHandle.TopLeft:
+                left = Math.Min(currentPoint.X, right - 5);
+                top = Math.Min(currentPoint.Y, bottom - 5);
+                break;
+            case ResizeHandle.TopCenter:
+                top = Math.Min(currentPoint.Y, bottom - 5);
+                break;
+            case ResizeHandle.TopRight:
+                right = Math.Max(currentPoint.X, left + 5);
+                top = Math.Min(currentPoint.Y, bottom - 5);
+                break;
+            case ResizeHandle.MiddleLeft:
+                left = Math.Min(currentPoint.X, right - 5);
+                break;
+            case ResizeHandle.MiddleRight:
+                right = Math.Max(currentPoint.X, left + 5);
+                break;
+            case ResizeHandle.BottomLeft:
+                left = Math.Min(currentPoint.X, right - 5);
+                bottom = Math.Max(currentPoint.Y, top + 5);
+                break;
+            case ResizeHandle.BottomCenter:
+                bottom = Math.Max(currentPoint.Y, top + 5);
+                break;
+            case ResizeHandle.BottomRight:
+                right = Math.Max(currentPoint.X, left + 5);
+                bottom = Math.Max(currentPoint.Y, top + 5);
+                break;
+        }
+
+        _resizedROI.Rect = new SKRectI((int)left, (int)top, (int)right, (int)bottom);
+        ViewModel?.NotifyROIPropertyChanged(_resizedROI);
     }
 
     private void DrawEditingROI(SKCanvas canvas)
@@ -480,6 +650,23 @@ public partial class ROIEditorControl : SKElement
             return;
         }
 
+        // 检查是否点击了选中 ROI 的调整手柄（优先于平移 / 移动）
+        if (ViewModel.SelectedROI is RectangleROI selectedRect)
+        {
+            var handle = GetResizeHandleAtPoint(skPoint, selectedRect);
+            if (handle != ResizeHandle.None)
+            {
+                _isResizing = true;
+                _resizedROI = selectedRect;
+                _resizeHandle = handle;
+                _resizeStartRect = selectedRect.GetBoundingBox();
+                _dragStart = skPoint;
+                CaptureMouse();
+                e.Handled = true;
+                return;
+            }
+        }
+
         // 检查是否点击了ROI
         foreach (var roi in ViewModel.ROIs)
         {
@@ -535,8 +722,20 @@ public partial class ROIEditorControl : SKElement
             InvalidateVisual();
         }
 
-        // 更新鼠标光标
-        if (hoveredROI != null || _isDragging)
+        // 更新鼠标光标：优先显示 resize 光标（仅针对选中 ROI 的手柄）
+        if (ViewModel.SelectedROI is RectangleROI selectedRect && !_isResizing && !_isDragging && !_isPanning)
+        {
+            var handle = GetResizeHandleAtPoint(skPoint, selectedRect);
+            Cursor = handle switch
+            {
+                ResizeHandle.TopLeft or ResizeHandle.BottomRight => Cursors.SizeNWSE,
+                ResizeHandle.TopRight or ResizeHandle.BottomLeft => Cursors.SizeNESW,
+                ResizeHandle.MiddleLeft or ResizeHandle.MiddleRight => Cursors.SizeWE,
+                ResizeHandle.TopCenter or ResizeHandle.BottomCenter => Cursors.SizeNS,
+                _ => hoveredROI != null ? Cursors.Hand : Cursors.Arrow
+            };
+        }
+        else if (hoveredROI != null || _isDragging)
         {
             Cursor = Cursors.Hand;
         }
@@ -551,6 +750,14 @@ public partial class ROIEditorControl : SKElement
         else
         {
             Cursor = Cursors.Arrow;
+        }
+
+        if (_isResizing && _resizedROI != null)
+        {
+            // 拖拽调整 ROI 大小
+            UpdateResizedRect(skPoint);
+            e.Handled = true;
+            return;
         }
 
         if (_isDragging && _draggedROI != null)
@@ -585,6 +792,15 @@ public partial class ROIEditorControl : SKElement
 
         _isDragging = false;
         _draggedROI = null;
+
+        if (_isResizing)
+        {
+            _isResizing = false;
+            _resizedROI = null;
+            _resizeHandle = ResizeHandle.None;
+            ReleaseMouseCapture();
+            InvalidateVisual();
+        }
 
         if (_isPanning)
         {
