@@ -119,8 +119,8 @@ sop:
       transitions: ["idle"]
       detection:
         method: "time_elapsed"
-        duration_ms: 1000
-        description: "等待1秒后回到初始状态"
+        duration_ms: 0
+        description: "所有步骤完成后立即判定通过（duration_ms=0 表示不等待，到达此步即触发 SOP 全部通过）"
 
   # 违规定义（仅作说明/展示，引擎主要靠超时与跳步判定）
   violations:

@@ -972,11 +972,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
                 bool isWrist = type == HandKeypointType.Wrist;
                 // MCP 略小于指尖，便于区分层级
-                float radius = isTip ? 7 : (isWrist ? 8 : 6);
+                // 关键点半径缩小约 50%（原 tip=7/wrist=8/mcp=6 → 现 tip=4/wrist=4/mcp=3）
+                float radius = isTip ? 4 : (isWrist ? 4 : 3);
                 var paint = isTip ? tipPaint : (isWrist ? wristPaint : jointPaint);
 
-                // 绘制关键点外圈（白色描边）
-                canvas.DrawCircle(kp.X, kp.Y, radius + 3, keypointOutlinePaint);
+                // 绘制关键点外圈（白色描边，半径同步缩小）
+                canvas.DrawCircle(kp.X, kp.Y, radius + 2, keypointOutlinePaint);
                 // 绘制关键点
                 canvas.DrawCircle(kp.X, kp.Y, radius, paint);
 

@@ -635,7 +635,10 @@ public static class SOPYamlConverter
 
             case "time_elapsed":
                 condition.Type = ConditionType.TimeElapsed;
-                condition.Parameters["RequiredSeconds"] = detection.StableFrames; // 复用字段
+                // ⚠️ 修复：原先误用 detection.StableFrames（默认 5）作为 RequiredSeconds，
+                // 导致 YAML 的 duration_ms 被忽略、最后一步总是等 5 秒。
+                // 改为读取 duration_ms 并换算为秒，真正尊重配置（设 0 即立即通过）。
+                condition.Parameters["RequiredSeconds"] = (double)detection.DurationMs / 1000.0;
                 break;
 
             case "person_present":
