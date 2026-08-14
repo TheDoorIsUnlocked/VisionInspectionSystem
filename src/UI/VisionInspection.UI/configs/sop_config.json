@@ -9,33 +9,33 @@
       "ModelPath": "yolo_models/yolov8s-pose.onnx"
     }
   },
-  "RegionConfigPath": "configs/sop/regions/phone_usage_regions.json",
-  "WorkflowPath": "configs/sop/sop_phone_usage.yaml",
+  "RegionConfigPath": "configs/sop/regions/cup_usage_regions.json",
+  "WorkflowPath": "configs/sop/sop_cup_usage.yaml",
   "DetectionMode": "PoseBased",
   "HandDetectionBackend": "MediaPipe",
   "Steps": [
     {
       "Id": "idle",
       "Name": "等待",
-      "Description": "等待操作开始",
+      "Description": "等待人员开始操作",
       "Icon": "⏳"
     },
     {
-      "Id": "pickup_phone",
-      "Name": "拿起手机",
-      "Description": "检测手从桌面拿起手机动作",
-      "Icon": "📱"
+      "Id": "pickup_cup",
+      "Name": "拿起水杯",
+      "Description": "检测手从桌面拿起水杯动作",
+      "Icon": "🥤"
     },
     {
-      "Id": "make_call",
-      "Name": "打电话",
-      "Description": "检测手举到耳边进行通话",
-      "Icon": "📞"
+      "Id": "drink_water",
+      "Name": "用杯子喝水",
+      "Description": "检测手举杯到嘴边喝水",
+      "Icon": "💧"
     },
     {
-      "Id": "put_down_phone",
-      "Name": "放下手机",
-      "Description": "检测手将手机放回桌面",
+      "Id": "put_down_cup",
+      "Name": "放回水杯",
+      "Description": "检测手将水杯放回桌面",
       "Icon": "✋"
     },
     {
