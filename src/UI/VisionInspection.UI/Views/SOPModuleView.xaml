@@ -11,10 +11,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="6"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="6"/>
+            <RowDefinition Height="2*"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
@@ -119,92 +116,10 @@
             </ScrollViewer>
         </Border>
 
-        <!-- 分隔条1: 步骤列表和时间轴之间 -->
-        <GridSplitter Grid.Row="3" 
-                      HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch"
-                      Background="Transparent"
-                      ShowsPreview="False">
-            <GridSplitter.Template>
-                <ControlTemplate TargetType="GridSplitter">
-                    <Border Background="{TemplateBinding Background}" 
-                            Cursor="SizeNS">
-                        <VisualStateManager.VisualStateGroups>
-                            <VisualStateGroup x:Name="CommonStates">
-                                <VisualState x:Name="Normal"/>
-                                <VisualState x:Name="MouseOver">
-                                    <Storyboard>
-                                        <ColorAnimation Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                        To="#2196F3" Duration="0:0:0.2"/>
-                                    </Storyboard>
-                                </VisualState>
-                            </VisualStateGroup>
-                        </VisualStateManager.VisualStateGroups>
-                        <Rectangle Width="40" 
-                                   Height="2" 
-                                   Fill="#CCCCCC" 
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   RadiusX="1"
-                                   RadiusY="1"/>
-                    </Border>
-                </ControlTemplate>
-            </GridSplitter.Template>
-        </GridSplitter>
-
-        <!-- 步骤时间轴 -->
-        <Border Grid.Row="4" BorderBrush="#E8E8E8" BorderThickness="0,1,0,1" Background="#FAFAFA">
-            <Grid>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <Border Background="#F0F0F0" Padding="10,5">
-                    <TextBlock Text="⏱️ 步骤时间轴" FontSize="12" Foreground="#666" FontWeight="Medium"/>
-                </Border>
-                <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                    <StackPanel x:Name="TimelinePanel" Orientation="Horizontal" Margin="10,5">
-                        <!-- 时间轴项将通过代码动态添加 -->
-                    </StackPanel>
-                </ScrollViewer>
-            </Grid>
-        </Border>
-
-        <!-- 分隔条2: 时间轴和日志之间 -->
-        <GridSplitter Grid.Row="5" 
-                      HorizontalAlignment="Stretch"
-                      VerticalAlignment="Stretch"
-                      Background="Transparent"
-                      ShowsPreview="False">
-            <GridSplitter.Template>
-                <ControlTemplate TargetType="GridSplitter">
-                    <Border Background="{TemplateBinding Background}" 
-                            Cursor="SizeNS">
-                        <VisualStateManager.VisualStateGroups>
-                            <VisualStateGroup x:Name="CommonStates">
-                                <VisualState x:Name="Normal"/>
-                                <VisualState x:Name="MouseOver">
-                                    <Storyboard>
-                                        <ColorAnimation Storyboard.TargetProperty="(Border.Background).(SolidColorBrush.Color)"
-                                                        To="#2196F3" Duration="0:0:0.2"/>
-                                    </Storyboard>
-                                </VisualState>
-                            </VisualStateGroup>
-                        </VisualStateManager.VisualStateGroups>
-                        <Rectangle Width="40" 
-                                   Height="2" 
-                                   Fill="#CCCCCC" 
-                                   HorizontalAlignment="Center"
-                                   VerticalAlignment="Center"
-                                   RadiusX="1"
-                                   RadiusY="1"/>
-                    </Border>
-                </ControlTemplate>
-            </GridSplitter.Template>
-        </GridSplitter>
+        <!-- 步骤耗时已合并到上方流程卡片，此处不再显示独立时间轴 -->
 
         <!-- 日志输出 -->
-        <Border Grid.Row="6" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0">
+        <Border Grid.Row="3" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>

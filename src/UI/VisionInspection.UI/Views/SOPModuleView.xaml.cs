@@ -85,6 +85,16 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
+        /// 格式化单步耗时（小于1秒显示毫秒，否则显示秒）
+        /// </summary>
+        private static string FormatStepDuration(TimeSpan duration)
+        {
+            if (duration.TotalSeconds < 1)
+                return $"{duration.TotalMilliseconds:F0}ms";
+            return $"{duration.TotalSeconds:F1}s";
+        }
+
+        /// <summary>
         /// 开始计时
         /// </summary>
         public void StartTimer()
@@ -731,10 +741,30 @@ namespace VisionInspection.UI.Views
             Grid.SetColumn(contentPanel, 1);
             grid.Children.Add(contentPanel);
 
-            // 右侧：状态指示器
+            // 右侧：状态指示器 + 单步耗时
+            var rightPanel = new StackPanel
+            {
+                Orientation = Orientation.Vertical,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
             var statusIndicator = CreateHorizontalStatusIndicator(step.Status);
-            Grid.SetColumn(statusIndicator, 2);
-            grid.Children.Add(statusIndicator);
+            rightPanel.Children.Add(statusIndicator);
+
+            if (step.Duration > TimeSpan.Zero)
+            {
+                var durationText = new TextBlock
+                {
+                    Text = FormatStepDuration(step.Duration),
+                    FontSize = 10,
+                    Foreground = new SolidColorBrush(Colors.Gray),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    Margin = new Thickness(0, 4, 0, 0)
+                };
+                rightPanel.Children.Add(durationText);
+            }
+            Grid.SetColumn(rightPanel, 2);
+            grid.Children.Add(rightPanel);
 
             border.Child = grid;
             return border;
@@ -1260,7 +1290,7 @@ namespace VisionInspection.UI.Views
             {
                 SetStatus("实时检测中", new SolidColorBrush(Color.FromRgb(82, 196, 26)));
                 SetResult("检测中...", new SolidColorBrush(Colors.Gray));
-                ClearTimeline();
+                ClearStepDurations();
                 StartTimer();
                 UpdateRunButtonState(true);
                 AddLog($"SOP 实时检测已启动 | 模式: {viewModel.SOPModuleInstance?.DetectionMode}");
@@ -1330,7 +1360,8 @@ namespace VisionInspection.UI.Views
             Dispatcher.Invoke(() =>
             {
                 StopTimer();
-                UpdateTimeline(e.StepHistory);
+                // 将步骤时间轴的耗时统计合并到上方流程卡片
+                SyncStepDurationsFromStateMachine();
                 var isPass = !e.HasViolations;
                 if (isPass)
                 {
@@ -1376,6 +1407,8 @@ namespace VisionInspection.UI.Views
             {
                 SetCurrentStep(e.CurrentStepId - 1); // 转换为0-based索引
                 AddLog($"步骤推进: {e.PreviousStepId} → {e.CurrentStepId} ({e.StepName})");
+                // 同步已结束步骤的耗时到对应卡片
+                SyncStepDurationsFromStateMachine();
             });
         }
 
@@ -1418,179 +1451,49 @@ namespace VisionInspection.UI.Views
             AddLog("SOP检测流程完成，结果: OK");
         }
 
-        #region 时间轴功能
+        #region 步骤耗时同步
 
         /// <summary>
-        /// 更新步骤时间轴显示
+        /// 从 SOP 状态机 StepHistory 同步各步骤实际耗时到上方流程卡片
         /// </summary>
-        public void UpdateTimeline(IReadOnlyList<VisionInspection.Modules.SOP.Models.StepExecutionRecord>? stepHistory)
+        private void SyncStepDurationsFromStateMachine()
         {
-            TimelinePanel.Children.Clear();
+            var vm = GetMainViewModel();
+            var history = vm?.SOPModuleInstance?.StateMachine?.StepHistory;
+            if (history == null) return;
 
-            if (stepHistory == null || stepHistory.Count == 0)
+            bool changed = false;
+            foreach (var record in history)
             {
-                // 显示空状态
-                var emptyText = new TextBlock
+                var idx = record.StepId - 1;
+                if (idx >= 0 && idx < _steps.Count && _steps[idx].Duration != record.Duration)
                 {
-                    Text = "暂无步骤记录",
-                    Foreground = new SolidColorBrush(Colors.Gray),
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(20, 0, 0, 0)
-                };
-                TimelinePanel.Children.Add(emptyText);
-                return;
-            }
-
-            for (int i = 0; i < stepHistory.Count; i++)
-            {
-                var record = stepHistory[i];
-                var timelineItem = CreateTimelineItem(record, i == stepHistory.Count - 1);
-                TimelinePanel.Children.Add(timelineItem);
-            }
-        }
-
-        /// <summary>
-        /// 创建时间轴项
-        /// </summary>
-        private Border CreateTimelineItem(VisionInspection.Modules.SOP.Models.StepExecutionRecord record, bool isLast)
-        {
-            var panel = new StackPanel
-            {
-                Orientation = Orientation.Vertical,
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 0, isLast ? 0 : 5, 0)
-            };
-
-            // 步骤编号和连接线
-            var numberPanel = new Grid { Height = 30 };
-            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            numberPanel.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-            // 左侧连接线
-            if (!isLast)
-            {
-                var rightLine = new Border
-                {
-                    Background = new SolidColorBrush(Color.FromRgb(200, 200, 200)),
-                    Height = 2,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    Margin = new Thickness(5, 0, 0, 0)
-                };
-                Grid.SetColumn(rightLine, 2);
-                numberPanel.Children.Add(rightLine);
-            }
-
-            // 步骤编号圆圈
-            var circle = new Border
-            {
-                Width = 24,
-                Height = 24,
-                CornerRadius = new CornerRadius(12),
-                Background = record.IsPass
-                    ? new SolidColorBrush(Color.FromRgb(82, 196, 26))
-                    : new SolidColorBrush(Color.FromRgb(255, 77, 79)),
-                Child = new TextBlock
-                {
-                    Text = record.StepId.ToString(),
-                    Foreground = new SolidColorBrush(Colors.White),
-                    FontSize = 11,
-                    FontWeight = FontWeights.Bold,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                    VerticalAlignment = VerticalAlignment.Center
-                },
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            Grid.SetColumn(circle, 1);
-            numberPanel.Children.Add(circle);
-
-            panel.Children.Add(numberPanel);
-
-            // 步骤名称
-            var nameText = new TextBlock
-            {
-                Text = record.StepName,
-                FontSize = 10,
-                Foreground = new SolidColorBrush(Colors.DarkGray),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                MaxWidth = 60,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 5, 0, 0)
-            };
-            panel.Children.Add(nameText);
-
-            // 耗时
-            var durationText = new TextBlock
-            {
-                Text = $"{record.Duration.TotalSeconds:F1}s",
-                FontSize = 9,
-                Foreground = new SolidColorBrush(Colors.Gray),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 2, 0, 0)
-            };
-            panel.Children.Add(durationText);
-
-            var border = new Border
-            {
-                Child = panel,
-                Padding = new Thickness(5),
-                Cursor = System.Windows.Input.Cursors.Hand,
-                ToolTip = $"步骤 {record.StepId}: {record.StepName}\n开始: {record.StartTime:HH:mm:ss}\n结束: {record.EndTime:HH:mm:ss}\n耗时: {record.Duration.TotalSeconds:F1}秒\n结果: {(record.IsPass ? "通过" : "失败")}"
-            };
-
-            return border;
-        }
-
-        /// <summary>
-        /// 添加时间轴项（实时添加）
-        /// </summary>
-        public void AddTimelineItem(VisionInspection.Modules.SOP.Models.StepExecutionRecord record)
-        {
-            // 移除"暂无步骤记录"提示
-            if (TimelinePanel.Children.Count == 1 &&
-                TimelinePanel.Children[0] is TextBlock textBlock &&
-                textBlock.Text == "暂无步骤记录")
-            {
-                TimelinePanel.Children.Clear();
-            }
-
-            var timelineItem = CreateTimelineItem(record, true);
-
-            // 更新前一个项的连接线
-            if (TimelinePanel.Children.Count > 0)
-            {
-                var lastItem = TimelinePanel.Children[TimelinePanel.Children.Count - 1] as Border;
-                if (lastItem != null)
-                {
-                    // 重新创建前一个项（添加右侧连接线）
-                    var lastRecord = (lastItem.Tag as VisionInspection.Modules.SOP.Models.StepExecutionRecord);
-                    if (lastRecord != null)
-                    {
-                        var newLastItem = CreateTimelineItem(lastRecord, false);
-                        newLastItem.Tag = lastRecord;
-                        TimelinePanel.Children[TimelinePanel.Children.Count - 1] = newLastItem;
-                    }
+                    _steps[idx].Duration = record.Duration;
+                    changed = true;
                 }
             }
 
-            timelineItem.Tag = record;
-            TimelinePanel.Children.Add(timelineItem);
+            if (changed)
+                UpdateStepDisplay();
         }
 
         /// <summary>
-        /// 清空时间轴
+        /// 清空所有步骤的耗时显示（每次重新运行前调用）
         /// </summary>
-        public void ClearTimeline()
+        private void ClearStepDurations()
         {
-            TimelinePanel.Children.Clear();
-            var emptyText = new TextBlock
+            bool changed = false;
+            foreach (var step in _steps)
             {
-                Text = "暂无步骤记录",
-                Foreground = new SolidColorBrush(Colors.Gray),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(20, 0, 0, 0)
-            };
-            TimelinePanel.Children.Add(emptyText);
+                if (step.Duration > TimeSpan.Zero)
+                {
+                    step.Duration = TimeSpan.Zero;
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                UpdateStepDisplay();
         }
 
         #endregion
@@ -1608,6 +1511,8 @@ namespace VisionInspection.UI.Views
         public string Icon { get; set; } = "";
         public StepStatus Status { get; set; }
         public string ResultMessage { get; set; } = "";
+        /// <summary>该步骤实际耗时（从状态机 StepHistory 同步）</summary>
+        public TimeSpan Duration { get; set; }
     }
 
     /// <summary>
