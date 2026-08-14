@@ -176,6 +176,44 @@ public partial class SOPRegionEditorWindow : Window
         DialogResult = false;
         Close();
     }
+
+    /// <summary>右侧 X/Y/W/H 参数框按 Enter 时立即提交绑定并移焦到画面，便于查看效果</summary>
+    private void RoiParamTextBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter && sender is TextBox tb)
+        {
+            UpdateTextBindingSource(tb);
+            // 把焦点移回画布，触发 LostFocus 同时让用户看到 ROI 变化
+            RoiEditor.Focus();
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>右侧 X/Y/W/H 参数框失去焦点时显式写回绑定（兼容某些默认 TwoWay 不生效的场景）</summary>
+    private void RoiParamTextBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is TextBox tb)
+        {
+            UpdateTextBindingSource(tb);
+        }
+    }
+
+    private static void UpdateTextBindingSource(TextBox tb)
+    {
+        var expr = tb.GetBindingExpression(TextBox.TextProperty);
+        if (expr != null)
+        {
+            try
+            {
+                expr.UpdateSource();
+            }
+            catch (FormatException)
+            {
+                // 输入非数字，恢复源值（红框会提示）
+                expr.UpdateTarget();
+            }
+        }
+    }
 }
 
 /// <summary>把 ROI 转为坐标摘要文本（DataTemplate 用）</summary>

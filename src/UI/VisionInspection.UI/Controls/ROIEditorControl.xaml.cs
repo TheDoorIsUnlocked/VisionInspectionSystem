@@ -468,26 +468,45 @@ public partial class ROIEditorControl : SKElement
 
     private void DrawSelectionHandles(SKCanvas canvas, SKRect bbox)
     {
-        using var handlePaint = new SKPaint
+        // 手柄大小固定为屏幕像素，除以缩放得到画布坐标
+        float handleSize = 14 / _zoomScale;
+        float half = handleSize / 2;
+        float strokeWidth = 2 / _zoomScale;
+
+        // 白色填充 + 蓝色描边，提高对比度，更容易辨认
+        using var fillPaint = new SKPaint
         {
-            Color = new SKColor(0, 150, 255),
+            Color = SKColors.White,
             Style = SKPaintStyle.Fill
         };
+        using var strokePaint = new SKPaint
+        {
+            Color = new SKColor(0, 150, 255),
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = strokeWidth,
+            IsAntialias = true
+        };
 
-        float handleSize = 8 / _zoomScale;
+        void DrawHandle(float cx, float cy)
+        {
+            var rect = new SKRect(cx - half, cy - half, cx + half, cy + half);
+            canvas.DrawRect(rect, fillPaint);
+            canvas.DrawRect(rect, strokePaint);
+        }
+
         // 四个角
-        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, bbox.Top - handleSize/2, bbox.Left + handleSize/2, bbox.Top + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Top - handleSize/2, bbox.Right + handleSize/2, bbox.Top + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, bbox.Bottom - handleSize/2, bbox.Left + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, bbox.Bottom - handleSize/2, bbox.Right + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
+        DrawHandle(bbox.Left, bbox.Top);
+        DrawHandle(bbox.Right, bbox.Top);
+        DrawHandle(bbox.Left, bbox.Bottom);
+        DrawHandle(bbox.Right, bbox.Bottom);
 
         // 四条边中点（共 8 个手柄）
         float midX = (bbox.Left + bbox.Right) / 2;
         float midY = (bbox.Top + bbox.Bottom) / 2;
-        canvas.DrawRect(new SKRect(midX - handleSize/2, bbox.Top - handleSize/2, midX + handleSize/2, bbox.Top + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(midX - handleSize/2, bbox.Bottom - handleSize/2, midX + handleSize/2, bbox.Bottom + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(bbox.Left - handleSize/2, midY - handleSize/2, bbox.Left + handleSize/2, midY + handleSize/2), handlePaint);
-        canvas.DrawRect(new SKRect(bbox.Right - handleSize/2, midY - handleSize/2, bbox.Right + handleSize/2, midY + handleSize/2), handlePaint);
+        DrawHandle(midX, bbox.Top);
+        DrawHandle(midX, bbox.Bottom);
+        DrawHandle(bbox.Left, midY);
+        DrawHandle(bbox.Right, midY);
     }
 
     /// <summary>
@@ -496,18 +515,20 @@ public partial class ROIEditorControl : SKElement
     private ResizeHandle GetResizeHandleAtPoint(SKPoint point, RectangleROI roi)
     {
         var bbox = roi.GetBoundingBox();
-        float hitRadius = 10 / _zoomScale; // 手柄有效半径随缩放变化
+        // 命中半径放大到 20 屏幕像素，且随缩放变化，命中更容易
+        float hitRadius = 20 / _zoomScale;
         float midX = (bbox.Left + bbox.Right) / 2f;
         float midY = (bbox.Top + bbox.Bottom) / 2f;
 
+        // 优先命中角点（用户更常用），再命中边中点
         if (Distance(point, new SKPoint(bbox.Left, bbox.Top)) < hitRadius) return ResizeHandle.TopLeft;
-        if (Distance(point, new SKPoint(midX, bbox.Top)) < hitRadius) return ResizeHandle.TopCenter;
         if (Distance(point, new SKPoint(bbox.Right, bbox.Top)) < hitRadius) return ResizeHandle.TopRight;
+        if (Distance(point, new SKPoint(bbox.Left, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomLeft;
+        if (Distance(point, new SKPoint(bbox.Right, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomRight;
+        if (Distance(point, new SKPoint(midX, bbox.Top)) < hitRadius) return ResizeHandle.TopCenter;
         if (Distance(point, new SKPoint(bbox.Left, midY)) < hitRadius) return ResizeHandle.MiddleLeft;
         if (Distance(point, new SKPoint(bbox.Right, midY)) < hitRadius) return ResizeHandle.MiddleRight;
-        if (Distance(point, new SKPoint(bbox.Left, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomLeft;
         if (Distance(point, new SKPoint(midX, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomCenter;
-        if (Distance(point, new SKPoint(bbox.Right, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomRight;
 
         return ResizeHandle.None;
     }

@@ -66,7 +66,8 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Left == value) return;
-            Rect = new SKRectI(value, _rect.Top, value + _rect.Width, _rect.Bottom);
+            int newRight = Math.Max(value + MinSize, _rect.Right);
+            Rect = new SKRectI(value, _rect.Top, newRight, _rect.Bottom);
         }
     }
 
@@ -76,7 +77,8 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Top == value) return;
-            Rect = new SKRectI(_rect.Left, value, _rect.Right, value + _rect.Height);
+            int newBottom = Math.Max(value + MinSize, _rect.Bottom);
+            Rect = new SKRectI(_rect.Left, value, _rect.Right, newBottom);
         }
     }
 
@@ -86,7 +88,8 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Right == value) return;
-            Rect = new SKRectI(_rect.Left, _rect.Top, value, _rect.Bottom);
+            int newLeft = Math.Min(_rect.Left, value - MinSize);
+            Rect = new SKRectI(newLeft, _rect.Top, value, _rect.Bottom);
         }
     }
 
@@ -96,7 +99,8 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Bottom == value) return;
-            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Right, value);
+            int newTop = Math.Min(_rect.Top, value - MinSize);
+            Rect = new SKRectI(_rect.Left, newTop, _rect.Right, value);
         }
     }
 
@@ -106,7 +110,8 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Width == value) return;
-            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Left + value, _rect.Bottom);
+            int w = Math.Max(MinSize, value);
+            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Left + w, _rect.Bottom);
         }
     }
 
@@ -116,9 +121,12 @@ public class RectangleROI : ROI, INotifyPropertyChanged
         set
         {
             if (_rect.Height == value) return;
-            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Right, _rect.Top + value);
+            int h = Math.Max(MinSize, value);
+            Rect = new SKRectI(_rect.Left, _rect.Top, _rect.Right, _rect.Top + h);
         }
     }
+
+    private const int MinSize = 5;
 
     public float Rotation { get; set; }
 
