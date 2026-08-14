@@ -131,53 +131,88 @@ public class MediaPipeHandDetector : IDisposable
             return new List<HandPose>();
         }
 
+        // 在副本上做多遍抑制：palm 模型一遍通常只出 1 个框，
+        // 故每遍检完一只手就把该区域涂黑，再跑一遍逼出第 2 只手（最多 _maxNumHands 遍）。
+        var working = image.Copy();
+        if (working == null)
+        {
+            DebugLog("图像拷贝失败，直接在原图检测单遍");
+            working = image; // 兜底：不释放原图（调用方拥有），直接在原图单遍检测
+        }
+
         try
         {
-            // 第一阶段：手掌检测
-            var palmDetections = DetectPalms(image);
-            DebugLog($"手掌检测完成，检测到 {palmDetections.Count} 个手掌");
+            var hands = new List<HandPose>();
+            var detectedPalms = new List<PalmDetection>();
 
-            if (palmDetections.Count == 0)
+            for (int pass = 0; pass < _maxNumHands; pass++)
+            {
+                // 第一阶段：手掌检测（在已涂黑的副本上）
+                var palmDetections = DetectPalms(working);
+                DebugLog($"第{pass + 1}遍手掌检测完成，检测到 {palmDetections.Count} 个候选手掌");
+
+                if (palmDetections.Count == 0)
+                    break;
+
+                // 选置信度最高、且不与已检出手重叠（IoU>0.3）的候选框，避免重复选中同一只手
+                PalmDetection? best = null;
+                foreach (var p in palmDetections.OrderByDescending(p => p.Confidence))
+                {
+                    bool overlaps = detectedPalms.Any(d => PalmIoU(d, p) > 0.3f);
+                    if (!overlaps)
+                    {
+                        best = p;
+                        break;
+                    }
+                }
+                if (best == null)
+                    break;
+
+                // 第二阶段：对该手掌做关键点检测（从副本裁剪，已检出的手已被涂黑，不会污染）
+                var handPose = DetectHandLandmarks(working, best);
+
+                bool accepted = false;
+                if (handPose != null)
+                {
+                    float avgConfidence = handPose.Keypoints.Count > 0
+                        ? handPose.Keypoints.Average(kp => kp.Confidence)
+                        : 0;
+
+                    bool confOk = avgConfidence >= _keypointConfidenceThreshold;
+                    bool valid = ValidateHandPose(handPose);
+
+                    if (confOk && valid)
+                    {
+                        hands.Add(handPose);
+                        detectedPalms.Add(best);
+                        accepted = true;
+                        DebugLog($"第{pass + 1}遍: 检出第{hands.Count}只手 (score={best.Confidence:F3}, conf={avgConfidence:F3})");
+                    }
+                    else
+                    {
+                        DebugLog($"第{pass + 1}遍: 候选框验证失败 confOk={confOk} valid={valid}，涂黑后继续");
+                    }
+                }
+                else
+                {
+                    DebugLog($"第{pass + 1}遍: 关键点检测失败，涂黑后继续");
+                }
+
+                // 无论本遍是否成功，都把该候选区域涂黑：避免下一遍重复选中同一只手陷入死循环
+                MaskRegion(working, best);
+
+                if (accepted && hands.Count >= _maxNumHands)
+                    break;
+            }
+
+            if (hands.Count == 0)
             {
                 // 无检测，清空多手跟踪状态
                 lock (_trackLock) _trackedHands.Clear();
                 return new List<HandPose>();
             }
 
-            // 第二阶段：对每个检测到的手掌进行关键点检测
-            var hands = new List<HandPose>();
-            foreach (var palm in palmDetections.Take(_maxNumHands))
-            {
-                var handPose = DetectHandLandmarks(image, palm);
-                if (handPose != null)
-                    hands.Add(handPose);
-            }
-
-            if (hands.Count == 0)
-            {
-                lock (_trackLock) _trackedHands.Clear();
-                return new List<HandPose>();
-            }
-
-            // 验证 + 平滑
-            var hand = hands[0];
-            float avgConfidence = hand.Keypoints.Count > 0
-                ? hand.Keypoints.Average(kp => kp.Confidence)
-                : 0;
-
-            if (avgConfidence < _keypointConfidenceThreshold)
-            {
-                DebugLog($"置信度太低({avgConfidence:F3})，丢弃");
-                return new List<HandPose>();
-            }
-
-            if (!ValidateHandPose(hand))
-            {
-                DebugLog("姿态验证失败，丢弃");
-                return new List<HandPose>();
-            }
-
-            // 应用平滑
+            // 应用多手时间平滑
             var smoothedHands = ApplySmoothing(hands);
             DebugLog($"DetectHands 结束，返回 {smoothedHands.Count} 只手");
             return smoothedHands;
@@ -186,6 +221,12 @@ public class MediaPipeHandDetector : IDisposable
         {
             DebugLog($"检测异常: {ex.Message}");
             return new List<HandPose>();
+        }
+        finally
+        {
+            // 仅当 working 是独立副本时才释放，避免误释放调用方拥有的原图
+            if (working != image)
+                working.Dispose();
         }
     }
 
@@ -1024,13 +1065,20 @@ public class MediaPipeHandDetector : IDisposable
     }
 
     /// <summary>
-    /// 在图像上涂黑指定手掌区域，用于多遍抑制重跑（把已检出的手压掉，逼出第 2 只手）
+    /// 在图像上涂黑指定手掌区域，用于多遍抑制重跑（把已检出的手压掉，逼出第 2 只手）。
+    /// 涂黑框在原检测框基础上向外膨胀约 20%，确保手掌边缘不会被下一遍重新检出。
     /// </summary>
     private static void MaskRegion(SKBitmap image, PalmDetection d)
     {
+        float inflate = Math.Max(d.Width, d.Height) * 0.2f;
+        float x = Math.Max(0, d.X - inflate);
+        float y = Math.Max(0, d.Y - inflate);
+        float w = Math.Min(image.Width - x, d.Width + inflate * 2);
+        float h = Math.Min(image.Height - y, d.Height + inflate * 2);
+
         using var paint = new SKPaint { Color = SKColors.Black };
         using var canvas = new SKCanvas(image);
-        canvas.DrawRect(d.X, d.Y, d.Width, d.Height, paint);
+        canvas.DrawRect(x, y, w, h, paint);
     }
 
     /// <summary>
