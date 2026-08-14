@@ -152,6 +152,59 @@
                 </Setter>
             </Style>
 
+            <!-- 圆角图标按钮（工具栏小图标用，统一尺寸与圆角，Segoe UI Symbol 保证图标尺寸一致） -->
+            <Style x:Key="RoundedIconButton" TargetType="Button">
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="MinWidth" Value="38"/>
+                <Setter Property="MinHeight" Value="32"/>
+                <Setter Property="FontSize" Value="15"/>
+                <Setter Property="FontWeight" Value="Bold"/>
+                <Setter Property="FontFamily" Value="Segoe UI Symbol"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="8">
+                                <ContentPresenter HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Opacity" Value="0.88"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Opacity" Value="0.72"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Background" Value="#BDBDBD"/>
+                                    <Setter Property="BorderBrush" Value="#BDBDBD"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="RoundedIconButtonPrimary" TargetType="Button" BasedOn="{StaticResource RoundedIconButton}">
+                <Setter Property="Background" Value="#2196F3"/>
+                <Setter Property="BorderBrush" Value="#1976D2"/>
+            </Style>
+
+            <Style x:Key="RoundedIconButtonSuccess" TargetType="Button" BasedOn="{StaticResource RoundedIconButton}">
+                <Setter Property="Background" Value="#4CAF50"/>
+                <Setter Property="BorderBrush" Value="#388E3C"/>
+            </Style>
+
+            <Style x:Key="RoundedIconButtonDanger" TargetType="Button" BasedOn="{StaticResource RoundedIconButton}">
+                <Setter Property="Background" Value="#F44336"/>
+                <Setter Property="BorderBrush" Value="#D32F2F"/>
+            </Style>
+
         </ResourceDictionary>
     </Application.Resources>
 </Application>

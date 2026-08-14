@@ -158,8 +158,8 @@
                 <Separator Margin="5,0"/>
                 
                 <!-- 视频推理组 -->
-                <Button Content="▶️" ToolTip="开始视频推理" Command="{Binding StartVideoInferenceCommand}"
-                        Style="{StaticResource ButtonSuccess}" Margin="2" Padding="8,4">
+                <Button Content="▶" ToolTip="开始视频推理" Command="{Binding StartVideoInferenceCommand}"
+                        Style="{StaticResource RoundedIconButtonSuccess}" Margin="2">
                     <Button.IsEnabled>
                         <MultiBinding Converter="{StaticResource BooleanAndConverter}">
                             <Binding Path="IsModelLoaded"/>
@@ -167,10 +167,10 @@
                         </MultiBinding>
                     </Button.IsEnabled>
                 </Button>
-                <Button Content="⏹️" ToolTip="停止推理" Command="{Binding StopVideoInferenceCommand}" 
-                        Margin="2" Padding="8,4">
+                <Button Content="■" ToolTip="停止推理" Command="{Binding StopVideoInferenceCommand}" 
+                        Margin="2">
                     <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ButtonDanger}">
+                        <Style TargetType="Button" BasedOn="{StaticResource RoundedIconButtonDanger}">
                             <Setter Property="IsEnabled" Value="False"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsVideoPlaying}" Value="True">
@@ -220,9 +220,9 @@
                 
                 <!-- 图像旋转控制 -->
                 <Button Content="↺" ToolTip="向左旋转90°" Click="RotateLeftButton_Click"
-                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                        Style="{StaticResource RoundedIconButtonPrimary}" Margin="2"/>
                 <Button Content="↻" ToolTip="向右旋转90°" Click="RotateRightButton_Click"
-                        Style="{StaticResource ButtonPrimary}" Margin="2" Padding="8,4"/>
+                        Style="{StaticResource RoundedIconButtonPrimary}" Margin="2"/>
                 <TextBlock Text="{Binding RoiEditorViewModel.ImageRotationAngle, StringFormat='{}{0}°'}" 
                           VerticalAlignment="Center" Margin="5,0" Width="40"/>
                 <Separator Margin="5,0"/>
