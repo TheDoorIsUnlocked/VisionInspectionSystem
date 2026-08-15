@@ -158,18 +158,40 @@
                                     <TextBox Text="{Binding NewRegionPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="140" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
                                     <Button Content="➕ 添加" Command="{Binding AddRegionPresetCommand}" Style="{StaticResource ButtonPrimary}" Margin="6,0,0,0"/>
                                 </StackPanel>
-                                <ItemsControl ItemsSource="{Binding RegionPresets}" Height="100">
+                                <ItemsControl ItemsSource="{Binding RegionPresets}" MinHeight="36">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Background="White" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,0,0,4">
-                                                <DockPanel LastChildFill="False">
-                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#37474F"/>
-                                                    <Button Content="🗑" Command="{Binding DataContext.RemoveRegionPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
-                                                            Style="{StaticResource ButtonDanger}" Width="28" Height="22" FontSize="10" Padding="0" DockPanel.Dock="Right"/>
-                                                </DockPanel>
+                                            <Border Background="#E0F2F1" BorderBrush="#B2DFDB" BorderThickness="1" CornerRadius="14"
+                                                    Padding="10,4" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#00695C" FontWeight="SemiBold" FontSize="12"/>
+                                                    <Button Content="✕" Command="{Binding DataContext.RemoveRegionPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                            Style="{StaticResource ButtonDanger}" Width="18" Height="18" FontSize="9" Padding="0" Margin="8,0,0,0"
+                                                            ToolTip="删除该预设"/>
+                                                </StackPanel>
                                             </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
+                                    <ItemsControl.Style>
+                                        <Style TargetType="ItemsControl">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding RegionPresets.Count}" Value="0">
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ItemsControl">
+                                                                <TextBlock Text="（暂无区域预设）" Foreground="#90A4AE" FontStyle="Italic" FontSize="11" Margin="2,6"/>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ItemsControl.Style>
                                 </ItemsControl>
                             </StackPanel>
                         </Border>
@@ -182,18 +204,40 @@
                                     <TextBox Text="{Binding NewObjectPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="140" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
                                     <Button Content="➕ 添加" Command="{Binding AddObjectPresetCommand}" Style="{StaticResource ButtonPrimary}" Margin="6,0,0,0"/>
                                 </StackPanel>
-                                <ItemsControl ItemsSource="{Binding ObjectPresets}" Height="100">
+                                <ItemsControl ItemsSource="{Binding ObjectPresets}" MinHeight="36">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Background="White" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,0,0,4">
-                                                <DockPanel LastChildFill="False">
-                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#37474F"/>
-                                                    <Button Content="🗑" Command="{Binding DataContext.RemoveObjectPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
-                                                            Style="{StaticResource ButtonDanger}" Width="28" Height="22" FontSize="10" Padding="0" DockPanel.Dock="Right"/>
-                                                </DockPanel>
+                                            <Border Background="#FFF3E0" BorderBrush="#FFCC80" BorderThickness="1" CornerRadius="14"
+                                                    Padding="10,4" Margin="0,0,8,8">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#EF6C00" FontWeight="SemiBold" FontSize="12"/>
+                                                    <Button Content="✕" Command="{Binding DataContext.RemoveObjectPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                            Style="{StaticResource ButtonDanger}" Width="18" Height="18" FontSize="9" Padding="0" Margin="8,0,0,0"
+                                                            ToolTip="删除该预设"/>
+                                                </StackPanel>
                                             </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
+                                    <ItemsControl.Style>
+                                        <Style TargetType="ItemsControl">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding ObjectPresets.Count}" Value="0">
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ItemsControl">
+                                                                <TextBlock Text="（暂无物体预设）" Foreground="#90A4AE" FontStyle="Italic" FontSize="11" Margin="2,6"/>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ItemsControl.Style>
                                 </ItemsControl>
                             </StackPanel>
                         </Border>
