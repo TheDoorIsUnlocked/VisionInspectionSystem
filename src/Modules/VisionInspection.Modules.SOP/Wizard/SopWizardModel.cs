@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using VisionInspection.Modules.SOP.Models;
 using YamlDotNet.Serialization;
 
@@ -110,15 +111,53 @@ public class SopWizardInput
     /// <summary>是否在第一步骤前插入"等待人员就位"（person_present）</summary>
     public bool IncludePersonEntry { get; set; } = true;
 
-    /// <summary>选中的区域（id -> 区域定义，含坐标）</summary>
+    /// <summary>本流程使用的区域名称预设（英文标识，用于第③步下拉选择）</summary>
+    public List<string> RegionPresets { get; set; } = new();
+
+    /// <summary>本流程使用的物体名称预设（英文标识，用于第③步下拉选择）</summary>
+    public List<string> ObjectPresets { get; set; } = new();
+
+    /// <summary>选中的区域（预设名 -> 区域定义，含坐标）</summary>
     public Dictionary<string, SopyamlRegion> Regions { get; set; } = new();
 
     /// <summary>编排好的动作序列（顺序 = 流程顺序）</summary>
     public List<WizardAction> Actions { get; set; } = new();
 }
 
+/// <summary>区域/物体名称预设校验（禁止中文、空格及特殊字符，只允许英文标识符）</summary>
+public static class SopPresetValidator
+{
+    /// <summary>匹配仅含字母、数字、下划线、连字符，且不以数字开头的名称</summary>
+    private static readonly Regex ValidNameRegex = new("^[a-zA-Z_][a-zA-Z0-9_-]*$", RegexOptions.Compiled);
+
+    /// <summary>匹配任意 CJK 统一表意文字（中文）</summary>
+    private static readonly Regex ChineseRegex = new("[\u4e00-\u9fa5]", RegexOptions.Compiled);
+
+    public static bool IsValid(string name, out string reason)
+    {
+        reason = "";
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            reason = "名称不能为空。";
+            return false;
+        }
+        var trimmed = name.Trim();
+        if (ChineseRegex.IsMatch(trimmed))
+        {
+            reason = "禁止使用中文，请使用英文/数字/下划线/连字符。";
+            return false;
+        }
+        if (!ValidNameRegex.IsMatch(trimmed))
+        {
+            reason = "只能包含字母、数字、下划线和连字符，且不能以数字开头。";
+            return false;
+        }
+        return true;
+    }
+}
+
 /// <summary>
-/// 常用 COCO 物体类别（物体下拉建议项；也可手填自定义类别）
+/// 常用 COCO 物体类别（仅作参考；向导第①步的物体预设优先）
 /// </summary>
 public static class SopCocoClasses
 {
@@ -302,6 +341,10 @@ public class SopScenarioPreset
     public string Name { get; set; } = "";
     /// <summary>需要的区域角色提示（帮助用户知道要去标定哪些区域）</summary>
     public string RegionHint { get; set; } = "";
+    /// <summary>自动添加的区域预设（英文标识）</summary>
+    public List<string> RegionPresets { get; set; } = new();
+    /// <summary>自动添加的物体预设（英文标识）</summary>
+    public List<string> ObjectPresets { get; set; } = new();
     /// <summary>动作序列：(模板Key, 默认步骤名)</summary>
     public List<(string TemplateKey, string StepName)> Steps { get; set; } = new();
 }
@@ -316,7 +359,9 @@ public static class SopScenarios
         new SopScenarioPreset
         {
             Name = "喝水流程",
-            RegionHint = "需要区域：拿起水杯区、嘴边区域、放回水杯区",
+            RegionHint = "需要区域：pickup_zone（拿起水杯区）、mouth_zone（嘴边区域）、return_zone（放回水杯区）",
+            RegionPresets = new() { "pickup_zone", "mouth_zone", "return_zone" },
+            ObjectPresets = new() { "cup" },
             Steps = new()
             {
                 ("pickup", "拿起水杯"),
@@ -327,7 +372,9 @@ public static class SopScenarios
         new SopScenarioPreset
         {
             Name = "零件取放",
-            RegionHint = "需要区域：取料区、放料区",
+            RegionHint = "需要区域：pick_zone（取料区）、place_zone（放料区）",
+            RegionPresets = new() { "pick_zone", "place_zone" },
+            ObjectPresets = new() { "part" },
             Steps = new()
             {
                 ("pickup", "从取料区拿起"),
@@ -337,7 +384,9 @@ public static class SopScenarios
         new SopScenarioPreset
         {
             Name = "按钮操作",
-            RegionHint = "需要区域：按钮所在区；物体可填 button 或自定义类别",
+            RegionHint = "需要区域：button_zone（按钮所在区）",
+            RegionPresets = new() { "button_zone" },
+            ObjectPresets = new() { "button" },
             Steps = new()
             {
                 ("hand_near_object", "手靠近按钮"),

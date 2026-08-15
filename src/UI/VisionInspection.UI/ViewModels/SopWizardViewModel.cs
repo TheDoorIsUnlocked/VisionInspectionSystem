@@ -33,6 +33,13 @@ public partial class SopWizardViewModel : ObservableObject
     [ObservableProperty] private string _sopName = "";
     [ObservableProperty] private string _sopDescription = "";
     [ObservableProperty] private bool _includePersonEntry = true;
+
+    /// <summary>第①步定义的区域名称预设（英文标识）</summary>
+    [ObservableProperty] private ObservableCollection<string> _regionPresets = new();
+    /// <summary>第①步定义的物体名称预设（英文标识）</summary>
+    [ObservableProperty] private ObservableCollection<string> _objectPresets = new();
+    [ObservableProperty] private string _newRegionPreset = "";
+    [ObservableProperty] private string _newObjectPreset = "";
     #endregion
 
     #region 场景模板（一键预填动作）
@@ -57,6 +64,11 @@ public partial class SopWizardViewModel : ObservableObject
             var vm = new WizardActionVM(this, tpl) { StepName = stepName };
             Actions.Add(vm);
         }
+        // 自动添加场景需要的区域/物体预设（避免用户手填英文名）
+        foreach (var rp in preset.RegionPresets.Where(p => !RegionPresets.Contains(p)))
+            RegionPresets.Add(rp);
+        foreach (var op in preset.ObjectPresets.Where(p => !ObjectPresets.Contains(p)))
+            ObjectPresets.Add(op);
         IncludePersonEntry = true;
         StatusMessage = $"已套用「{preset.Name}」模板：{preset.RegionHint}";
     }
@@ -66,8 +78,10 @@ public partial class SopWizardViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<RegionSourceItem> _regionSources = new();
     [ObservableProperty] private RegionSourceItem? _selectedRegionSource;
     [ObservableProperty] private string _regionStatus = "点击下方「刷新区域来源」加载已标定区域的 SOP 文件";
-    [ObservableProperty] private ObservableCollection<RegionChoice> _availableRegions = new();
-    [ObservableProperty] private ObservableCollection<RegionOption> _selectedRegionOptions = new();
+    /// <summary>来源 SOP 文件里的所有区域（供第②步映射下拉）</summary>
+    [ObservableProperty] private ObservableCollection<RegionOption> _sourceRegionOptions = new();
+    /// <summary>区域预设 -> 来源区域 的映射（key=预设名, value=来源区域id）</summary>
+    [ObservableProperty] private ObservableCollection<RegionPresetMapping> _regionPresetMappings = new();
     #endregion
 
     #region ③ 编排动作
@@ -84,7 +98,6 @@ public partial class SopWizardViewModel : ObservableObject
     #endregion
 
     #region 供 UI 绑定的下拉数据
-    public List<string> CocoClasses => SopCocoClasses.Common;
     /// <summary>可手动添加的动作模板（排除自动追加的"完成"）</summary>
     public List<SopActionTemplate> AddableTemplates => SopActionCatalog.All.Where(t => !t.IsCompletion).ToList();
     public List<HandOption> HandOptions { get; } = new()
@@ -93,13 +106,16 @@ public partial class SopWizardViewModel : ObservableObject
         new HandOption("左手", "left"),
         new HandOption("右手", "right")
     };
-    /// <summary>动作编辑器中"区域"下拉的数据源（用户在第②步勾选的区域）</summary>
-    public ObservableCollection<RegionOption> RegionOptions => SelectedRegionOptions;
+    /// <summary>动作编辑器中"区域"下拉的数据源（来自第①步的区域预设）</summary>
+    public ObservableCollection<string> RegionOptions => RegionPresets;
+    /// <summary>动作编辑器中"物体"下拉的数据源（来自第①步的物体预设）</summary>
+    public ObservableCollection<string> ObjectOptions => ObjectPresets;
     #endregion
 
     public SopWizardViewModel()
     {
         LoadRegionSources();
+        RegionPresets.CollectionChanged += (_, _) => RebuildRegionPresetMappings();
     }
 
     #region 区域来源命令
@@ -121,42 +137,110 @@ public partial class SopWizardViewModel : ObservableObject
 
     partial void OnSelectedRegionSourceChanged(RegionSourceItem? value)
     {
-        if (value == null) { AvailableRegions.Clear(); return; }
+        if (value == null) { SourceRegionOptions.Clear(); RegionPresetMappings.Clear(); return; }
         LoadRegionsFromSource(value.Path);
     }
 
     private void LoadRegionsFromSource(string yamlPath)
     {
-        AvailableRegions.Clear();
+        SourceRegionOptions.Clear();
         var dict = SopRegionLibrary.LoadRegions(yamlPath);
         if (dict.Count == 0)
         {
             RegionStatus = $"该 SOP 文件没有已标定的区域。请先用「🎯 标定区域」在此文件里画好区域。";
+            RegionPresetMappings.Clear();
             return;
         }
         foreach (var (id, region) in dict.OrderBy(k => k.Key))
         {
-            var rc = new RegionChoice
-            {
-                Id = id,
-                Display = string.IsNullOrWhiteSpace(region.Name) ? id : $"{region.Name}（{id}）",
-                Region = region
-            };
-            rc.PropertyChanged += (_, e) =>
-            {
-                if (e.PropertyName == nameof(RegionChoice.IsSelected))
-                    SyncSelectedRegionOptions();
-            };
-            AvailableRegions.Add(rc);
+            var display = string.IsNullOrWhiteSpace(region.Name) ? id : $"{region.Name}（{id}）";
+            SourceRegionOptions.Add(new RegionOption { Id = id, Display = display });
         }
-        RegionStatus = $"已载入 {dict.Count} 个区域，请勾选本次流程用到的区域。";
+        RebuildRegionPresetMappings();
+        RegionStatus = $"已载入 {dict.Count} 个区域，请为左侧每个区域预设选择对应的已标定区域。";
     }
 
-    private void SyncSelectedRegionOptions()
+    /// <summary>根据当前 RegionPresets 和 SourceRegionOptions 重建映射表（尽量保留已有选择）</summary>
+    private void RebuildRegionPresetMappings()
     {
-        SelectedRegionOptions = new ObservableCollection<RegionOption>(
-            AvailableRegions.Where(r => r.IsSelected)
-                .Select(r => new RegionOption { Id = r.Id, Display = r.Display }));
+        var existing = RegionPresetMappings.ToDictionary(m => m.PresetName, m => m.SourceRegionId);
+        RegionPresetMappings.Clear();
+        foreach (var preset in RegionPresets)
+        {
+            var mapping = new RegionPresetMapping(preset, this);
+            if (existing.TryGetValue(preset, out var savedId) && SourceRegionOptions.Any(r => r.Id == savedId))
+                mapping.SourceRegionId = savedId;
+            else if (SourceRegionOptions.Any(r => r.Id == preset))
+                mapping.SourceRegionId = preset; // 自动匹配同名源区域
+            RegionPresetMappings.Add(mapping);
+        }
+    }
+    #endregion
+
+    #region ① 名称预设管理命令
+    [RelayCommand]
+    private void AddRegionPreset()
+    {
+        if (!SopPresetValidator.IsValid(NewRegionPreset, out var reason))
+        {
+            StatusMessage = $"⚠️ 区域预设：{reason}";
+            return;
+        }
+        var name = NewRegionPreset.Trim();
+        if (RegionPresets.Contains(name))
+        {
+            StatusMessage = "⚠️ 该区域预设已存在。";
+            return;
+        }
+        RegionPresets.Add(name);
+        NewRegionPreset = "";
+        StatusMessage = $"已添加区域预设：{name}";
+    }
+
+    [RelayCommand]
+    private void RemoveRegionPreset(string? name)
+    {
+        if (name == null) return;
+        RegionPresets.Remove(name);
+        // 同时清理已引用该预设的动作参数
+        foreach (var action in Actions)
+        {
+            foreach (var p in action.ParamEditors.Where(p => p.Spec.Kind == SopParamKind.Region && p.Value == name))
+                p.Value = "";
+        }
+        StatusMessage = $"已移除区域预设：{name}";
+    }
+
+    [RelayCommand]
+    private void AddObjectPreset()
+    {
+        if (!SopPresetValidator.IsValid(NewObjectPreset, out var reason))
+        {
+            StatusMessage = $"⚠️ 物体预设：{reason}";
+            return;
+        }
+        var name = NewObjectPreset.Trim();
+        if (ObjectPresets.Contains(name))
+        {
+            StatusMessage = "⚠️ 该物体预设已存在。";
+            return;
+        }
+        ObjectPresets.Add(name);
+        NewObjectPreset = "";
+        StatusMessage = $"已添加物体预设：{name}";
+    }
+
+    [RelayCommand]
+    private void RemoveObjectPreset(string? name)
+    {
+        if (name == null) return;
+        ObjectPresets.Remove(name);
+        foreach (var action in Actions)
+        {
+            foreach (var p in action.ParamEditors.Where(p => p.Spec.Kind == SopParamKind.Object && p.Value == name))
+                p.Value = "";
+        }
+        StatusMessage = $"已移除物体预设：{name}";
     }
     #endregion
 
@@ -232,16 +316,25 @@ public partial class SopWizardViewModel : ObservableObject
         {
             Name = SopName,
             Description = SopDescription,
-            IncludePersonEntry = IncludePersonEntry
+            IncludePersonEntry = IncludePersonEntry,
+            RegionPresets = RegionPresets.ToList(),
+            ObjectPresets = ObjectPresets.ToList()
         };
-        foreach (var rc in AvailableRegions.Where(r => r.IsSelected))
+
+        // 第②步：把区域预设映射到来源区域坐标
+        var sourceDict = SelectedRegionSource == null
+            ? new Dictionary<string, SopyamlRegion>()
+            : SopRegionLibrary.LoadRegions(SelectedRegionSource.Path);
+        foreach (var mapping in RegionPresetMappings.Where(m => !string.IsNullOrWhiteSpace(m.SourceRegionId)))
         {
-            var r = rc.Region;
-            input.Regions[rc.Id] = new SopyamlRegion
+            if (sourceDict.TryGetValue(mapping.SourceRegionId, out var r))
             {
-                X1 = r.X1, Y1 = r.Y1, X2 = r.X2, Y2 = r.Y2,
-                Name = r.Name, Description = r.Description, Color = r.Color
-            };
+                input.Regions[mapping.PresetName] = new SopyamlRegion
+                {
+                    X1 = r.X1, Y1 = r.Y1, X2 = r.X2, Y2 = r.Y2,
+                    Name = mapping.PresetName, Description = r.Description, Color = r.Color
+                };
+            }
         }
         foreach (var a in Actions)
             input.Actions.Add(a.Model);
@@ -266,18 +359,40 @@ public partial class SopWizardViewModel : ObservableObject
 
         var input = BuildInput();
 
-        // 引用区域完整性检查：动作里用到的区域必须已在第②步勾选
-        var selectedIds = new HashSet<string>(input.Regions.Keys, StringComparer.OrdinalIgnoreCase);
+        var regionPresetSet = new HashSet<string>(RegionPresets, StringComparer.OrdinalIgnoreCase);
+        var objectPresetSet = new HashSet<string>(ObjectPresets, StringComparer.OrdinalIgnoreCase);
+        var mappedRegions = new HashSet<string>(input.Regions.Keys, StringComparer.OrdinalIgnoreCase);
+
         foreach (var a in Actions)
         {
-            foreach (var p in a.Template.Params.Where(p => p.Kind == SopParamKind.Region))
+            foreach (var p in a.Template.Params)
             {
                 var v = a.Model.GetParam(p.Name);
-                if (!string.IsNullOrWhiteSpace(v) && !selectedIds.Contains(v))
+                if (string.IsNullOrWhiteSpace(v)) continue;
+
+                if (p.Kind == SopParamKind.Region)
                 {
-                    ValidationOk = false;
-                    ValidationMessage = $"⚠️ 动作「{a.StepName}」引用的区域「{v}」未在第②步勾选，请先勾选该区域。";
-                    return;
+                    if (!regionPresetSet.Contains(v))
+                    {
+                        ValidationOk = false;
+                        ValidationMessage = $"⚠️ 动作「{a.StepName}」引用的区域「{v}」不是预设区域，请先在第①步添加。";
+                        return;
+                    }
+                    if (!mappedRegions.Contains(v))
+                    {
+                        ValidationOk = false;
+                        ValidationMessage = $"⚠️ 区域「{v}」未在第②步映射到已标定区域，请先选择坐标来源。";
+                        return;
+                    }
+                }
+                else if (p.Kind == SopParamKind.Object)
+                {
+                    if (!objectPresetSet.Contains(v))
+                    {
+                        ValidationOk = false;
+                        ValidationMessage = $"⚠️ 动作「{a.StepName}」引用的物体「{v}」不是预设物体，请先在第①步添加。";
+                        return;
+                    }
                 }
             }
         }
@@ -364,13 +479,21 @@ public class RegionSourceItem
     public override string ToString() => Name;
 }
 
-/// <summary>第②步中可勾选的区域</summary>
-public partial class RegionChoice : ObservableObject
+/// <summary>第②步中区域预设到来源区域的映射</summary>
+public partial class RegionPresetMapping : ObservableObject
 {
-    public string Id { get; set; } = "";
-    public string Display { get; set; } = "";
-    public SopyamlRegion Region { get; set; } = new();
-    [ObservableProperty] private bool _isSelected;
+    private readonly SopWizardViewModel _owner;
+
+    public RegionPresetMapping(string presetName, SopWizardViewModel owner)
+    {
+        PresetName = presetName;
+        _owner = owner;
+    }
+
+    public string PresetName { get; }
+    public ObservableCollection<RegionOption> SourceOptions => _owner.SourceRegionOptions;
+
+    [ObservableProperty] private string _sourceRegionId = "";
 }
 
 /// <summary>区域下拉选项</summary>
@@ -431,8 +554,8 @@ public partial class ParamProxy : ObservableObject
         _spec = spec;
     }
     public SopParamSpec Spec => _spec;
-    public ObservableCollection<RegionOption> RegionOptions => _owner.Owner.RegionOptions;
-    public List<string> ObjectOptions => _owner.Owner.CocoClasses;
+    public ObservableCollection<string> RegionOptions => _owner.Owner.RegionOptions;
+    public ObservableCollection<string> ObjectOptions => _owner.Owner.ObjectOptions;
     public List<HandOption> HandOptions => _owner.Owner.HandOptions;
 
     [ObservableProperty] private string _value = "";

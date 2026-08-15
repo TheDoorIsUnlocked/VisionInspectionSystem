@@ -40,12 +40,12 @@
                            Foreground="#455A64" FontSize="12" TextWrapping="Wrap"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
                     <ComboBox Width="200" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Region}"
-                              ItemsSource="{Binding RegionOptions}" DisplayMemberPath="Display"
-                              SelectedValuePath="Id" SelectedValue="{Binding Value, Mode=TwoWay}"
-                              ToolTip="选择已标定的区域"/>
+                              ItemsSource="{Binding RegionOptions}"
+                              SelectedValue="{Binding Value, Mode=TwoWay}"
+                              ToolTip="选择第①步预设的区域"/>
                     <ComboBox Width="200" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Object}"
-                              ItemsSource="{Binding ObjectOptions}" IsEditable="True"
-                              Text="{Binding Value, Mode=TwoWay}" ToolTip="选择或输入物体类别（COCO 名称）"/>
+                              ItemsSource="{Binding ObjectOptions}"
+                              SelectedValue="{Binding Value, Mode=TwoWay}" ToolTip="选择第①步预设的物体"/>
                     <ComboBox Width="140" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Hand}"
                               ItemsSource="{Binding HandOptions}" DisplayMemberPath="Display"
                               SelectedValuePath="Value" SelectedValue="{Binding Value, Mode=TwoWay}"/>
@@ -133,7 +133,7 @@
                 <!-- 步骤① 基本信息 -->
                 <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=1}">
                     <TextBlock Text="第一步：填写基本信息" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
-                    <TextBlock Text="给这套作业流程起个名字，并选择是否需要在第一步等待人员就位。" Foreground="#607D8B" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                    <TextBlock Text="给这套作业流程起个名字，再预先定义本流程会用到的区域和物体名称（英文）。之后在第③步直接下拉选择，禁止手填中文。" Foreground="#607D8B" Margin="0,0,0,10" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4">
                         <TextBlock Text="SOP 名称：" Width="100" VerticalAlignment="Center"/>
                         <TextBox Text="{Binding SopName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="360" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
@@ -142,9 +142,66 @@
                         <TextBlock Text="流程描述：" Width="100" VerticalAlignment="Top" Margin="0,4,0,0"/>
                         <TextBox Text="{Binding SopDescription, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="360" Height="60" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
                     </StackPanel>
+
+                    <!-- 区域/物体预设 -->
+                    <Grid Margin="0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- 区域预设 -->
+                        <Border Grid.Column="0" Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,6,0">
+                            <StackPanel>
+                                <TextBlock Text="📍 区域预设" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,6"/>
+                                <TextBlock Text="如 pickup_zone、mouth_zone（英文，禁止中文）" Foreground="#78909C" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBox Text="{Binding NewRegionPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="140" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
+                                    <Button Content="➕ 添加" Command="{Binding AddRegionPresetCommand}" Style="{StaticResource ButtonPrimary}" Margin="6,0,0,0"/>
+                                </StackPanel>
+                                <ItemsControl ItemsSource="{Binding RegionPresets}" Height="100">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="White" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,0,0,4">
+                                                <DockPanel LastChildFill="False">
+                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#37474F"/>
+                                                    <Button Content="🗑" Command="{Binding DataContext.RemoveRegionPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                            Style="{StaticResource ButtonDanger}" Width="28" Height="22" FontSize="10" Padding="0" DockPanel.Dock="Right"/>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                        <!-- 物体预设 -->
+                        <Border Grid.Column="1" Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="6,0,0,0">
+                            <StackPanel>
+                                <TextBlock Text="📦 物体预设" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,6"/>
+                                <TextBlock Text="如 cup、part、button（英文，对应模型类别）" Foreground="#78909C" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                    <TextBox Text="{Binding NewObjectPreset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="140" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
+                                    <Button Content="➕ 添加" Command="{Binding AddObjectPresetCommand}" Style="{StaticResource ButtonPrimary}" Margin="6,0,0,0"/>
+                                </StackPanel>
+                                <ItemsControl ItemsSource="{Binding ObjectPresets}" Height="100">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="White" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="4" Padding="4" Margin="0,0,0,4">
+                                                <DockPanel LastChildFill="False">
+                                                    <TextBlock Text="{Binding}" VerticalAlignment="Center" Foreground="#37474F"/>
+                                                    <Button Content="🗑" Command="{Binding DataContext.RemoveObjectPresetCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                                            Style="{StaticResource ButtonDanger}" Width="28" Height="22" FontSize="10" Padding="0" DockPanel.Dock="Right"/>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
                     <Border Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8">
                         <StackPanel>
-                            <TextBlock Text="🚀 或从场景模板开始（一键预填动作，再改名字/区域）" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,6"/>
+                            <TextBlock Text="🚀 或从场景模板开始（一键预填区域/物体/动作）" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,6"/>
                             <StackPanel Orientation="Horizontal">
                                 <ComboBox ItemsSource="{Binding ScenarioNames}" SelectedItem="{Binding SelectedScenario, Mode=TwoWay}"
                                           Width="200" VerticalAlignment="Center"/>
@@ -158,8 +215,8 @@
 
                 <!-- 步骤② 选择区域 -->
                 <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=2}">
-                    <TextBlock Text="第二步：选择区域（复用已标定区域）" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
-                    <TextBlock Text="区域坐标已在「🎯 标定区域」里画好并保存在某个 SOP 文件中。选好来源后，勾选本次流程用到的区域即可，无需手填坐标。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <TextBlock Text="第二步：把区域预设映射到已标定区域" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <TextBlock Text="区域坐标已在「🎯 标定区域」里画好并保存在某个 SOP 文件中。为第①步的每个区域预设选择一个来源区域，生成 YAML 时会用预设名作为区域名、并继承来源区域的坐标。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4">
                         <Button Content="🔄 刷新区域来源" Command="{Binding LoadRegionSourcesCommand}" Style="{StaticResource ButtonInfo}" Margin="0,0,8,0"/>
                         <ComboBox ItemsSource="{Binding RegionSources}" SelectedItem="{Binding SelectedRegionSource, Mode=TwoWay}"
@@ -167,21 +224,46 @@
                     </StackPanel>
                     <TextBlock Text="{Binding RegionStatus}" Foreground="#78909C" Margin="0,6" TextWrapping="Wrap"/>
                     <Border Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,6">
-                        <ItemsControl ItemsSource="{Binding AvailableRegions}">
+                        <ItemsControl ItemsSource="{Binding RegionPresetMappings}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <CheckBox Content="{Binding Display}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="3,4" Foreground="#37474F"/>
+                                    <Grid Margin="0,4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="160"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding PresetName}" VerticalAlignment="Center" Foreground="#37474F" FontWeight="SemiBold"/>
+                                        <ComboBox Grid.Column="1" Width="300" HorizontalAlignment="Left"
+                                                  ItemsSource="{Binding SourceOptions}" DisplayMemberPath="Display"
+                                                  SelectedValuePath="Id" SelectedValue="{Binding SourceRegionId, Mode=TwoWay}"
+                                                  ToolTip="选择该预设对应的已标定区域"/>
+                                    </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding RegionPresetMappings.Count}" Value="0">
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ItemsControl">
+                                                        <TextBlock Text="（第①步还没有区域预设，请先返回上一步添加）" Foreground="#90A4AE" FontStyle="Italic" Margin="4"/>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
                         </ItemsControl>
                     </Border>
-                    <TextBlock Text="💡 没看到区域？请先在「🎯 标定区域」里打开某个 SOP 文件画好区域并保存。" Foreground="#90A4AE" FontSize="11" Margin="0,6" TextWrapping="Wrap"/>
+                    <TextBlock Text="💡 没看到区域？请先在「🎯 标定区域」里打开某个 SOP 文件画好区域并保存。若预设名和某个源区域同名，会自动匹配。" Foreground="#90A4AE" FontSize="11" Margin="0,6" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <!-- 步骤③ 编排动作 -->
                 <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=3}">
                     <TextBlock Text="第三步：编排动作（按顺序）" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
-                    <TextBlock Text="点「+ 添加动作」选择动作类型，再填写出现的参数。列表顺序就是流程顺序，可用 ↑/↓ 调整。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <TextBlock Text="点「+ 添加动作」选择动作类型，区域和物体都从第①步的预设里下拉选择（禁止手填中文）。列表顺序就是流程顺序，可用 ↑/↓ 调整。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4">
                         <ComboBox ItemsSource="{Binding AddableTemplates}" SelectedValue="{Binding AddActionTemplateKey, Mode=TwoWay}"
                                   SelectedValuePath="Key" DisplayMemberPath="Label" Width="220" ToolTip="选择动作类型"/>
