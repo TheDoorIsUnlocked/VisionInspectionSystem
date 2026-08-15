@@ -131,7 +131,7 @@
                 
                 <!-- 模型和检测组 -->
                 <Button Content="🧠" ToolTip="加载模型" Command="{Binding LoadModelCommand}"
-                        Style="{StaticResource ButtonInfo}" Margin="2" Padding="8,4"/>
+                        Style="{StaticResource RoundedEmojiButtonInfo}" Margin="2"/>
                 <TextBlock Text="{Binding LoadedModelName}" VerticalAlignment="Center" Margin="5,0" Width="100"
                           TextTrimming="CharacterEllipsis" ToolTip="{Binding LoadedModelName}">
                     <TextBlock.Style>
@@ -147,7 +147,7 @@
                     </TextBlock.Style>
                 </TextBlock>
                 <Button Content="🔍" ToolTip="开始检测" Command="{Binding RunDetectionCommand}"
-                        Style="{StaticResource ButtonSuccess}" Margin="2" Padding="8,4">
+                        Style="{StaticResource RoundedEmojiButtonSuccess}" Margin="2">
                     <Button.IsEnabled>
                         <MultiBinding Converter="{StaticResource BooleanAndConverter}">
                             <Binding Path="IsModelLoaded"/>
@@ -187,9 +187,9 @@
                 
                 <!-- 实时相机检测组 -->
                 <Button Content="📷" ToolTip="开始实时检测" Command="{Binding StartRealTimeDetectionCommand}"
-                        Margin="2" Padding="8,4">
+                        Margin="2">
                     <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ButtonSuccess}">
+                        <Style TargetType="Button" BasedOn="{StaticResource RoundedEmojiButtonSuccess}">
                             <Setter Property="IsEnabled" Value="False"/>
                             <Style.Triggers>
                                 <MultiDataTrigger>
@@ -204,9 +204,9 @@
                     </Button.Style>
                 </Button>
                 <Button Content="🛑" ToolTip="停止实时检测" Command="{Binding StopRealTimeDetectionCommand}" 
-                        Margin="2" Padding="8,4">
+                        Margin="2">
                     <Button.Style>
-                        <Style TargetType="Button" BasedOn="{StaticResource ButtonDanger}">
+                        <Style TargetType="Button" BasedOn="{StaticResource RoundedEmojiButtonDanger}">
                             <Setter Property="IsEnabled" Value="False"/>
                             <Style.Triggers>
                                 <DataTrigger Binding="{Binding IsRealTimeDetecting}" Value="True">

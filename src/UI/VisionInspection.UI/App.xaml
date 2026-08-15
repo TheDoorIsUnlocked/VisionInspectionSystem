@@ -205,6 +205,56 @@
                 <Setter Property="BorderBrush" Value="#D32F2F"/>
             </Style>
 
+            <!-- 圆角图标按钮-emoji版（30x30, 圆角6, 保留emoji字体, 用于🔍📷🛑🧠等彩色图标） -->
+            <Style x:Key="RoundedEmojiButton" TargetType="Button">
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="Padding" Value="0"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Width" Value="30"/>
+                <Setter Property="Height" Value="30"/>
+                <Setter Property="FontSize" Value="16"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    CornerRadius="6">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Opacity" Value="0.88"/>
+                                </Trigger>
+                                <Trigger Property="IsPressed" Value="True">
+                                    <Setter Property="Opacity" Value="0.72"/>
+                                </Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter Property="Background" Value="#BDBDBD"/>
+                                    <Setter Property="BorderBrush" Value="#BDBDBD"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style x:Key="RoundedEmojiButtonInfo" TargetType="Button" BasedOn="{StaticResource RoundedEmojiButton}">
+                <Setter Property="Background" Value="#00BCD4"/>
+                <Setter Property="BorderBrush" Value="#0097A7"/>
+            </Style>
+
+            <Style x:Key="RoundedEmojiButtonSuccess" TargetType="Button" BasedOn="{StaticResource RoundedEmojiButton}">
+                <Setter Property="Background" Value="#4CAF50"/>
+                <Setter Property="BorderBrush" Value="#388E3C"/>
+            </Style>
+
+            <Style x:Key="RoundedEmojiButtonDanger" TargetType="Button" BasedOn="{StaticResource RoundedEmojiButton}">
+                <Setter Property="Background" Value="#F44336"/>
+                <Setter Property="BorderBrush" Value="#D32F2F"/>
+            </Style>
+
         </ResourceDictionary>
     </Application.Resources>
 </Application>
