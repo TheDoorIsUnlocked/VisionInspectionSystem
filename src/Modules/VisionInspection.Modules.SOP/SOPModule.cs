@@ -142,6 +142,55 @@ public class SOPModule : IDetectionModule
     /// </summary>
     public event EventHandler<string>? ModelWarning;
 
+    /// <summary>
+    /// 主检测计算设备变化通知（true=GPU/CUDA，false=CPU）。
+    /// 用于界面切换开关与实际状态保持同步（例如 CUDA 不可用时自动回退 CPU）。
+    /// </summary>
+    public event EventHandler<bool>? UseGpuChanged;
+
+    /// <summary>
+    /// 尝试切换到 GPU 但 CUDA 不可用、已回退 CPU 时触发，供界面给出告警。
+    /// </summary>
+    public event EventHandler? GpuSwitchFailed;
+
+    /// <summary>
+    /// 当前主检测是否运行在 GPU 上。
+    /// </summary>
+    public bool IsUsingGpu => _config?.UseGpu ?? false;
+
+    /// <summary>
+    /// 运行时切换主检测的计算设备（GPU/CPU）。切换会释放并重建 YOLO 推理会话，立即生效。
+    /// 返回切换后的最终状态（CUDA 不可用时自动回退 CPU 并返回 false）。
+    /// </summary>
+    public async Task<bool> SetUseGpuAsync(bool useGpu)
+    {
+        if (_config == null) return false;
+
+        // 无变化且模型已加载则不重建
+        if (_yolo != null && _config.UseGpu == useGpu)
+            return _config.UseGpu;
+
+        // 释放旧会话并清空缓存，绕过 LoadYoloAsync 内部"路径未变跳过重建"逻辑
+        try { _yolo?.Dispose(); } catch { /* 忽略释放异常 */ }
+        _yolo = null;
+        _lastLoadedModelPath = null;
+
+        _config.UseGpu = useGpu;
+        await LoadYoloAsync(_config.ModelPath, useGpu, "0");
+
+        if (_yolo == null)
+        {
+            // 目标设备加载失败（最常见：CUDA 不可用）。回退 CPU 保证功能可用。
+            _config.UseGpu = false;
+            _lastLoadedModelPath = null;
+            await LoadYoloAsync(_config.ModelPath, false, "0");
+            GpuSwitchFailed?.Invoke(this, EventArgs.Empty);
+        }
+
+        UseGpuChanged?.Invoke(this, _config.UseGpu);
+        return _config.UseGpu;
+    }
+
     public async Task InitializeAsync(IConfiguration config, ICameraService cameraService)
     {
         State = ModuleState.Initializing;

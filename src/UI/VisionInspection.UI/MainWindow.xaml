@@ -147,6 +147,26 @@
                         </Style>
                     </TextBlock.Style>
                 </TextBlock>
+                <!-- 计算设备切换（主检测 GPU/CPU） -->
+                <Button Command="{Binding ToggleGpuCommand}" ToolTip="切换主检测计算设备 (GPU/CPU)，立即生效"
+                        Margin="2" Padding="10,4">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="FontWeight" Value="Bold"/>
+                            <Setter Property="BorderThickness" Value="1"/>
+                            <Setter Property="BorderBrush" Value="#CCCCCC"/>
+                            <Setter Property="Background" Value="#9E9E9E"/>
+                            <Setter Property="Content" Value="⚡ CPU"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding UseGpu}" Value="True">
+                                    <Setter Property="Background" Value="#4CAF50"/>
+                                    <Setter Property="Content" Value="⚡ GPU"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
                 <Button Content="🔍" ToolTip="开始检测" Command="{Binding RunDetectionCommand}"
                         Style="{StaticResource RoundedEmojiButtonSuccess}" Margin="2">
                     <Button.IsEnabled>

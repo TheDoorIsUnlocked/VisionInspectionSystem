@@ -15,6 +15,8 @@ using VisionInspection.Modules.Detection;
 using VisionInspection.Modules.SOP;
 using VisionInspection.Modules.SOP.Models;
 using VisionInspection.UI.Services;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace VisionInspection.UI.ViewModels;
 
@@ -27,6 +29,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private SOPModule? _sopModule;
     private ModelInfo? _loadedModel;
     private bool _isDisposed = false;
+
+    /// <summary>主检测当前是否运行在 GPU 上（界面切换开关的数据源）</summary>
+    [ObservableProperty]
+    private bool _useGpu;
 
     /// <summary>
     /// 保存的SOP检测模式配置（从SOP配置界面获取）
@@ -1137,6 +1143,53 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         Console.WriteLine($"[MainViewModel] SOP检测配置已保存: 模式={detectionMode}, 手部检测={enableHandPose}");
     }
 
+    /// <summary>
+    /// 切换主检测计算设备（GPU/CPU）。立即释放并重建推理会话，并持久化到 configs/sop_config.json。
+    /// </summary>
+    [RelayCommand]
+    private async Task ToggleGpuAsync()
+    {
+        if (_sopModule == null)
+        {
+            Status = "请先启动 SOP 实时检测，再切换计算设备";
+            return;
+        }
+        bool next = !UseGpu;
+        bool finalGpu = await _sopModule.SetUseGpuAsync(next);
+        UseGpu = finalGpu;
+        SaveUseGpuToConfig(finalGpu);
+        Status = finalGpu ? "主检测已切换到 GPU (CUDA)" : "主检测运行在 CPU";
+    }
+
+    /// <summary>把主检测的 UseGpu 选择写回运行时配置文件 configs/sop_config.json</summary>
+    private void SaveUseGpuToConfig(bool useGpu)
+    {
+        try
+        {
+            const string path = "configs/sop_config.json";
+            if (!File.Exists(path)) return;
+            var text = File.ReadAllText(path);
+            var node = JsonNode.Parse(text);
+            if (node?["SOPModule"] is JsonObject sop)
+            {
+                sop["UseGpu"] = useGpu;
+                File.WriteAllText(path, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MainViewModel] 保存 UseGpu 到配置失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>同步 SOP 模块的计算设备状态到界面，并订阅变化/失败事件</summary>
+    private void AttachSopModuleEvents(SOPModule module)
+    {
+        UseGpu = module.IsUsingGpu;
+        module.UseGpuChanged += (_, gpu) => UseGpu = gpu;
+        module.GpuSwitchFailed += (_, _) => Status = "⚠️ 当前设备 CUDA 不可用，已回退到 CPU 运行";
+    }
+
     [RelayCommand]
     public async Task InitializeSOPModuleAsync()
     {
@@ -1178,6 +1231,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] 调用InitializeAsync...\n");
                 await _sopModule.InitializeAsync(defaultConfig, _cameraManager.CurrentCameraService!);
                 File.AppendAllText(logFile, $"{DateTime.Now:HH:mm:ss.fff} [MainViewModel] InitializeAsync完成，State={_sopModule.State}\n");
+                AttachSopModuleEvents(_sopModule);
             }
             else
             {
@@ -1195,6 +1249,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
                 _sopModule = new SOPModule();
                 await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
+                AttachSopModuleEvents(_sopModule);
             }
 
             // 加载区域配置（如果存在）
@@ -1337,6 +1392,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
                 _sopModule = new SOPModule();
                 await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
+                AttachSopModuleEvents(_sopModule);
 
                 // 订阅事件
                 _sopModule.StepChanged += OnSOPStepChanged;
