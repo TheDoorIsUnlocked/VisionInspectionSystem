@@ -13,6 +13,9 @@
   "WorkflowPath": "configs/sop/sop_cup_usage.yaml",
   "DetectionMode": "PoseBased",
   "HandDetectionBackend": "MediaPipe",
+  "HandPoseEstimation": {
+    "UseGpu": true
+  },
   "Steps": [
     {
       "Id": "idle",

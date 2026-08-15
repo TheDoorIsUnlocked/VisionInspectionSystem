@@ -20,6 +20,8 @@ public class MediaPipeHandDetector : IDisposable
     private readonly float _confidenceThreshold;
     private readonly int _maxNumHands;
     private readonly object _lockObject = new();
+    private readonly bool _useGpu;      // 是否优先使用 CUDA(GPU)，来自配置 HandPoseEstimation.UseGpu
+    private bool _usingGpu;             // 实际使用的设备（CUDA 不可用时回退 CPU，记录真实状态）
 
     // 模型输入尺寸
     private const int PalmInputSize = 192;
@@ -47,6 +49,9 @@ public class MediaPipeHandDetector : IDisposable
 
     public bool IsInitialized => _palmSession != null && _landmarkSession != null;
 
+    /// <summary>实际使用的计算设备：CUDA(GPU)=true / CPU=false。供状态显示与诊断。</summary>
+    public bool UsingGpu => _usingGpu;
+
     public MediaPipeHandDetector(HandPoseEstimationConfig config)
     {
         _palmModelPath = config.PalmModelPath;
@@ -57,6 +62,7 @@ public class MediaPipeHandDetector : IDisposable
         _minBoxAreaRatio = config.MinBoxAreaRatio;
         _enableFaceFilter = config.EnableFaceFilter;
         _faceFilterUpperRatio = config.FaceFilterUpperRatio;
+        _useGpu = config.UseGpu;
     }
 
     /// <summary>
@@ -82,15 +88,8 @@ public class MediaPipeHandDetector : IDisposable
 
             try
             {
-                var options = new SessionOptions
-                {
-                    InterOpNumThreads = 2,
-                    IntraOpNumThreads = 2,
-                    GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
-                };
-
-                _palmSession = new InferenceSession(_palmModelPath, options);
-                _landmarkSession = new InferenceSession(_landmarkModelPath, options);
+                // 优先 CUDA(GPU)，CUDA 不可用时自动回退 CPU（见 CreateSessions）
+                (_palmSession, _landmarkSession, _usingGpu) = CreateSessions(_useGpu);
 
                 // 打印模型输入输出信息
                 Console.WriteLine("[MediaPipeHand] Palm model inputs:");
@@ -116,6 +115,56 @@ public class MediaPipeHandDetector : IDisposable
                 throw;
             }
         }
+    }
+
+    /// <summary>
+    /// 创建手掌 + 关键点两个推理会话。优先 CUDA(GPU)，CUDA 不可用时回退 CPU。
+    /// 每个会话各自持有一份 SessionOptions 实例（不共享），避免会话释放时重复 Dispose。
+    /// CUDA 设备号固定 0，与 YoloPose 后端保持一致。
+    /// </summary>
+    private (InferenceSession? palm, InferenceSession? landmark, bool usedGpu) CreateSessions(bool preferGpu)
+    {
+        if (preferGpu)
+        {
+            try
+            {
+                var palm = new InferenceSession(_palmModelPath, BuildSessionOptions(useCuda: true));
+                try
+                {
+                    var landmark = new InferenceSession(_landmarkModelPath, BuildSessionOptions(useCuda: true));
+                    return (palm, landmark, true);
+                }
+                catch
+                {
+                    palm.Dispose();
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MediaPipeHand] CUDA 不可用，手部检测回退 CPU 运行: {ex.Message}");
+            }
+        }
+
+        var palmCpu = new InferenceSession(_palmModelPath, BuildSessionOptions(useCuda: false));
+        var landmarkCpu = new InferenceSession(_landmarkModelPath, BuildSessionOptions(useCuda: false));
+        return (palmCpu, landmarkCpu, false);
+    }
+
+    /// <summary>
+    /// 构建 ONNX Runtime SessionOptions。useCuda=true 时追加 CUDA 执行提供器。
+    /// </summary>
+    private static SessionOptions BuildSessionOptions(bool useCuda)
+    {
+        var options = new SessionOptions
+        {
+            InterOpNumThreads = 2,
+            IntraOpNumThreads = 2,
+            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
+        };
+        if (useCuda)
+            options.AppendExecutionProvider_CUDA(0);
+        return options;
     }
 
     /// <summary>

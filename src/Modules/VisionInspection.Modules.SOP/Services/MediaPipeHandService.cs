@@ -36,7 +36,7 @@ public class MediaPipeHandService : IHandPoseEstimationService
 
                 _detector = new MediaPipeHandDetector(config);
                 _detector.Initialize();
-                Console.WriteLine($"[MediaPipeHand] 初始化完成, IsInitialized={_detector.IsInitialized}");
+                Console.WriteLine($"[MediaPipeHand] 初始化完成, IsInitialized={_detector.IsInitialized}, 计算设备={(config.UseGpu ? (_detector.UsingGpu ? "CUDA/GPU" : "CPU(已回退)") : "CPU(配置关闭)")}");
             }
         });
     }
