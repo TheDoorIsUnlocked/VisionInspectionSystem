@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         xmlns:controls="clr-namespace:VisionInspection.UI.Controls"
+        Icon="/Assets/AppIcon.ico"
         Title="SOP 区域标定" Height="760" Width="1180">
     <Window.Resources>
         <local:RoiRectConverter x:Key="RoiRectConverter"/>

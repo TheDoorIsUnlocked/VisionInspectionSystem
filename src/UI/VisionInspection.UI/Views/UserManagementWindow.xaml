@@ -1,6 +1,7 @@
 <Window x:Class="VisionInspection.UI.Views.UserManagementWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Icon="/Assets/AppIcon.ico"
         Title="用户管理" 
         Height="600" Width="800"
         WindowStartupLocation="CenterOwner"

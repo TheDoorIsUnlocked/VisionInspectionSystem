@@ -5,6 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="相机配置" Height="700" Width="900"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"

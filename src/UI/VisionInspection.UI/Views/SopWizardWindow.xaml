@@ -7,6 +7,7 @@
         xmlns:vm="clr-namespace:VisionInspection.UI.ViewModels"
         xmlns:conv="clr-namespace:VisionInspection.UI.Converters"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="🧙 SOP 生成向导" Height="660" Width="920"
         WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
         FontFamily="Microsoft YaHei" FontSize="13">

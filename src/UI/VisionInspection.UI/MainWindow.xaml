@@ -9,6 +9,7 @@
         xmlns:viewModels="clr-namespace:VisionInspection.UI.ViewModels"
         xmlns:hc="https://handyorg.github.io/handycontrol"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="视觉检测系统" Height="700" Width="1400"
         WindowStartupLocation="CenterScreen">
     <Grid Background="{DynamicResource {x:Static SystemColors.ControlBrushKey}}">

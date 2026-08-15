@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="模型管理" Height="700" Width="900"
         WindowStartupLocation="CenterScreen"
         Background="#F5F5F5">

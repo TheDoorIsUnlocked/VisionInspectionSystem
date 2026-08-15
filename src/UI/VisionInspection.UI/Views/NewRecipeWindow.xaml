@@ -4,6 +4,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="新建产品配方" Height="300" Width="460"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize">
     <Grid Margin="20">

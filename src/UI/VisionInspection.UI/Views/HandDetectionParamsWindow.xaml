@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
+        Icon="/Assets/AppIcon.ico"
         Title="手部检测高级参数配置" Height="800" Width="550"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize">
