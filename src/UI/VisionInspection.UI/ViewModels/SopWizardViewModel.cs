@@ -91,6 +91,10 @@ public partial class SopWizardViewModel : ObservableObject
 
     #region ④ 生成与保存
     [ObservableProperty] private string _yamlPreview = "";
+    /// <summary>开启后 YAML 预览框可手动编辑（高级模式）</summary>
+    [ObservableProperty] private bool _isYamlEditable;
+    /// <summary>手动编辑后的 YAML 文本（生成时从 YamlPreview 同步）</summary>
+    [ObservableProperty] private string _editableYaml = "";
     [ObservableProperty] private string _validationMessage = "填写前 3 步后，点「生成并校验」预览 YAML。";
     [ObservableProperty] private bool _validationOk;
     [ObservableProperty] private string _savedPath = "";
@@ -403,6 +407,7 @@ public partial class SopWizardViewModel : ObservableObject
             ? $"✅ {msg}（共 {stepCount} 步：{(input.IncludePersonEntry ? "等待 + " : "")}{Actions.Count} 个动作 + 完成）"
             : $"❌ {msg}";
         YamlPreview = SopYamlGenerator.GenerateYaml(input);
+        EditableYaml = YamlPreview;
         if (ok) StatusMessage = "已生成 YAML，可点「保存到文件」。";
     }
 
@@ -423,10 +428,19 @@ public partial class SopWizardViewModel : ObservableObject
         };
         if (dlg.ShowDialog() != true) return;
 
-        var input = BuildInput();
         try
         {
-            SopYamlGenerator.SaveToFile(input, dlg.FileName);
+            if (IsYamlEditable)
+            {
+                // 高级模式：保存用户手动编辑后的 YAML（必须先通过「重新校验」）
+                File.WriteAllText(dlg.FileName, EditableYaml);
+            }
+            else
+            {
+                // 向导模式：根据第①-③步重新生成
+                var input = BuildInput();
+                SopYamlGenerator.SaveToFile(input, dlg.FileName);
+            }
             SavedPath = dlg.FileName;
             // 同步到运行时 configs/sop，规避 PreserveNewest 副本不刷新坑，立即生效
             CopyToRuntimeSopDir(dlg.FileName);
@@ -441,10 +455,35 @@ public partial class SopWizardViewModel : ObservableObject
     [RelayCommand]
     private void CopyYaml()
     {
-        if (!string.IsNullOrEmpty(YamlPreview))
+        var text = IsYamlEditable ? EditableYaml : YamlPreview;
+        if (!string.IsNullOrEmpty(text))
         {
-            Clipboard.SetText(YamlPreview);
+            Clipboard.SetText(text);
             StatusMessage = "已复制 YAML 到剪贴板。";
+        }
+    }
+
+    [RelayCommand]
+    private void RevalidateYaml()
+    {
+        if (string.IsNullOrWhiteSpace(EditableYaml))
+        {
+            ValidationOk = false;
+            ValidationMessage = "⚠️ YAML 内容为空，无法校验。";
+            return;
+        }
+        try
+        {
+            var wf = SOPYamlConverter.ParseYaml(EditableYaml);
+            ValidationOk = true;
+            ValidationMessage = $"✅ 手动编辑的 YAML 可被 SOP 引擎正常解析（共 {wf.Steps.Count} 步）。注意：第①-③步的向导数据可能已与当前 YAML 不一致。";
+            StatusMessage = "手动编辑的 YAML 校验通过，可保存。";
+        }
+        catch (Exception ex)
+        {
+            ValidationOk = false;
+            ValidationMessage = $"❌ YAML 解析失败：{ex.Message}";
+            StatusMessage = "请修正 YAML 后再保存。";
         }
     }
 

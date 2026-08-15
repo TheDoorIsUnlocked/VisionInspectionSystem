@@ -336,24 +336,38 @@
                 </StackPanel>
 
                 <!-- 步骤④ 生成与保存 -->
-                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=4}">
-                    <TextBlock Text="第四步：生成并保存" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
-                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                <Grid Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=4}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Text="第四步：生成并保存" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,4">
                         <Button Content="⚙ 生成并校验" Command="{Binding GenerateCommand}" Style="{StaticResource ButtonPrimary}" Margin="0,0,8,0"/>
                         <Button Content="💾 保存到文件" Command="{Binding SaveCommand}" Style="{StaticResource ButtonSuccess}" Margin="0,0,8,0"
                                 IsEnabled="{Binding ValidationOk}"/>
-                        <Button Content="📋 复制 YAML" Command="{Binding CopyYamlCommand}" Style="{StaticResource ButtonInfo}"/>
+                        <Button Content="📋 复制 YAML" Command="{Binding CopyYamlCommand}" Style="{StaticResource ButtonInfo}" Margin="0,0,8,0"/>
+                        <Button Content="🔍 重新校验" Command="{Binding RevalidateYamlCommand}" Style="{StaticResource ButtonInfo}"
+                                Visibility="{Binding IsYamlEditable, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                        <CheckBox Content="允许手动编辑 YAML（高级）" IsChecked="{Binding IsYamlEditable, Mode=TwoWay}" Margin="12,0,0,0"
+                                  VerticalAlignment="Center" Foreground="#455A64" ToolTip="勾选后可在下方直接修改 YAML，修改后必须点「重新校验」通过才能保存"/>
                     </StackPanel>
-                    <Border Background="{Binding ValidationOk, Converter={x:Static conv:BoolToBrushConverter.Instance}}"
+                    <Border Grid.Row="2" Background="{Binding ValidationOk, Converter={x:Static conv:BoolToBrushConverter.Instance}}"
                             BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,8">
                         <TextBlock Text="{Binding ValidationMessage}" TextWrapping="Wrap" FontWeight="SemiBold"/>
                     </Border>
-                    <TextBlock Text="生成的 YAML 预览：" Foreground="#607D8B" Margin="0,6,0,2"/>
-                    <TextBox Text="{Binding YamlPreview, Mode=OneWay}" IsReadOnly="True" Height="220"
+                    <TextBlock Grid.Row="3" Text="生成的 YAML 预览：" Foreground="#607D8B" Margin="0,6,0,2"/>
+                    <TextBox Grid.Row="4" Text="{Binding EditableYaml, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             IsReadOnly="{Binding IsYamlEditable, Converter={StaticResource Boolean2BooleanReConverter}}"
                              FontFamily="Consolas" FontSize="11" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                             BorderBrush="#B0BEC5" BorderThickness="1" TextWrapping="NoWrap" Background="#FBFCFC"/>
-                    <TextBlock Text="{Binding SavedPath}" Foreground="#2E7D32" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                </StackPanel>
+                             BorderBrush="#B0BEC5" BorderThickness="1" TextWrapping="NoWrap" Background="#FBFCFC" MinHeight="360"
+                             AcceptsReturn="True" AcceptsTab="True"/>
+                    <TextBlock Grid.Row="5" Text="{Binding SavedPath}" Foreground="#2E7D32" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                </Grid>
             </StackPanel>
         </ScrollViewer>
     </DockPanel>
