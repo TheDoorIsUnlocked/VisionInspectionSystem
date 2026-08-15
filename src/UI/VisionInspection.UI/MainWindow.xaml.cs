@@ -208,6 +208,16 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// 打开 SOP 生成向导（傻瓜化生成 SOP 流程 YAML）
+    /// </summary>
+    private void SopWizardMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        var wizard = new SopWizardWindow();
+        wizard.Owner = this;
+        wizard.ShowDialog();
+    }
+
+    /// <summary>
     /// 通信设置菜单点击
     /// </summary>
     private void CommunicationConfigMenuItem_Click(object sender, RoutedEventArgs e)

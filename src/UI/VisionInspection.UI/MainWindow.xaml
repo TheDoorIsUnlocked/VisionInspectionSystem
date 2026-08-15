@@ -76,6 +76,7 @@
                 <MenuItem Header="⏹️ 停止SOP检测" Command="{Binding StopSOPDetectionCommand}"/>
                 <MenuItem Header="🔄 重置SOP工作流" Command="{Binding ResetSOPWorkflowCommand}"/>
                 <MenuItem Header="📂 切换SOP工作流" Command="{Binding SwitchSOPWorkflowCommand}"/>
+                <MenuItem Header="🧙 SOP 生成向导" Click="SopWizardMenuItem_Click"/>
             </MenuItem>
             
             <MenuItem Header="配置">

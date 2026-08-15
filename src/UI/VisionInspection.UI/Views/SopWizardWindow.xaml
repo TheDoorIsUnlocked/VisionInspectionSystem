@@ -1,0 +1,234 @@
+<Window x:Class="VisionInspection.UI.Views.SopWizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:local="clr-namespace:VisionInspection.UI.Views"
+        xmlns:vm="clr-namespace:VisionInspection.UI.ViewModels"
+        xmlns:conv="clr-namespace:VisionInspection.UI.Converters"
+        mc:Ignorable="d"
+        Title="🧙 SOP 生成向导" Height="660" Width="920"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResize"
+        FontFamily="Microsoft YaHei" FontSize="13">
+    <Window.Resources>
+        <conv:EqualVisibilityConverter x:Key="EqualVisibility"/>
+        <conv:NotEqualVisibilityConverter x:Key="NotEqualVisibility"/>
+        <conv:KindVisibilityConverter x:Key="KindVisibility"/>
+
+        <!-- 步骤指示器芯片 -->
+        <Style x:Key="StepChip" TargetType="Border">
+            <Setter Property="CornerRadius" Value="14"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Margin" Value="3,0"/>
+            <Setter Property="Background" Value="#ECEFF1"/>
+            <Setter Property="BorderBrush" Value="#CFD8DC"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+        <Style x:Key="StepChipActive" TargetType="Border" BasedOn="{StaticResource StepChip}">
+            <Setter Property="Background" Value="#009688"/>
+            <Setter Property="BorderBrush" Value="#00796B"/>
+        </Style>
+
+        <!-- 参数编辑器行 -->
+        <DataTemplate x:Key="ParamEditorTemplate">
+            <Grid Margin="0,3">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="150"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding Spec.Display}" VerticalAlignment="Center"
+                           Foreground="#455A64" FontSize="12" TextWrapping="Wrap"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <ComboBox Width="200" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Region}"
+                              ItemsSource="{Binding RegionOptions}" DisplayMemberPath="Display"
+                              SelectedValuePath="Id" SelectedValue="{Binding Value, Mode=TwoWay}"
+                              ToolTip="选择已标定的区域"/>
+                    <ComboBox Width="200" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Object}"
+                              ItemsSource="{Binding ObjectOptions}" IsEditable="True"
+                              Text="{Binding Value, Mode=TwoWay}" ToolTip="选择或输入物体类别（COCO 名称）"/>
+                    <ComboBox Width="140" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Hand}"
+                              ItemsSource="{Binding HandOptions}" DisplayMemberPath="Display"
+                              SelectedValuePath="Value" SelectedValue="{Binding Value, Mode=TwoWay}"/>
+                    <TextBox Width="90" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Duration}"
+                             Text="{Binding Value, Mode=TwoWay}" ToolTip="稳定停留秒数（数字）"/>
+                </StackPanel>
+            </Grid>
+        </DataTemplate>
+
+        <!-- 单条动作卡片 -->
+        <DataTemplate x:Key="ActionTemplate">
+            <Border Background="White" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8"
+                    Padding="10" Margin="0,0,0,8">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <TextBlock Text="🔘" FontSize="14" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                        <TextBox Text="{Binding StepName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 FontWeight="Bold" FontSize="13" Width="220" Padding="3"
+                                 BorderBrush="#B0BEC5" BorderThickness="1"/>
+                        <TextBlock Text="{Binding Template.Label}" Foreground="#009688" FontWeight="Bold"
+                                   VerticalAlignment="Center" Margin="8,0,0,0"/>
+                        <TextBlock Text="{Binding Template.Hint}" Foreground="#90A4AE" FontSize="11"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" TextWrapping="Wrap" MaxWidth="360"/>
+                        <Button Content="↑" Command="{Binding Owner.MoveActionUpCommand}" CommandParameter="{Binding}"
+                                Width="30" Margin="8,0,0,0" Style="{StaticResource ButtonInfo}" ToolTip="上移"/>
+                        <Button Content="↓" Command="{Binding Owner.MoveActionDownCommand}" CommandParameter="{Binding}"
+                                Width="30" Margin="3,0,0,0" Style="{StaticResource ButtonInfo}" ToolTip="下移"/>
+                        <Button Content="🗑" Command="{Binding Owner.RemoveActionCommand}" CommandParameter="{Binding}"
+                                Width="34" Margin="3,0,0,0" Style="{StaticResource ButtonDanger}" ToolTip="删除该动作"/>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding ParamEditors}" ItemTemplate="{StaticResource ParamEditorTemplate}"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- 顶部：步骤指示器 -->
+        <Border DockPanel.Dock="Top" Background="#F7F9FA" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="12,8">
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                <Border Style="{StaticResource StepChipActive}" Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=1}">
+                    <TextBlock Text="① 基本信息" Foreground="White"/>
+                </Border>
+                <Border Style="{StaticResource StepChip}" Visibility="{Binding CurrentStep, Converter={StaticResource NotEqualVisibility}, ConverterParameter=1}">
+                    <TextBlock Text="① 基本信息"/>
+                </Border>
+
+                <Border Style="{StaticResource StepChipActive}" Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=2}">
+                    <TextBlock Text="② 选择区域" Foreground="White"/>
+                </Border>
+                <Border Style="{StaticResource StepChip}" Visibility="{Binding CurrentStep, Converter={StaticResource NotEqualVisibility}, ConverterParameter=2}">
+                    <TextBlock Text="② 选择区域"/>
+                </Border>
+
+                <Border Style="{StaticResource StepChipActive}" Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=3}">
+                    <TextBlock Text="③ 编排动作" Foreground="White"/>
+                </Border>
+                <Border Style="{StaticResource StepChip}" Visibility="{Binding CurrentStep, Converter={StaticResource NotEqualVisibility}, ConverterParameter=3}">
+                    <TextBlock Text="③ 编排动作"/>
+                </Border>
+
+                <Border Style="{StaticResource StepChipActive}" Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=4}">
+                    <TextBlock Text="④ 生成与保存" Foreground="White"/>
+                </Border>
+                <Border Style="{StaticResource StepChip}" Visibility="{Binding CurrentStep, Converter={StaticResource NotEqualVisibility}, ConverterParameter=4}">
+                    <TextBlock Text="④ 生成与保存"/>
+                </Border>
+            </StackPanel>
+        </Border>
+
+        <!-- 底部：导航按钮 + 状态 -->
+        <Border DockPanel.Dock="Bottom" Background="#F7F9FA" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="12,8">
+            <DockPanel LastChildFill="False">
+                <TextBlock Text="{Binding StatusMessage}" Foreground="#607D8B" VerticalAlignment="Center" DockPanel.Dock="Left" MaxWidth="480" TextWrapping="Wrap"/>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                    <Button Content="← 上一步" Command="{Binding PrevCommand}" Style="{StaticResource ButtonInfo}" Margin="3"/>
+                    <Button Content="下一步 →" Command="{Binding NextCommand}" Style="{StaticResource ButtonPrimary}" Margin="3"/>
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- 主体：4 个步骤面板 -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="16">
+            <StackPanel>
+                <!-- 步骤① 基本信息 -->
+                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=1}">
+                    <TextBlock Text="第一步：填写基本信息" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <TextBlock Text="给这套作业流程起个名字，并选择是否需要在第一步等待人员就位。" Foreground="#607D8B" Margin="0,0,0,10" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <TextBlock Text="SOP 名称：" Width="100" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding SopName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="360" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,8">
+                        <TextBlock Text="流程描述：" Width="100" VerticalAlignment="Top" Margin="0,4,0,0"/>
+                        <TextBox Text="{Binding SopDescription, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="360" Height="60" Padding="5" BorderBrush="#B0BEC5" BorderThickness="1" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                    </StackPanel>
+                    <Border Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8">
+                        <StackPanel>
+                            <TextBlock Text="🚀 或从场景模板开始（一键预填动作，再改名字/区域）" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,6"/>
+                            <StackPanel Orientation="Horizontal">
+                                <ComboBox ItemsSource="{Binding ScenarioNames}" SelectedItem="{Binding SelectedScenario, Mode=TwoWay}"
+                                          Width="200" VerticalAlignment="Center"/>
+                                <Button Content="套用模板" Command="{Binding ApplyScenarioCommand}" CommandParameter="{Binding SelectedScenario}"
+                                        Style="{StaticResource ButtonPrimary}" Margin="8,0,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                    <CheckBox Content="第一步等待人员就位（画面里有人才开始）" IsChecked="{Binding IncludePersonEntry, Mode=TwoWay}" Margin="0,8" Foreground="#455A64"/>
+                </StackPanel>
+
+                <!-- 步骤② 选择区域 -->
+                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=2}">
+                    <TextBlock Text="第二步：选择区域（复用已标定区域）" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <TextBlock Text="区域坐标已在「🎯 标定区域」里画好并保存在某个 SOP 文件中。选好来源后，勾选本次流程用到的区域即可，无需手填坐标。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Button Content="🔄 刷新区域来源" Command="{Binding LoadRegionSourcesCommand}" Style="{StaticResource ButtonInfo}" Margin="0,0,8,0"/>
+                        <ComboBox ItemsSource="{Binding RegionSources}" SelectedItem="{Binding SelectedRegionSource, Mode=TwoWay}"
+                                  DisplayMemberPath="Name" Width="320" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding RegionStatus}" Foreground="#78909C" Margin="0,6" TextWrapping="Wrap"/>
+                    <Border Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,6">
+                        <ItemsControl ItemsSource="{Binding AvailableRegions}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <CheckBox Content="{Binding Display}" IsChecked="{Binding IsSelected, Mode=TwoWay}" Margin="3,4" Foreground="#37474F"/>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+                    <TextBlock Text="💡 没看到区域？请先在「🎯 标定区域」里打开某个 SOP 文件画好区域并保存。" Foreground="#90A4AE" FontSize="11" Margin="0,6" TextWrapping="Wrap"/>
+                </StackPanel>
+
+                <!-- 步骤③ 编排动作 -->
+                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=3}">
+                    <TextBlock Text="第三步：编排动作（按顺序）" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <TextBlock Text="点「+ 添加动作」选择动作类型，再填写出现的参数。列表顺序就是流程顺序，可用 ↑/↓ 调整。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <ComboBox ItemsSource="{Binding AddableTemplates}" SelectedValue="{Binding AddActionTemplateKey, Mode=TwoWay}"
+                                  SelectedValuePath="Key" DisplayMemberPath="Label" Width="220" ToolTip="选择动作类型"/>
+                        <Button Content="➕ 添加动作" Command="{Binding AddActionCommand}" Style="{StaticResource ButtonPrimary}" Margin="8,0,0,0"/>
+                    </StackPanel>
+
+                    <Border Background="#ECEFF1" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,10,0,0">
+                        <ItemsControl ItemsSource="{Binding Actions}" ItemTemplate="{StaticResource ActionTemplate}">
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Actions.Count}" Value="0">
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ItemsControl">
+                                                        <TextBlock Text="（还没有动作，点上方「➕ 添加动作」开始）" Foreground="#90A4AE" FontStyle="Italic" Margin="4"/>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
+                        </ItemsControl>
+                    </Border>
+                </StackPanel>
+
+                <!-- 步骤④ 生成与保存 -->
+                <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=4}">
+                    <TextBlock Text="第四步：生成并保存" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,4">
+                        <Button Content="⚙ 生成并校验" Command="{Binding GenerateCommand}" Style="{StaticResource ButtonPrimary}" Margin="0,0,8,0"/>
+                        <Button Content="💾 保存到文件" Command="{Binding SaveCommand}" Style="{StaticResource ButtonSuccess}" Margin="0,0,8,0"
+                                IsEnabled="{Binding ValidationOk}"/>
+                        <Button Content="📋 复制 YAML" Command="{Binding CopyYamlCommand}" Style="{StaticResource ButtonInfo}"/>
+                    </StackPanel>
+                    <Border Background="{Binding ValidationOk, Converter={x:Static conv:BoolToBrushConverter.Instance}}"
+                            BorderThickness="1" CornerRadius="6" Padding="8" Margin="0,8">
+                        <TextBlock Text="{Binding ValidationMessage}" TextWrapping="Wrap" FontWeight="SemiBold"/>
+                    </Border>
+                    <TextBlock Text="生成的 YAML 预览：" Foreground="#607D8B" Margin="0,6,0,2"/>
+                    <TextBox Text="{Binding YamlPreview, Mode=OneWay}" IsReadOnly="True" Height="220"
+                             FontFamily="Consolas" FontSize="11" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                             BorderBrush="#B0BEC5" BorderThickness="1" TextWrapping="NoWrap" Background="#FBFCFC"/>
+                    <TextBlock Text="{Binding SavedPath}" Foreground="#2E7D32" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
