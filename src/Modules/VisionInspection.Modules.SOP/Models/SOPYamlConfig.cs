@@ -146,9 +146,10 @@ public class SopyamlSettings
 
     /// <summary>
     /// 自动重置前的延迟秒数（让 UI 显示 PASS 一段时间再开始下一轮）。
+    /// 默认 1 秒；如需更长可在 yaml 中通过 reset_delay_sec 调整。
     /// </summary>
     [YamlMember(Alias = "reset_delay_sec")]
-    public int ResetDelaySec { get; set; } = 3;
+    public int ResetDelaySec { get; set; } = 1;
 }
 
 public class SopyamlDetection

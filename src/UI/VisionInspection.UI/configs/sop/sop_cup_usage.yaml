@@ -26,6 +26,8 @@ sop:
     confidenceThreshold: 0.6
     stableFrames: 3
     enableTimeoutDetection: false   # 关闭每步超时限制（先不限制时间，动作做完才推进）
+    auto_reset_on_complete: true    # 全部通过后自动循环下一轮
+    reset_delay_sec: 1              # 重置前缓冲 1 秒（原为 3 秒，用户反馈间隔太长）
 
   # 区域定义（坐标需在「🎯 标定区域」工具里按真机画面重新标定）
   regions:

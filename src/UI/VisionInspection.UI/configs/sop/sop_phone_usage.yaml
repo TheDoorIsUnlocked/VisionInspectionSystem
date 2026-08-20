@@ -14,7 +14,7 @@ sop:
     timeoutSeconds: 30
     # 持续监控场景：所有步骤通过后自动重置，循环检测下一轮
     auto_reset_on_complete: true
-    reset_delay_sec: 3
+    reset_delay_sec: 1
   
   # 区域定义
   regions:

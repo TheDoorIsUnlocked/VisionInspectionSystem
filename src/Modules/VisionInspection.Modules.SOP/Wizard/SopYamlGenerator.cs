@@ -74,7 +74,7 @@ public static class SopYamlGenerator
                 EnableTimeoutDetection = false, // 不限制每步时间，做完才推进
                 EnableSkipDetection = true,
                 AutoResetOnComplete = true,
-                ResetDelaySec = 3
+                ResetDelaySec = 1
             },
             Visualization = new SopyamlVisualization
             {

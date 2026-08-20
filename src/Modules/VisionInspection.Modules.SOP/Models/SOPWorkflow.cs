@@ -104,7 +104,7 @@ public class SOPGlobalSettings
     public int StableFrameCount { get; set; } = 5;
     public float PositionTolerance { get; set; } = 20f;
     public bool AutoResetOnComplete { get; set; } = true;
-    public int ResetDelaySec { get; set; } = 3;
+    public int ResetDelaySec { get; set; } = 1;
 }
 
 /// <summary>
