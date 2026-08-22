@@ -1440,6 +1440,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _sopModule.ViolationDetected += OnSOPViolationDetected;
             _sopModule.WorkflowCompleted += OnSOPWorkflowCompleted;
             _sopModule.ModelWarning += OnSOPModelWarning;
+            Console.WriteLine($"[SOP-Audio][DEBUG] MainViewModel 已(重新)订阅 SOP 事件(含 ViolationDetected)，实例={_sopModule?.GetHashCode()}");
 
             // 3. 确保手部姿态估计服务已准备好（等待异步初始化完成）
             Console.WriteLine($"[MainViewModel] 确保手部服务准备就绪...");
@@ -1566,6 +1567,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void OnSOPViolationDetected(object? sender, ViolationEventArgs e)
     {
+        Console.WriteLine($"[SOP-Audio][DEBUG] OnSOPViolationDetected 触发: type={e.Violation.Type} desc={e.Violation.Description} | Application.Current={(System.Windows.Application.Current == null ? "NULL(不播)" : "OK")}");
         System.Windows.Application.Current?.Dispatcher.Invoke(() =>
         {
             if (_isDisposed) return;
@@ -1574,7 +1576,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // 跳步（中间跳了工序）→ 播放 ng.wav
             if (e.Violation.Type == ViolationType.SkipStep)
             {
-                Console.WriteLine($"[SOP] 收到跳步违规事件 -> 请求播放 ng.wav (path='{_ngWavPath}')");
+                EnsureSopAudioPaths();
+                Console.WriteLine($"[SOP-Audio][DEBUG] 跳步 -> 请求播放 ng.wav | _ngWavPath='{_ngWavPath}' exists={(_ngWavPath != null && File.Exists(_ngWavPath))}");
                 PlayNgSound();
             }
         });
@@ -1642,44 +1645,89 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 播放音频（SoundPlayer 内部异步播放线程，不阻塞 UI）。文件不存在时静默跳过。
     /// 设计要点：
-    /// 1. 用 SoundPlayer.Play() 异步模式——这是该 API 设计的主播放方式，内部自己管理
-    ///    独立播放线程，在 UI 线程或后台线程调用都可靠（比 Task.Run+PlaySync 稳）。
+    /// 1. 用 SoundPlayer.Play() 异步模式——内部自己管理独立播放线程，不阻塞 UI。
     /// 2. 播放器常驻缓存 _sopSoundPlayerCache 永不 Dispose，避免 Dispose 内部调用 Stop()
-    ///    截断正在播放的声音（ng.wav 较大，曾被截断导致听不到）。
-    /// 3. 同步 Load() 到内存，避免首次异步播放因未就绪而丢失。
+    ///    截断正在播放的声音。
+    /// 3. 同步 Load() 到内存；若格式不支持（如 24-bit WAV）Load 会抛异常，被下方 catch 捕获并打印。
+    /// 4. [调试] 打印 WAV 格式：SoundPlayer 仅支持 8/16-bit PCM，24-bit 会静默失败（错误发生在
+    ///    内部播放线程，Play() 不抛异常），因此这里主动解析 fmt 块给出明确支持性提示。
     /// </summary>
     private void PlaySopSound(string? path)
     {
         if (string.IsNullOrEmpty(path))
         {
-            Console.WriteLine("[SOP-Audio] 跳过播放：音频路径为空（未初始化）");
+            Console.WriteLine("[SOP-Audio][DEBUG] 跳过播放：音频路径为空（EnsureSopAudioPaths 未解析到文件）");
             return;
         }
         if (!File.Exists(path))
         {
-            Console.WriteLine($"[SOP-Audio] 跳过播放：文件不存在 -> {path}");
+            Console.WriteLine($"[SOP-Audio][DEBUG] 跳过播放：文件不存在 -> {path}");
             return;
         }
         try
         {
+            // 调试：打印 WAV 格式与是否被 SoundPlayer 支持
+            var info = GetWavFormatInfo(path);
+            long size = new FileInfo(path).Length;
+            Console.WriteLine($"[SOP-Audio][DEBUG] 准备播放: {path} | 大小={size}字节 | {info}");
+
             SoundPlayer player;
             lock (_sopSoundPlayerCache)
             {
                 if (!_sopSoundPlayerCache.TryGetValue(path, out player))
                 {
                     player = new SoundPlayer(path);
-                    player.Load(); // 同步加载到内存，避免首次异步播放竞态导致丢失
-                    _sopSoundPlayerCache[path] = player; // 缓存引用：防 GC 提前回收 + 避免 Dispose 截断
+                    player.Load(); // 同步加载；格式不支持时此处会抛异常，被下方 catch 捕获
+                    _sopSoundPlayerCache[path] = player; // 缓存引用：防 GC 回收 + 避免 Dispose 截断
+                    Console.WriteLine($"[SOP-Audio][DEBUG] Load() 成功（格式受支持）");
                 }
             }
 
             // 异步播放：SoundPlayer 内部独立线程，不阻塞 UI；不 Dispose 保证整段播放完整。
             player.Play();
-            Console.WriteLine($"[SOP-Audio] 已发起播放: {path}");
+            Console.WriteLine($"[SOP-Audio][DEBUG] 已发起 Play() 调用（等待内部线程出声）");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[SOP-Audio] 播放失败 '{path}': {ex.Message}");
+            Console.WriteLine($"[SOP-Audio][ERROR] 播放失败 '{path}': {ex}");
+        }
+    }
+
+    /// <summary>
+    /// 解析 WAV 的 fmt 块，返回可读格式信息及 SoundPlayer 支持性提示（调试用）。
+    /// </summary>
+    private static string GetWavFormatInfo(string path)
+    {
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var br = new BinaryReader(fs);
+            if (br.ReadInt32() != 0x46464952) return "非RIFF/WAV头";
+            br.ReadInt32(); // RIFF size
+            if (br.ReadInt32() != 0x45564157) return "非WAVE";
+            while (fs.Position < fs.Length - 8)
+            {
+                int chunkId = br.ReadInt32();
+                int chunkSize = br.ReadInt32();
+                if (chunkId == 0x20746D66) // 'fmt '
+                {
+                    short audioFormat = br.ReadInt16(); // 1=PCM
+                    short channels = br.ReadInt16();
+                    int sampleRate = br.ReadInt32();
+                    br.ReadInt32(); // byteRate
+                    br.ReadInt16(); // blockAlign
+                    short bits = br.ReadInt16();
+                    string fmt = audioFormat == 1 ? "PCM" : $"fmt={audioFormat}";
+                    bool supported = audioFormat == 1 && (bits == 8 || bits == 16);
+                    return $"{fmt} {channels}ch {bits}bit {sampleRate}Hz {(supported ? "[SoundPlayer支持]" : "[SoundPlayer不支持!需8/16bit PCM]")}";
+                }
+                fs.Seek(chunkSize, SeekOrigin.Current);
+            }
+            return "未找到fmt块";
+        }
+        catch (Exception ex)
+        {
+            return $"解析失败:{ex.Message}";
         }
     }
 
