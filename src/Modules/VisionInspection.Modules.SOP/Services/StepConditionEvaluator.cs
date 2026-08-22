@@ -409,21 +409,38 @@ public class StepConditionEvaluator
                 }
 
                 // 无目标区域：理解为"从起始区域拿起目标物体"（pickup 语义）
-                // ⚠️ 修复：必须以"目标物体（杯子）确实被拿起"为判据，
-                //   不能再允许"手空着进入/离开起始区域"就判定拿起（杯子根本没出现）。
+                // ⚠️ 关键约束：目标物体（杯子）必须【当前帧】位于 from_region（cup_table），
+                //   才能判定"从该区域拿起"。禁止从任意地方拿起。
+                //   不能用"会话历史曾访问过 from_region"判断——那会导致上一轮/起始放置后
+                //   永久为 true，从而杯子从任何地方拿都判 OK（from_region 约束失效）。
                 if (hasFrom)
                 {
-                    // 必须先访问过起始区域，否则不能算"从该区域拿起"
-                    if (!visitedFrom)
+                    // 目标物体当前是否位于起始区域（当前帧，非历史）
+                    bool objInFromNow = false;
+                    if (!string.IsNullOrEmpty(condition.TargetObject))
+                    {
+                        var objNow = detections
+                            .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
+                            .Where(d => d.Confidence >= condition.MinConfidence)
+                            .OrderByDescending(d => d.Confidence)
+                            .FirstOrDefault();
+                        if (objNow != null && zoneFrom != null)
+                            objInFromNow = IsInZone(objNow.BoundingBox, zoneFrom);
+                    }
+
+                    Dbg($"  [pickup] from='{fromRegion}' objInFromNow={objInFromNow} inFrom={inFrom} handHolding={handHoldingTarget}");
+
+                    // 杯子当前必须位于起始区域（或手当前位于起始区域），否则不能算"从该区域拿起"
+                    if (!(objInFromNow || inFrom))
                     {
                         return new ConditionCheckResult
                         {
                             IsMet = false,
-                            Message = $"手部尚未访问区域 {fromRegion}，不能判定拿起"
+                            Message = $"'{condition.TargetObject}' 不在区域 {fromRegion}（需从 {fromRegion} 拿起，当前位置不符）"
                         };
                     }
 
-                    // 判定 1：手正握着目标物体（物体被握起）——最直接的"拿起"证据
+                    // 判定：手正握着目标物体（物体被握起）——最直接的"拿起"证据
                     if (handHoldingTarget)
                     {
                         return new ConditionCheckResult
@@ -433,29 +450,10 @@ public class StepConditionEvaluator
                         };
                     }
 
-                    // 判定 2：目标物体已离开起始区域（被拿走）——要求能检测到目标物体
-                    if (!string.IsNullOrEmpty(condition.TargetObject))
-                    {
-                        var targetObj = detections
-                            .Where(d => (d.Label?.Name ?? "").Equals(condition.TargetObject, StringComparison.OrdinalIgnoreCase))
-                            .Where(d => d.Confidence >= condition.MinConfidence)
-                            .OrderByDescending(d => d.Confidence)
-                            .FirstOrDefault();
-
-                        if (targetObj != null && fromRect != SKRect.Empty && !IsInZone(targetObj.BoundingBox, zoneFrom!))
-                        {
-                            return new ConditionCheckResult
-                            {
-                                IsMet = true,
-                                Message = $"目标物体 '{condition.TargetObject}' 已离开区域 {fromRegion}"
-                            };
-                        }
-                    }
-
                     return new ConditionCheckResult
                     {
                         IsMet = false,
-                        Message = $"手部在区域 {fromRegion} 内，但未检测到 '{condition.TargetObject}' 被拿起（杯子需被拿起）"
+                        Message = $"手部/物体位于区域 {fromRegion}，但未检测到 '{condition.TargetObject}' 被拿起（杯子需被拿起）"
                     };
                 }
 
