@@ -101,6 +101,9 @@ namespace VisionInspection.UI.Services
             {
                 try
                 {
+                    // 断开已有连接
+                    Disconnect();
+
                     if (camera?.ExtInfo == null)
                     {
                         ErrorOccurred?.Invoke(this, "相机信息无效");
@@ -108,58 +111,17 @@ namespace VisionInspection.UI.Services
                     }
 
                     int cameraIndex = (int)camera.ExtInfo;
+                    _capture = new VideoCapture(cameraIndex);
 
-                    // 已连接相同相机：直接复用，避免「断开→重连」带来的设备释放等待与重复打开延迟
-                    if (_isConnected && _capture != null && _capture.IsOpened()
-                        && CurrentCamera.ExtInfo is int idx && idx == cameraIndex)
-                    {
-                        ConnectionStatusChanged?.Invoke(this, true);
-                        return true;
-                    }
-
-                    // 切换相机或首次连接：先干净断开旧连接（若正采集则停止采集任务）
-                    Disconnect();
-
-                    VideoCapture? capture = null;
-                    bool opened = false;
-                    // USB 相机上一次占用未完全释放时，new VideoCapture 可能打不开；短延后重试以吸收
-                    // 驱动层设备释放延迟，避免用户需手动反复重连（表现为“要等一会才能连接”）。
-                    for (int attempt = 0; attempt < 3 && !opened; attempt++)
-                    {
-                        try
-                        {
-                            capture = new VideoCapture(cameraIndex);
-                            opened = capture.IsOpened();
-                            if (!opened)
-                            {
-                                capture.Dispose();
-                                capture = null;
-                                if (attempt < 2) Thread.Sleep(300);
-                            }
-                        }
-                        catch
-                        {
-                            capture?.Dispose();
-                            capture = null;
-                            if (attempt < 2) Thread.Sleep(300);
-                        }
-                    }
-
-                    if (!opened || capture == null)
+                    if (!_capture.IsOpened())
                     {
                         ErrorOccurred?.Invoke(this, $"无法打开摄像头 {cameraIndex}");
                         return false;
                     }
 
-                    _capture = capture;
-
-                    // 设置分辨率（可选，不支持的相机忽略）
-                    try
-                    {
-                        _capture.Set(VideoCaptureProperties.FrameWidth, 1280);
-                        _capture.Set(VideoCaptureProperties.FrameHeight, 720);
-                    }
-                    catch { /* USB 相机可能不支持该分辨率，忽略 */ }
+                    // 设置分辨率（可选）
+                    _capture.Set(VideoCaptureProperties.FrameWidth, 1280);
+                    _capture.Set(VideoCaptureProperties.FrameHeight, 720);
 
                     _isConnected = true;
                     CurrentCamera = camera;
@@ -300,7 +262,6 @@ namespace VisionInspection.UI.Services
         {
             try
             {
-                bool wasGrabbing = _isGrabbing || _grabTask != null;
                 _isGrabbing = false;
                 _cancellationTokenSource?.Cancel();
 
@@ -313,9 +274,7 @@ namespace VisionInspection.UI.Services
                 _cancellationTokenSource?.Dispose();
                 _cancellationTokenSource = null;
 
-                // 仅在确实处于采集状态时才打印，避免「连接」动作触发无意义的“采集已停止”
-                if (wasGrabbing)
-                    System.Diagnostics.Debug.WriteLine("摄像头采集已停止");
+                System.Diagnostics.Debug.WriteLine("摄像头采集已停止");
             }
             catch (Exception ex)
             {
