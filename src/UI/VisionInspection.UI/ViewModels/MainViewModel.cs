@@ -5,6 +5,7 @@ using Microsoft.Win32;
 using SkiaSharp;
 using System.IO;
 using System.Media;
+using System.Threading.Tasks;
 using System.Threading.Channels;
 using System.Windows;
 using VisionInspection.Core.Interfaces;
@@ -1590,6 +1591,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private string? _ngWavPath;
 
     /// <summary>
+    /// 音频播放器缓存：SoundPlayer 一旦 Dispose 内部会调用 Stop() 截断正在播放的声音，
+    /// 因此常驻缓存、永不释放，避免 using 释放时把 ng.wav 等大文件播放截断。
+    /// </summary>
+    private readonly Dictionary<string, SoundPlayer> _sopSoundPlayerCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// 定位 ok.wav / ng.wav：优先程序运行目录，其次从程序目录向上逐层查找
     /// （音频文件一般放在项目根目录，运行时工作目录可能是 bin/Debug/...）。
     /// </summary>
@@ -1623,15 +1630,35 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 播放音频（异步，不阻塞 UI）。文件不存在时静默跳过。
+    /// 播放音频（后台线程完整播放，不阻塞 UI）。文件不存在时静默跳过。
+    /// 关键修复：旧实现用 using var player + 异步 Play()，using 释放时会调用 Stop()
+    /// 立即截断声音，导致 ng.wav（较大）几乎听不到。这里改为缓存 SoundPlayer（不释放）
+    /// 并在后台线程用 PlaySync() 同步播放到结束。
     /// </summary>
     private void PlaySopSound(string? path)
     {
         if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
         try
         {
-            using var player = new SoundPlayer(path);
-            player.Play();
+            SoundPlayer? player = null;
+            lock (_sopSoundPlayerCache)
+            {
+                if (!_sopSoundPlayerCache.TryGetValue(path, out player))
+                {
+                    player = new SoundPlayer(path);
+                    player.Load(); // 同步加载到内存，避免首次异步加载竞态导致播放丢失
+                    _sopSoundPlayerCache[path] = player;
+                }
+            }
+
+            var p = player;
+            // PlaySync 会阻塞调用线程直到播放结束，故放到后台 Task，避免卡 UI；
+            // 播放器常驻缓存不 Dispose，保证整段音频（尤其 ng.wav）被完整播放。
+            Task.Run(() =>
+            {
+                try { p.PlaySync(); }
+                catch { /* 忽略单次播放异常 */ }
+            });
         }
         catch (Exception ex)
         {
