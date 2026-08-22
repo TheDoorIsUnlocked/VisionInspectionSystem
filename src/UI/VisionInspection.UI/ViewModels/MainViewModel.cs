@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Win32;
 using SkiaSharp;
 using System.IO;
+using NAudio.Wave;
 using System.Media;
 using System.Threading.Tasks;
 using System.Threading.Channels;
@@ -1604,10 +1605,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private string? _ngWavPath;
 
     /// <summary>
-    /// 音频播放器缓存：SoundPlayer 一旦 Dispose 内部会调用 Stop() 截断正在播放的声音，
-    /// 因此常驻缓存、永不释放，避免 using 释放时把 ng.wav 等大文件播放截断。
+    /// 音频播放器缓存：基于 NAudio 的 WaveOutEvent + AudioFileReader，支持任意位深 PCM
+    /// （8/16/24/32-bit）及 IEEE float，因此 24-bit/44100Hz/立体声的 WAV 也能原生播放，
+    /// 不再需要事先转成 16-bit。播放器常驻缓存、永不释放，避免重复创建与截断。
     /// </summary>
-    private readonly Dictionary<string, SoundPlayer> _sopSoundPlayerCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _sopAudioLock = new();
+    private readonly Dictionary<string, (WaveOutEvent output, AudioFileReader reader)> _sopAudioCache
+        = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// 定位 ok.wav / ng.wav：优先程序运行目录，其次从程序目录向上逐层查找
@@ -1643,14 +1647,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 播放音频（SoundPlayer 内部异步播放线程，不阻塞 UI）。文件不存在时静默跳过。
+    /// 播放音频（NAudio WaveOutEvent 异步播放，不阻塞 UI）。文件不存在时静默跳过。
     /// 设计要点：
-    /// 1. 用 SoundPlayer.Play() 异步模式——内部自己管理独立播放线程，不阻塞 UI。
-    /// 2. 播放器常驻缓存 _sopSoundPlayerCache 永不 Dispose，避免 Dispose 内部调用 Stop()
-    ///    截断正在播放的声音。
-    /// 3. 同步 Load() 到内存；若格式不支持（如 24-bit WAV）Load 会抛异常，被下方 catch 捕获并打印。
-    /// 4. [调试] 打印 WAV 格式：SoundPlayer 仅支持 8/16-bit PCM，24-bit 会静默失败（错误发生在
-    ///    内部播放线程，Play() 不抛异常），因此这里主动解析 fmt 块给出明确支持性提示。
+    /// 1. 用 NAudio.WaveOutEvent + AudioFileReader 播放——底层走 WaveOut / Media Foundation，
+    ///    原生支持 8/16/24/32-bit PCM 与 IEEE float，无需把 24-bit WAV 预先转成 16-bit。
+    /// 2. 播放器（output+reader）常驻缓存 _sopAudioCache，重复播放只需 reader.Position=0 后
+    ///    Play()，避免重复创建；若正在播放则先 Stop() 再重播，不会叠加成杂音。
+    /// 3. [调试] 打印 WAV 格式信息（任意位深 PCM 均支持）。
     /// </summary>
     private void PlaySopSound(string? path)
     {
@@ -1666,26 +1669,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
         try
         {
-            // 调试：打印 WAV 格式与是否被 SoundPlayer 支持
+            // 调试：打印 WAV 格式与是否被播放器支持
             var info = GetWavFormatInfo(path);
             long size = new FileInfo(path).Length;
             Console.WriteLine($"[SOP-Audio][DEBUG] 准备播放: {path} | 大小={size}字节 | {info}");
 
-            SoundPlayer player;
-            lock (_sopSoundPlayerCache)
+            (WaveOutEvent output, AudioFileReader reader) entry;
+            lock (_sopAudioLock)
             {
-                if (!_sopSoundPlayerCache.TryGetValue(path, out player))
+                if (!_sopAudioCache.TryGetValue(path, out entry))
                 {
-                    player = new SoundPlayer(path);
-                    player.Load(); // 同步加载；格式不支持时此处会抛异常，被下方 catch 捕获
-                    _sopSoundPlayerCache[path] = player; // 缓存引用：防 GC 回收 + 避免 Dispose 截断
-                    Console.WriteLine($"[SOP-Audio][DEBUG] Load() 成功（格式受支持）");
+                    var afReader = new AudioFileReader(path);
+                    var waveOut = new WaveOutEvent();
+                    waveOut.Init(afReader);
+                    entry = (waveOut, afReader);
+                    _sopAudioCache[path] = entry;
+                    Console.WriteLine($"[SOP-Audio][DEBUG] 创建播放器成功（支持任意位深 PCM）");
                 }
-            }
 
-            // 异步播放：SoundPlayer 内部独立线程，不阻塞 UI；不 Dispose 保证整段播放完整。
-            player.Play();
-            Console.WriteLine($"[SOP-Audio][DEBUG] 已发起 Play() 调用（等待内部线程出声）");
+                // 重置到开头，避免上次播放到结尾后无法再播；若正在播放则先停再重播
+                if (entry.reader.Position != 0) entry.reader.Position = 0;
+                if (entry.output.PlaybackState == PlaybackState.Playing)
+                    entry.output.Stop();
+                entry.output.Play();
+            }
+            Console.WriteLine($"[SOP-Audio][DEBUG] 已发起 Play() 调用（等待设备出声）");
         }
         catch (Exception ex)
         {
@@ -1694,7 +1702,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 解析 WAV 的 fmt 块，返回可读格式信息及 SoundPlayer 支持性提示（调试用）。
+    /// 解析 WAV 的 fmt 块，返回可读格式信息及播放器支持性提示（调试用）。
     /// </summary>
     private static string GetWavFormatInfo(string path)
     {
@@ -1717,9 +1725,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     br.ReadInt32(); // byteRate
                     br.ReadInt16(); // blockAlign
                     short bits = br.ReadInt16();
-                    string fmt = audioFormat == 1 ? "PCM" : $"fmt={audioFormat}";
-                    bool supported = audioFormat == 1 && (bits == 8 || bits == 16);
-                    return $"{fmt} {channels}ch {bits}bit {sampleRate}Hz {(supported ? "[SoundPlayer支持]" : "[SoundPlayer不支持!需8/16bit PCM]")}";
+                    string fmt = audioFormat == 1 ? "PCM" : (audioFormat == 3 ? "IEEE-float" : $"fmt={audioFormat}");
+                    // NAudio（WaveOutEvent+AudioFileReader）原生支持 PCM 任意位深与 IEEE float；
+                    // 仅非 PCM 的压缩格式（如 MP3/AAC，audioFormat 不为 1 也不为 3）才无法直接播放。
+                    bool supported = audioFormat == 1 || audioFormat == 3;
+                    return $"{fmt} {channels}ch {bits}bit {sampleRate}Hz {(supported ? "[播放器支持]" : "[播放器不支持:非PCM压缩格式]")}";
                 }
                 fs.Seek(chunkSize, SeekOrigin.Current);
             }
