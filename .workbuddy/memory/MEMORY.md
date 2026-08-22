@@ -48,3 +48,10 @@
 - 排查时**注意大小写 `models/` vs `Models/` 是不同目录**，别查错路径误以为模型缺失。
 - 手部检测后端枚举 `HandDetectionBackend`：`Auto`(MediaPipe→YOLO→YoloPose→DWPose) / `MediaPipe` / `Yolo` / `DWPose` / `YoloPose`(新增，默认)。`sop_config.json` 的 `HandDetectionBackend` 字段控制；改完需重启程序（DLL/配置被运行进程锁定）。
 - **YoloPose 局限**：首阶段仍依赖 yolov8-pose 检测手腕，手臂极度外伸/远距/遮挡时手腕可能漏检 → 仍会识别不到手。彻底方案是专用手部检测器（MediaPipe palm_detection / yolov8n-hand.onnx），项目目前缺失这些模型。
+
+## SOP 音频播放约定（ng.wav / ok.wav，重要！）
+- **绝不要用 `System.Media.SoundPlayer` 播放音频文件**：它仅支持 8/16-bit PCM，24-bit PCM（原 ng.wav 就是 24-bit/44100Hz/立体声）会**静默失败**（Play() 异步、错误发生在内部线程、不抛到调用方）→ 表现为"不响且无任何报错"。
+- **正确做法**：用 **NAudio**（`WaveOutEvent` + `AudioFileReader`，底层 WaveOut/Media Foundation）播放，原生支持任意位深 PCM（8/16/24/32-bit）与 IEEE float，无需预先转格式。
+- 实现落点：`MainViewModel.cs` 的 `_sopAudioCache`（WaveOutEvent+AudioFileReader 元组字典，常驻缓存不释放）与 `PlaySopSound`（重复播放 `reader.Position=0` 后 `Play()`，正在播放先 `Stop()` 重播避免叠加）。`scripts/convert_wav_to_16bit.py` 已不再必需，仅作历史遗留。
+- 引入 NAudio 需在 `VisionInspection.UI.csproj` 加 `PackageReference Include="NAudio"`（已加 2.2.1）；用户须在 VS 还原并重新生成。
+- 替换音源（ng.wav/ok.wav，项目根 `..\..\..\ng.wav`）后需重新生成（csproj PreserveNewest 拷贝），否则 bin 副本仍是旧文件（PreserveNewest 时间戳陷阱）。
