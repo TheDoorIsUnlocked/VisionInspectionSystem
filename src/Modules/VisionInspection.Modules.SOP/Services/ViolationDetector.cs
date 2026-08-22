@@ -351,7 +351,10 @@ public class ViolationDetector
         if (nextStep.PassConditions.Count == 1 && nextStep.PassConditions[0].Type == ConditionType.TimeElapsed)
             return null;
 
-        var eval = _conditionEvaluator.EvaluateConditions(nextStep, detections, handResult);
+        // 跳步检测：忽略 nextStep 的 from_region 时序约束。用户跳过中间步骤时，
+        // 物体没经过起始区域（如没到嘴边），若要求 visitedFrom 会漏报跳步。
+        // 只需核心动作意图（物体到达目标区域）即判定"正在做下一步"，从而报跳步。
+        var eval = _conditionEvaluator.EvaluateConditions(nextStep, detections, handResult, ignoreFromRegion: true);
         if (eval.IsPass)
         {
             return new ViolationRecord

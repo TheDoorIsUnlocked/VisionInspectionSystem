@@ -48,7 +48,7 @@ public class StepConditionEvaluator
     /// <summary>
     /// 评估步骤的所有条件（物体 + 手部姿态）
     /// </summary>
-    public ConditionEvaluationResult EvaluateConditions(SOPStep step, List<ObjectDetection> detections, HandPoseEstimationResult? handResult = null)
+    public ConditionEvaluationResult EvaluateConditions(SOPStep step, List<ObjectDetection> detections, HandPoseEstimationResult? handResult = null, bool ignoreFromRegion = false)
     {
         // 先更新手部跨帧跟踪状态（用于稳定/移动判断）
         UpdateHandTracks(handResult);
@@ -84,7 +84,7 @@ public class StepConditionEvaluator
 
         foreach (var condition in step.PassConditions)
         {
-            var result = CheckCondition(condition, detections, handResult);
+            var result = CheckCondition(condition, detections, handResult, ignoreFromRegion);
             results.Add(result);
 
             if (!result.IsMet)
@@ -107,7 +107,7 @@ public class StepConditionEvaluator
         };
     }
 
-    private ConditionCheckResult CheckCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
+    private ConditionCheckResult CheckCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult, bool ignoreFromRegion = false)
     {
         // 手部动作条件分支
         if (condition.Type == ConditionType.HandInRegion ||
@@ -115,7 +115,7 @@ public class StepConditionEvaluator
             condition.Type == ConditionType.HandStable ||
             condition.Type == ConditionType.HandMoveFromTo)
         {
-            return CheckHandCondition(condition, detections, handResult);
+            return CheckHandCondition(condition, detections, handResult, ignoreFromRegion);
         }
 
         if (condition.Type == ConditionType.HandNearObject)
@@ -242,7 +242,7 @@ public class StepConditionEvaluator
         return chosen;
     }
 
-    private ConditionCheckResult CheckHandCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult)
+    private ConditionCheckResult CheckHandCondition(StepCondition condition, List<ObjectDetection> detections, HandPoseEstimationResult? handResult, bool ignoreFromRegion = false)
     {
         var hand = SelectHand(condition, handResult);
         if (hand == null)
@@ -318,7 +318,11 @@ public class StepConditionEvaluator
                 bool visitedFromByObject = !string.IsNullOrEmpty(condition.TargetObject)
                     && _objectVisitedRegions.TryGetValue(condition.TargetObject, out var objRegions)
                     && objRegions.Contains(fromRegion);
-                bool visitedFrom = hasFrom && (visitedFromByHand || visitedFromByObject);
+                // 跳步检测(ignoreFromRegion)时忽略 from_region 的历史访问约束——
+                // 跳步场景本就跳过了中间步骤，物体自然没经过起始区域（如没到嘴边），
+                // 若强制要求 visitedFrom 会导致跳步漏报。此处仅放松时序约束，
+                // 主体仍要求"物体到达目标区域(to_region)"这一核心动作意图。
+                bool visitedFrom = hasFrom && (ignoreFromRegion || visitedFromByHand || visitedFromByObject);
 
                 // [DEBUG] HandMoveFromTo 入口摘要：所有输入一目了然
                 Dbg(
