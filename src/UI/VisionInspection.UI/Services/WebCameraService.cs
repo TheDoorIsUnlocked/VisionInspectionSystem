@@ -19,6 +19,12 @@ namespace VisionInspection.UI.Services
         private bool _isGrabbing = false;
         private CancellationTokenSource? _cancellationTokenSource;
         private Task? _grabTask;
+        /// <summary>
+        /// 实际已打开的相机索引。用于「同相机重连」复用判断，
+        /// 不再依赖 CurrentCamera.ExtInfo（主窗口以无 ExtInfo 的 CameraInfo 连接时该值为 null，
+        /// 会导致复用判断失败、每次都走断开-重连，表现为连接很慢）。
+        /// </summary>
+        private int? _openedCameraIndex;
 
         #endregion
 
@@ -109,9 +115,13 @@ namespace VisionInspection.UI.Services
 
                     int cameraIndex = (int)camera.ExtInfo;
 
-                    // 已连接相同相机：直接复用，避免「断开→重连」带来的设备释放等待与重复打开延迟
+                    // 已连接相同相机：直接复用，避免「断开→重连」带来的设备释放等待与重复打开延迟。
+                    // 复用判断基于「实际已打开的索引」_openedCameraIndex，而非 CurrentCamera.ExtInfo——
+                    // 主窗口可能以无 ExtInfo 的 CameraInfo 建立连接，此时 CurrentCamera.ExtInfo 为 null，
+                    // 旧判断会失效，导致每次重连都先 Disconnect()（若正在采集则 StopGrabbing 阻塞至多 1 秒）
+                    // 再重新 new VideoCapture 打开，表现为「连接很慢、好一会才高亮开始采集」。
                     if (_isConnected && _capture != null && _capture.IsOpened()
-                        && CurrentCamera.ExtInfo is int idx && idx == cameraIndex)
+                        && _openedCameraIndex == cameraIndex)
                     {
                         ConnectionStatusChanged?.Invoke(this, true);
                         return true;
@@ -152,6 +162,7 @@ namespace VisionInspection.UI.Services
                     }
 
                     _capture = capture;
+                    _openedCameraIndex = cameraIndex;
 
                     // 设置分辨率（可选，不支持的相机忽略）
                     try
@@ -190,7 +201,8 @@ namespace VisionInspection.UI.Services
                     _capture.Release();
                     _capture.Dispose();
                     _capture = null;
-                    
+                    _openedCameraIndex = null;
+
                     _isConnected = false;
                     System.Diagnostics.Debug.WriteLine("摄像头已断开");
                 }
