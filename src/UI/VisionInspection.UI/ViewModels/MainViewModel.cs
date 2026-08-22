@@ -1395,12 +1395,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 await _sopModule.InitializeAsync(config, _cameraManager.CurrentCameraService!);
                 AttachSopModuleEvents(_sopModule);
 
-                // 订阅事件
-                _sopModule.StepChanged += OnSOPStepChanged;
-                _sopModule.ViolationDetected += OnSOPViolationDetected;
-                _sopModule.WorkflowCompleted += OnSOPWorkflowCompleted;
-                _sopModule.ModelWarning += OnSOPModelWarning;
-
                 Console.WriteLine($"[MainViewModel] SOP模块创建完成，当前模式: {_sopModule.DetectionMode}");
                 Console.WriteLine($"[MainViewModel] 保存的配置: {(_savedSOPDetectionConfig.HasValue ? "存在" : "不存在")}");
 
@@ -1433,6 +1427,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     }
                 }
             }
+
+            // 确保 MainViewModel 侧事件订阅始终挂上（无论 SOP 模块是新建还是复用）。
+            // 之前这些订阅写在 if (_sopModule == null) 块内，模块已存在走复用分支时不执行，
+            // 导致跳步违规事件无法到达 OnSOPViolationDetected -> 不播 ng.wav。
+            // 先退订再订阅，避免多次启动检测造成重复订阅、重复播放音频。
+            _sopModule.StepChanged -= OnSOPStepChanged;
+            _sopModule.ViolationDetected -= OnSOPViolationDetected;
+            _sopModule.WorkflowCompleted -= OnSOPWorkflowCompleted;
+            _sopModule.ModelWarning -= OnSOPModelWarning;
+            _sopModule.StepChanged += OnSOPStepChanged;
+            _sopModule.ViolationDetected += OnSOPViolationDetected;
+            _sopModule.WorkflowCompleted += OnSOPWorkflowCompleted;
+            _sopModule.ModelWarning += OnSOPModelWarning;
 
             // 3. 确保手部姿态估计服务已准备好（等待异步初始化完成）
             Console.WriteLine($"[MainViewModel] 确保手部服务准备就绪...");
@@ -1566,7 +1573,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Status = $"⚠ SOP 违规: [{e.Violation.Type}] {e.Violation.Description}";
             // 跳步（中间跳了工序）→ 播放 ng.wav
             if (e.Violation.Type == ViolationType.SkipStep)
+            {
+                Console.WriteLine($"[SOP] 收到跳步违规事件 -> 请求播放 ng.wav (path='{_ngWavPath}')");
                 PlayNgSound();
+            }
         });
     }
 
@@ -1630,35 +1640,42 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 播放音频（后台线程完整播放，不阻塞 UI）。文件不存在时静默跳过。
-    /// 关键修复：旧实现用 using var player + 异步 Play()，using 释放时会调用 Stop()
-    /// 立即截断声音，导致 ng.wav（较大）几乎听不到。这里改为缓存 SoundPlayer（不释放）
-    /// 并在后台线程用 PlaySync() 同步播放到结束。
+    /// 播放音频（SoundPlayer 内部异步播放线程，不阻塞 UI）。文件不存在时静默跳过。
+    /// 设计要点：
+    /// 1. 用 SoundPlayer.Play() 异步模式——这是该 API 设计的主播放方式，内部自己管理
+    ///    独立播放线程，在 UI 线程或后台线程调用都可靠（比 Task.Run+PlaySync 稳）。
+    /// 2. 播放器常驻缓存 _sopSoundPlayerCache 永不 Dispose，避免 Dispose 内部调用 Stop()
+    ///    截断正在播放的声音（ng.wav 较大，曾被截断导致听不到）。
+    /// 3. 同步 Load() 到内存，避免首次异步播放因未就绪而丢失。
     /// </summary>
     private void PlaySopSound(string? path)
     {
-        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return;
+        if (string.IsNullOrEmpty(path))
+        {
+            Console.WriteLine("[SOP-Audio] 跳过播放：音频路径为空（未初始化）");
+            return;
+        }
+        if (!File.Exists(path))
+        {
+            Console.WriteLine($"[SOP-Audio] 跳过播放：文件不存在 -> {path}");
+            return;
+        }
         try
         {
-            SoundPlayer? player = null;
+            SoundPlayer player;
             lock (_sopSoundPlayerCache)
             {
                 if (!_sopSoundPlayerCache.TryGetValue(path, out player))
                 {
                     player = new SoundPlayer(path);
-                    player.Load(); // 同步加载到内存，避免首次异步加载竞态导致播放丢失
-                    _sopSoundPlayerCache[path] = player;
+                    player.Load(); // 同步加载到内存，避免首次异步播放竞态导致丢失
+                    _sopSoundPlayerCache[path] = player; // 缓存引用：防 GC 提前回收 + 避免 Dispose 截断
                 }
             }
 
-            var p = player;
-            // PlaySync 会阻塞调用线程直到播放结束，故放到后台 Task，避免卡 UI；
-            // 播放器常驻缓存不 Dispose，保证整段音频（尤其 ng.wav）被完整播放。
-            Task.Run(() =>
-            {
-                try { p.PlaySync(); }
-                catch { /* 忽略单次播放异常 */ }
-            });
+            // 异步播放：SoundPlayer 内部独立线程，不阻塞 UI；不 Dispose 保证整段播放完整。
+            player.Play();
+            Console.WriteLine($"[SOP-Audio] 已发起播放: {path}");
         }
         catch (Exception ex)
         {
