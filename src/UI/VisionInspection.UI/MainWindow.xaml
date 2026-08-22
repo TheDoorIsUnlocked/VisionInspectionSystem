@@ -80,9 +80,7 @@
                 <MenuItem Header="🧙 SOP 生成向导" Click="SopWizardMenuItem_Click"/>
             </MenuItem>
 
-            <MenuItem Header="相机">
-                <MenuItem Header="📷 相机配置" Click="CameraConfigMenuItem_Click"/>
-            </MenuItem>
+            <MenuItem Header="相机" Click="CameraConfigMenuItem_Click"/>
 
             <MenuItem Header="配置">
                 <MenuItem Header="模型管理" Click="ModelManagementMenuItem_Click"/>
