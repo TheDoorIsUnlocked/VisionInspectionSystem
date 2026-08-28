@@ -52,6 +52,10 @@ configs/*.local.json
 .DS_Store
 Thumbs.db
 
+# Tool/agent memory (not project source)
+.claude/
+.workbuddy/
+
 # Nested git repos / large model files
 yolo_models/dwpose-github/
 0_IMG_0631.png

@@ -1,0 +1,1 @@
+ERROR: MethodInvocationException: 使用“1”个参数调用“GetType”时发生异常:“因为没有预加载，所以无法解析程序集“System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a”的依赖项。在使用 ReflectionOnly API 时，必须通过 ReflectionOnlyAssemblyResolve 事件预加载或按需要加载依赖程序集。”
