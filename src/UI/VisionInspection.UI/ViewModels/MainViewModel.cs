@@ -2579,40 +2579,45 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             _isDisposed = true;
             
-            // 取消订阅相机事件（先取消订阅，避免在关闭过程中收到事件）
+            // 取消订阅相机/检测/SOP 事件，避免关闭过程中收到回调
             _cameraManager.ImageGrabbed -= OnCameraImageGrabbed;
             _cameraManager.ConnectionStatusChanged -= OnCameraConnectionStatusChanged;
-            
-            // 取消订阅检测错误事件
             _detectionService.DetectionError -= OnDetectionError;
-
-            // ⭐ 取消订阅 SOP 事件并释放资源
             if (_sopModule != null)
             {
                 _sopModule.StepChanged -= OnSOPStepChanged;
                 _sopModule.ViolationDetected -= OnSOPViolationDetected;
                 _sopModule.WorkflowCompleted -= OnSOPWorkflowCompleted;
-                _sopModule.Dispose();
-                _sopModule = null;
             }
 
-            // 修复：停止推理工作线程
+            // ⭐ 先停止相机抓取，避免持续产生新帧
+            try { SafeShutdownCamera(); } catch (Exception) { }
+
+            // ⭐ 再停止后台推理任务，并等待其真正结束，避免原生会话被释放后仍被线程访问
             try
             {
                 _inferenceCts?.Cancel();
                 _inferenceQueue?.Writer.TryComplete();
+                _inferenceWorkerTask?.Wait(TimeSpan.FromSeconds(3));
             }
             catch (Exception)
             {
-                // Channel已经关闭或为空，忽略
+                // 忽略等待/取消异常
+            }
+
+            // 释放 SOP 模块（内部 StopWorkflow 并释放 _yolo / 手部服务），此时推理线程已停止
+            if (_sopModule != null)
+            {
+                try { _sopModule.Dispose(); } catch (Exception) { }
+                _sopModule = null;
             }
 
             // 释放图像资源
             CurrentImage?.Dispose();
             DetectionResultImage?.Dispose();
 
-            // 安全关闭相机
-            SafeShutdownCamera();
+            // 释放检测服务（YOLO 推理会话）
+            try { _detectionService?.Dispose(); } catch (Exception) { }
         }
     }
     
