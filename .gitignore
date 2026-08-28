@@ -55,3 +55,16 @@ Thumbs.db
 # Nested git repos / large model files
 yolo_models/dwpose-github/
 0_IMG_0631.png
+
+# Large model / binary / media files (excluded from repo)
+src/yolo_models/
+yolo_models/
+models/
+ffmpeg/
+ffmpeg-release-essentials/
+outputs/
+*.onnx
+*.onnx.*
+*.pt
+*.weights
+*.log
