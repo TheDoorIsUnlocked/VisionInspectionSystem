@@ -56,6 +56,12 @@ Thumbs.db
 .claude/
 .workbuddy/
 
+# Docs / notes (keep only README in repo)
+docs/
+remember.txt
+seg_reflect.txt
+src/UI/VisionInspection.UI/remember.txt
+
 # Nested git repos / large model files
 yolo_models/dwpose-github/
 0_IMG_0631.png
