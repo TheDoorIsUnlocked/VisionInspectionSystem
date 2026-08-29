@@ -592,9 +592,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     if (obj.Mask != null)
                     {
                         var color = SEG_MASK_COLORS[obj.ClassId % SEG_MASK_COLORS.Length];
-                        DrawSegmentationMask(canvas, obj.Mask,
+                        // 掩膜按原始检测框尺寸位打包，绘制必须用 MaskBox（此处检测结果未经平滑，与 PixelBoundingBox 一致）
+                        var maskBox = obj.MaskBox ?? new SKRectI(
                             (int)obj.BoundingBox[0], (int)obj.BoundingBox[1],
-                            (int)obj.BoundingBox[2], (int)obj.BoundingBox[3], color);
+                            (int)(obj.BoundingBox[0] + obj.BoundingBox[2]), (int)(obj.BoundingBox[1] + obj.BoundingBox[3]));
+                        DrawSegmentationMask(canvas, obj.Mask,
+                            maskBox.Left, maskBox.Top,
+                            maskBox.Width, maskBox.Height, color);
                     }
                 }
             }
@@ -2114,9 +2118,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             if (obj.Mask != null)
             {
                 var maskColor = SEG_MASK_COLORS[obj.ClassId % SEG_MASK_COLORS.Length];
+                // 掩膜按原始检测框尺寸位打包，必须用 MaskBox（而非平滑后的 PixelBoundingBox）绘制，否则错位/变形
+                var maskBox = obj.MaskBox ?? obj.PixelBoundingBox;
                 DrawSegmentationMask(canvas, obj.Mask,
-                    obj.PixelBoundingBox.Left, obj.PixelBoundingBox.Top,
-                    obj.PixelBoundingBox.Width, obj.PixelBoundingBox.Height, maskColor);
+                    maskBox.Left, maskBox.Top,
+                    maskBox.Width, maskBox.Height, maskColor);
             }
         }
     }

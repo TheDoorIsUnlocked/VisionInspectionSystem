@@ -71,6 +71,13 @@ namespace VisionInspection.Core.Services
         public byte[]? Mask { get; set; }
 
         /// <summary>
+        /// 分割掩码对应的原始边界框（像素坐标）。
+        /// YoloDotNet 的位打包掩码是按该框的宽高生成的，绘制掩膜时必须用它（而非平滑后的框），
+        /// 否则掩膜会因尺寸/位置不匹配而错位、变形，无法准确贴合物体轮廓。
+        /// </summary>
+        public SKRectI? MaskBox { get; set; }
+
+        /// <summary>
         /// 关键点（仅姿态估计模型）
         /// </summary>
         public List<KeyPoint>? KeyPoints { get; set; }

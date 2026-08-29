@@ -231,6 +231,10 @@ public class DetectionTrackSmoother
                     (int)Math.Round(t.Box.Left), (int)Math.Round(t.Box.Top),
                     (int)Math.Round(t.Box.Right), (int)Math.Round(t.Box.Bottom)),
                 Mask = src.Mask,
+                // 掩膜必须保留原始检测框（掩膜按该框尺寸位打包），否则绘制会错位/变形
+                MaskBox = (src.MaskBox is { } mb && mb.Width > 0 && mb.Height > 0)
+                    ? mb
+                    : src.PixelBoundingBox,
                 KeyPoints = t.SmoothedKeyPoints ?? src.KeyPoints,
                 IsInRoi = src.IsInRoi,
                 RoiId = src.RoiId

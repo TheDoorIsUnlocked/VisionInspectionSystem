@@ -232,7 +232,8 @@ namespace VisionInspection.Modules.Detection
                 Confidence = (float)r.Confidence,
                 BoundingBox = new[] { (float)r.BoundingBox.Left, (float)r.BoundingBox.Top, (float)r.BoundingBox.Width, (float)r.BoundingBox.Height },
                 PixelBoundingBox = r.BoundingBox,
-                Mask = r.BitPackedPixelMask
+                Mask = r.BitPackedPixelMask,
+                MaskBox = r.BoundingBox
             }).ToList();
 
             if (rois.Count > 0)
