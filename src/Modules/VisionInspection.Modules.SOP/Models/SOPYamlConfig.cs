@@ -47,6 +47,10 @@ public class SopyamlSop
     // ⭐ 新增：SOP模型配置
     [YamlMember(Alias = "model")]
     public SopyamlModel? Model { get; set; }
+
+    // ⭐ 新增：区域监控配置（在标定区域内检测"未戴安全帽的人"）
+    [YamlMember(Alias = "monitoring")]
+    public SopyamlMonitoring? Monitoring { get; set; }
 }
 
 public class SopyamlStep
@@ -315,6 +319,36 @@ public class SopyamlModel
 }
 
 /// <summary>
+/// 区域监控配置（YAML sop.monitoring 节点）
+/// </summary>
+public class SopyamlMonitoring
+{
+    /// <summary>是否启用区域监控</summary>
+    [YamlMember(Alias = "enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>人体类别名列表（与模型 classes 一致）</summary>
+    [YamlMember(Alias = "person_classes")]
+    public List<string> PersonClasses { get; set; } = new() { "person" };
+
+    /// <summary>安全帽类别名列表（与模型 classes 一致）</summary>
+    [YamlMember(Alias = "helmet_classes")]
+    public List<string> HelmetClasses { get; set; } = new() { "helmet", "safe_helmet", "hard_hat" };
+
+    /// <summary>需要监控的区域 ID 列表；为空表示监控全部区域</summary>
+    [YamlMember(Alias = "regions")]
+    public List<string>? Regions { get; set; }
+
+    /// <summary>检测置信度阈值（0-1）</summary>
+    [YamlMember(Alias = "min_confidence")]
+    public float MinConfidence { get; set; } = 0.5f;
+
+    /// <summary>报警冷却时间（秒），防止每帧连续播放 ng.wav</summary>
+    [YamlMember(Alias = "cooldown_seconds")]
+    public double CooldownSeconds { get; set; } = 5;
+}
+
+/// <summary>
 /// YAML配置转换器
 /// </summary>
 public static class SOPYamlConverter
@@ -534,6 +568,22 @@ public static class SOPYamlConverter
             {
                 workflow.Description += $" | 模型: {System.IO.Path.GetFileName(yamlSop.Model.Path)}";
             }
+        }
+
+        // ⭐ 转换安全帽监控配置（独立监控任务）
+        // 仅当配方显式配置 monitoring 节点时才启用，避免与手机/水杯等步骤型任务融合。
+        if (yamlSop.Monitoring != null)
+        {
+            workflow.Monitoring = new SOPMonitoringConfig
+            {
+                Enabled = yamlSop.Monitoring.Enabled,
+                PersonClasses = yamlSop.Monitoring.PersonClasses,
+                HelmetClasses = yamlSop.Monitoring.HelmetClasses,
+                Regions = yamlSop.Monitoring.Regions,
+                MinConfidence = yamlSop.Monitoring.MinConfidence,
+                CooldownSeconds = yamlSop.Monitoring.CooldownSeconds
+            };
+            Console.WriteLine($"[SOP] 安全帽监控任务已加载: enabled={workflow.Monitoring.Enabled} | person={string.Join(",", workflow.Monitoring.PersonClasses)} | helmet={string.Join(",", workflow.Monitoring.HelmetClasses)}");
         }
 
         // ⭐ 转换违规定义（如果有）
@@ -889,6 +939,40 @@ public static class SOPYamlConverter
         }
 
         return detection;
+    }
+
+    /// <summary>
+    /// 加载完整 YAML 配置模型（保留 steps / regions / model / monitoring / settings / violations 等全部节点），
+    /// 供 SOP 流程预览与编辑窗口直接读写，避免经 SOPWorkflow 中转丢失信息。
+    /// </summary>
+    public static SOPYamlConfig LoadFullConfig(string yamlPath)
+    {
+        if (!File.Exists(yamlPath))
+        {
+            throw new FileNotFoundException($"YAML配置文件不存在: {yamlPath}");
+        }
+
+        var yaml = File.ReadAllText(yamlPath);
+        var deserializer = new DeserializerBuilder()
+            .IgnoreUnmatchedProperties()
+            .Build();
+
+        var config = deserializer.Deserialize<SOPYamlConfig>(yaml) ?? new SOPYamlConfig();
+        config.Sop ??= new SopyamlSop();
+        return config;
+    }
+
+    /// <summary>
+    /// 将完整配置模型写回 YAML（省略 null 与空集合，保持文件简洁）。
+    /// 注意：往返序列化会丢失 YAML 注释（与 SaveRegions 相同的取舍）。
+    /// </summary>
+    public static void SaveFullConfig(string yamlPath, SOPYamlConfig config)
+    {
+        config.Sop ??= new SopyamlSop();
+        var serializer = new SerializerBuilder()
+            .ConfigureDefaultValuesHandling(DefaultValuesHandling.OmitNull | DefaultValuesHandling.OmitEmptyCollections)
+            .Build();
+        File.WriteAllText(yamlPath, serializer.Serialize(config));
     }
 
     /// <summary>

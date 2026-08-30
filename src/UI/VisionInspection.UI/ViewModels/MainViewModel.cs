@@ -160,6 +160,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 关键：避免"推理完成 → 把旧帧+检测框覆盖到 CurrentImage → 画面退回上一帧"的卡顿感。
     private SOPModuleResult? _lastSopResult;
     private int _noSopResultFrameCount = 0;
+
+    // ---- 区域监控（在标定区域内检测"未戴安全帽的人"）状态 ----
+    private DateTime _regionAlertLastTime = DateTime.MinValue;
+    private bool _regionAlertActive = false;
     private const int MaxNoSopResultFrames = 15;  // ~0.5s @ 30fps，超过后清除残留检测框
 
     // 检测框时序平滑器：IOU 跟踪 + EMA 位置平滑 + 确认/保持机制，消除检测框闪烁与跳动。
@@ -703,6 +707,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
                     HighConfidenceCount = DetectionResults.Count(o => o.Confidence >= 0.5);
 
+                    // 区域监控：在标定区域内检测"未戴安全帽的人"，命中则播放 ng.wav
+                    EvaluateRegionMonitoring(sopResult);
+
                     // 不再在此处覆盖 RoiEditorViewModel.CurrentImage：
                     // 让 OnCameraImageGrabbed 在收到下一帧新画面时统一叠加渲染，
                     // 画面永远是"最新相机帧 + 最新检测结果"，消除卡顿和上一帧残留。
@@ -739,6 +746,110 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         finally
         {
             _sopInferenceLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 区域监控：在「🎯 标定区域」标定的 ROI 区域内，若出现"未戴安全帽的人"，播放 ng.wav。
+    /// 判定标准：
+    ///   1. 人体框中心点落入任一监控区域 → 认为该区域出现人；
+    ///   2. 该人的头部区域（人体框上部 35%）没有与任何安全帽框相交 → 判为"未戴安全帽"。
+    /// 报警带冷却时间（SOPMonitoringConfig.CooldownSeconds），防止每帧连续播放造成噪音。
+    /// 人体/安全帽类别名由 YAML 的 sop.monitoring 配置（与模型 classes 一致）。
+    /// </summary>
+    private void EvaluateRegionMonitoring(SOPModuleResult sopResult)
+    {
+        try
+        {
+            var workflow = _sopModule?.CurrentWorkflow;
+            var cfg = workflow?.Monitoring;
+            if (workflow == null || cfg == null || !cfg.Enabled) return;
+            if (workflow.Regions == null || workflow.Regions.Count == 0) return;
+
+            // 过滤需要监控的区域（cfg.Regions 为空 = 监控全部标定区域）
+            var zones = workflow.Regions;
+            if (cfg.Regions is { Count: > 0 })
+            {
+                zones = zones
+                    .Where(z => cfg.Regions.Contains(z.ZoneId, StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+            }
+            if (zones.Count == 0) return;
+
+            var personNames = cfg.PersonClasses ?? new List<string>();
+            var helmetNames = cfg.HelmetClasses ?? new List<string>();
+            if (personNames.Count == 0) return;
+
+            // 类别名匹配（不区分大小写）
+            static bool IsClass(string? name, List<string> names) =>
+                !string.IsNullOrEmpty(name) && names.Contains(name, StringComparer.OrdinalIgnoreCase);
+
+            var persons = sopResult.Detections
+                .Where(d => d.Confidence >= cfg.MinConfidence && IsClass(d.Label?.Name, personNames))
+                .ToList();
+            var helmets = sopResult.Detections
+                .Where(d => d.Confidence >= cfg.MinConfidence && IsClass(d.Label?.Name, helmetNames))
+                .ToList();
+
+            bool violation = false;
+            string detail = "";
+            foreach (var person in persons)
+            {
+                var pBox = person.BoundingBox;
+                var centerX = pBox.MidX;
+                var centerY = pBox.MidY;
+
+                foreach (var zone in zones)
+                {
+                    var zoneRect = new SKRect(zone.X, zone.Y, zone.X + zone.Width, zone.Y + zone.Height);
+                    if (!zoneRect.Contains(centerX, centerY)) continue;
+
+                    // 头部区域 = 人体框上部 35%
+                    var headRect = new SKRect(
+                        pBox.Left,
+                        pBox.Top,
+                        pBox.Right,
+                        pBox.Top + pBox.Height * 0.35f);
+
+                    var hasHelmet = helmets.Any(h =>
+                    {
+                        var hBox = h.BoundingBox;
+                        return new SKRect(hBox.Left, hBox.Top, hBox.Right, hBox.Bottom)
+                            .IntersectsWith(headRect);
+                    });
+
+                    if (!hasHelmet)
+                    {
+                        violation = true;
+                        detail = $"区域[{zone.Name}] 出现未戴安全帽的人(person={person.Label?.Name}, conf={person.Confidence:F2})";
+                        break;
+                    }
+                }
+                if (violation) break;
+            }
+
+            if (violation)
+            {
+                // 冷却时间内不重复报警，避免每帧连续播放 ng.wav
+                if (!_regionAlertActive ||
+                    (DateTime.Now - _regionAlertLastTime).TotalSeconds >= cfg.CooldownSeconds)
+                {
+                    _regionAlertLastTime = DateTime.Now;
+                    _regionAlertActive = true;
+                    SopStatus = "⚠ 区域监控: 未戴安全帽！";
+                    Status = $"⚠ {detail}";
+                    DebugLog($"[RegionMonitor] {detail} -> 播放 ng.wav");
+                    PlayNgSound();
+                }
+            }
+            else
+            {
+                _regionAlertActive = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"区域监控异常: {ex.Message}");
         }
     }
 
@@ -1475,6 +1586,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             DebugLog($"[StartSOP] StartWorkflow 完成");
 
+            // 安全帽监控任务状态提示
+            var monitorCfg = _sopModule?.CurrentWorkflow?.Monitoring;
+            if (monitorCfg != null && monitorCfg.Enabled)
+            {
+                var zoneCount = _sopModule?.CurrentWorkflow?.Regions?.Count ?? 0;
+                DebugLog($"[StartSOP] 安全帽监控任务已启用: person={string.Join(",", monitorCfg.PersonClasses)} | helmet={string.Join(",", monitorCfg.HelmetClasses)} | 标定区域数={zoneCount}");
+                if (zoneCount == 0)
+                    DebugLog("[StartSOP] 警告: 未标定任何区域，安全帽监控将不生效（请用「🎯 标定区域」定义）");
+            }
+            else
+            {
+                DebugLog("[StartSOP] 当前配方未启用安全帽监控（仅按 SOP 步骤任务运行）");
+            }
+
             // 5. 启动实时检测
             IsSOPDetecting = true;
             DebugLog($"[StartSOP] IsSOPDetecting 设置为: {IsSOPDetecting}");
@@ -1518,6 +1643,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _detectionSmoother.Clear();
         _lastSopResult = null;
         _noSopResultFrameCount = 0;
+        // 重置区域监控报警状态
+        _regionAlertActive = false;
+        _regionAlertLastTime = DateTime.MinValue;
         InferenceFps = 0;
         SopStatus = "SOP 检测已停止";
         Status = "SOP 检测已停止";

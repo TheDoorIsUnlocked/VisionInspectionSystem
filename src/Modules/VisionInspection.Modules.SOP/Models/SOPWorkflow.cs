@@ -17,6 +17,9 @@ public class SOPWorkflow
 
     // ⭐ 新增：该工作流配置的 YOLO 模型
     public SOPModelConfig? Model { get; set; }
+
+    // ⭐ 新增：区域监控配置（在标定区域内检测"未戴安全帽的人"）
+    public SOPMonitoringConfig? Monitoring { get; set; }
 }
 
 /// <summary>
@@ -161,4 +164,37 @@ public class SOPModelConfig
     /// 用于 SOP 条件评估时做类别名称校验
     /// </summary>
     public List<string> Classes { get; set; } = new();
+}
+
+/// <summary>
+/// 区域监控配置：在标定的 ROI 区域内，检测是否出现"未戴安全帽的人"，一旦出现播放 ng.wav。
+/// 由 YAML 的 sop.monitoring 节点解析而来。
+/// </summary>
+public class SOPMonitoringConfig
+{
+    /// <summary>是否启用区域监控</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// 人体类别名（与模型 classes 一致），如 ["person"]。
+    /// 判定标准：人体框中心落入标定区域内即视为"该区域出现人"。
+    /// </summary>
+    public List<string> PersonClasses { get; set; } = new() { "person" };
+
+    /// <summary>
+    /// 安全帽类别名（与模型 classes 一致），如 ["helmet", "safe_helmet", "hard_hat"]。
+    /// 只要任一安全帽框与人体头部区域（人体框上部 35%）相交，即视为"戴了安全帽"。
+    /// </summary>
+    public List<string> HelmetClasses { get; set; } = new() { "helmet", "safe_helmet", "hard_hat" };
+
+    /// <summary>
+    /// 需要监控的区域 ID 列表；为空表示监控全部标定区域。
+    /// </summary>
+    public List<string>? Regions { get; set; }
+
+    /// <summary>检测置信度阈值（0-1），默认 0.5</summary>
+    public float MinConfidence { get; set; } = 0.5f;
+
+    /// <summary>报警冷却时间（秒），防止每帧连续播放 ng.wav 造成噪音，默认 5 秒</summary>
+    public double CooldownSeconds { get; set; } = 5;
 }

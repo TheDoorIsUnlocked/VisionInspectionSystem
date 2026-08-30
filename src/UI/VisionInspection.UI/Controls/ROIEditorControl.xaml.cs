@@ -510,34 +510,63 @@ public partial class ROIEditorControl : SKElement
     }
 
     /// <summary>
-    /// 检测鼠标是否落在某个缩放调整手柄上
+    /// 检测鼠标是否落在某个缩放调整手柄上（分区命中：角部优先、其次边缘带）
+    /// 鼠标贴近边框任意位置（内侧或外侧）都能命中对应方向的手柄，不再只限 8 个点。
     /// </summary>
     private ResizeHandle GetResizeHandleAtPoint(SKPoint point, RectangleROI roi)
     {
         var bbox = roi.GetBoundingBox();
-        // 命中半径放大到 20 屏幕像素，且随缩放变化，命中更容易
-        float hitRadius = 20 / _zoomScale;
-        float midX = (bbox.Left + bbox.Right) / 2f;
-        float midY = (bbox.Top + bbox.Bottom) / 2f;
 
-        // 优先命中角点（用户更常用），再命中边中点
-        if (Distance(point, new SKPoint(bbox.Left, bbox.Top)) < hitRadius) return ResizeHandle.TopLeft;
-        if (Distance(point, new SKPoint(bbox.Right, bbox.Top)) < hitRadius) return ResizeHandle.TopRight;
-        if (Distance(point, new SKPoint(bbox.Left, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomLeft;
-        if (Distance(point, new SKPoint(bbox.Right, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomRight;
-        if (Distance(point, new SKPoint(midX, bbox.Top)) < hitRadius) return ResizeHandle.TopCenter;
-        if (Distance(point, new SKPoint(bbox.Left, midY)) < hitRadius) return ResizeHandle.MiddleLeft;
-        if (Distance(point, new SKPoint(bbox.Right, midY)) < hitRadius) return ResizeHandle.MiddleRight;
-        if (Distance(point, new SKPoint(midX, bbox.Bottom)) < hitRadius) return ResizeHandle.BottomCenter;
+        // 边缘带厚度与角部判定宽度（屏幕像素换算为图像坐标）
+        float edgeBand = 10f / _zoomScale;
+        float cornerZone = 16f / _zoomScale;
+
+        // 小矩形保护：命中区不超过半宽/半高的 45%，避免小矩形整体被手柄覆盖而无法移动
+        float halfW = (bbox.Right - bbox.Left) / 2f;
+        float halfH = (bbox.Bottom - bbox.Top) / 2f;
+        float clamp = Math.Min(halfW, halfH) * 0.45f;
+        edgeBand = Math.Min(edgeBand, clamp);
+        cornerZone = Math.Min(cornerZone, clamp);
+
+        // 不在扩展矩形（外扩 edgeBand）内 → 无手柄
+        if (point.X < bbox.Left - edgeBand || point.X > bbox.Right + edgeBand ||
+            point.Y < bbox.Top - edgeBand || point.Y > bbox.Bottom + edgeBand)
+            return ResizeHandle.None;
+
+        // 鼠标到四条边的距离
+        float dLeft = Math.Abs(point.X - bbox.Left);
+        float dRight = Math.Abs(point.X - bbox.Right);
+        float dTop = Math.Abs(point.Y - bbox.Top);
+        float dBottom = Math.Abs(point.Y - bbox.Bottom);
+
+        // 角部（用户最常用，给更宽的判定区）
+        if (dLeft <= cornerZone && dTop <= cornerZone) return ResizeHandle.TopLeft;
+        if (dRight <= cornerZone && dTop <= cornerZone) return ResizeHandle.TopRight;
+        if (dLeft <= cornerZone && dBottom <= cornerZone) return ResizeHandle.BottomLeft;
+        if (dRight <= cornerZone && dBottom <= cornerZone) return ResizeHandle.BottomRight;
+
+        // 边缘带：贴着任意一条边（内侧或外侧）即触发对应方向调整
+        if (dTop <= edgeBand) return ResizeHandle.TopCenter;
+        if (dBottom <= edgeBand) return ResizeHandle.BottomCenter;
+        if (dLeft <= edgeBand) return ResizeHandle.MiddleLeft;
+        if (dRight <= edgeBand) return ResizeHandle.MiddleRight;
 
         return ResizeHandle.None;
     }
 
-    private static float Distance(SKPoint a, SKPoint b)
+    /// <summary>
+    /// ROI 命中测试：矩形 ROI 允许鼠标在边框外几像素内也算命中（便于点中边缘触发移动）
+    /// </summary>
+    private bool HitTestROI(ROI roi, SKPoint point)
     {
-        float dx = a.X - b.X;
-        float dy = a.Y - b.Y;
-        return MathF.Sqrt(dx * dx + dy * dy);
+        if (roi is RectangleROI)
+        {
+            var b = roi.GetBoundingBox();
+            float tol = 6f / _zoomScale;
+            return point.X >= b.Left - tol && point.X <= b.Right + tol &&
+                   point.Y >= b.Top - tol && point.Y <= b.Bottom + tol;
+        }
+        return roi.ContainsPoint(point);
     }
 
     /// <summary>
@@ -688,15 +717,16 @@ public partial class ROIEditorControl : SKElement
             }
         }
 
-        // 检查是否点击了ROI
+        // 检查是否点击了ROI（扩展命中：鼠标在边框上/附近几像素内也能选中并移动）
         foreach (var roi in ViewModel.ROIs)
         {
-            if (roi.ContainsPoint(skPoint))
+            if (HitTestROI(roi, skPoint))
             {
                 ViewModel.SelectedROI = roi;
                 _isDragging = true;
                 _dragStart = skPoint;
                 _draggedROI = roi;
+                CaptureMouse(); // 拖动期间捕获鼠标，快速拖动不丢失
                 return;
             }
         }
@@ -726,11 +756,11 @@ public partial class ROIEditorControl : SKElement
         // 更新鼠标位置
         ViewModel.MousePosition = skPoint;
 
-        // 检查鼠标悬停在哪个ROI上
+        // 检查鼠标悬停在哪个ROI上（扩展命中，边缘附近也有悬停高亮反馈）
         ROI? hoveredROI = null;
         foreach (var roi in ViewModel.ROIs)
         {
-            if (roi.ContainsPoint(skPoint))
+            if (HitTestROI(roi, skPoint))
             {
                 hoveredROI = roi;
                 break;
@@ -811,8 +841,12 @@ public partial class ROIEditorControl : SKElement
     {
         if (ViewModel == null) return;
 
-        _isDragging = false;
-        _draggedROI = null;
+        if (_isDragging)
+        {
+            _isDragging = false;
+            _draggedROI = null;
+            ReleaseMouseCapture();
+        }
 
         if (_isResizing)
         {

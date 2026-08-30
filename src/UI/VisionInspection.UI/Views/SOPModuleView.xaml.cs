@@ -221,7 +221,8 @@ namespace VisionInspection.UI.Views
                 try
                 {
                     var text = File.ReadAllText(f);
-                    var m = Regex.Match(text, @"^\s{0,4}name\s*:\s*(.+)$", RegexOptions.Multiline);
+                    // [^\r\n#]+ 仅取本行 name 值：排除换行（防止吞掉 version/description）和行内 # 注释
+                    var m = Regex.Match(text, @"^\s{0,4}name\s*:\s*([^\r\n#]+)$", RegexOptions.Multiline);
                     if (m.Success)
                     {
                         var val = m.Groups[1].Value.Trim().Trim('"').Trim('\'');
@@ -589,6 +590,13 @@ namespace VisionInspection.UI.Views
     iou: 0.45
     useGpu: true
     classes: []
+  monitoring:
+    enabled: true
+    person_classes: [""person""]
+    helmet_classes: [""helmet"", ""safe_helmet"", ""hard_hat""]
+    regions: []
+    min_confidence: 0.5
+    cooldown_seconds: 5
 ";
         }
 
@@ -1139,44 +1147,34 @@ namespace VisionInspection.UI.Views
 
         private void ConfigButton_Click(object sender, RoutedEventArgs e)
         {
-            var configWindow = new SOPConfigWindow();
+            // 打开 SOP 流程预览与编辑窗口：传入当前配方 YAML，保存后自动重载
+            var configWindow = new SOPConfigWindow(string.IsNullOrEmpty(_currentYamlPath) ? null : _currentYamlPath);
             configWindow.Owner = Window.GetWindow(this);
 
-            // 传递当前步骤配置
-            var configSteps = _steps.Select(s => new SOPConfigStep
-            {
-                Id = s.Id,
-                Name = s.Name,
-                Description = s.Description,
-                Icon = s.Icon,
-                DetectionType = "物体检测",
-                ModelName = "默认YOLOv8模型"
-            }).ToList();
-
-            configWindow.SetSteps(configSteps);
-
-            // 传递当前检测模式配置
+            // 传递当前运行时检测配置（手部检测等）
             configWindow.SetDetectionModeConfig(_detectionModeConfig);
 
             if (configWindow.ShowDialog() == true)
             {
-                // 应用新配置
-                var newSteps = configWindow.GetSteps();
-                _steps.Clear();
-
-                for (int i = 0; i < newSteps.Count; i++)
+                // YAML 已保存 → 重载工作流步骤
+                if (!string.IsNullOrEmpty(configWindow.SavedYamlPath))
                 {
-                    AddStep((i + 1).ToString(), newSteps[i].Name, newSteps[i].Description, newSteps[i].Icon, newSteps[i].Id);
+                    try
+                    {
+                        LoadStepsFromYaml(configWindow.SavedYamlPath);
+                        _currentYamlPath = configWindow.SavedYamlPath;
+                        AddLog($"SOP流程已修改并重载: {System.IO.Path.GetFileName(_currentYamlPath)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        AddLog($"重载工作流失败: {ex.Message}");
+                    }
                 }
 
-                // 保存检测模式配置
+                // 应用运行时检测配置
                 _detectionModeConfig = configWindow.GetDetectionModeConfig();
-
-                // 更新SOP模块的检测模式
                 UpdateSOPDetectionMode();
-
                 UpdateStepDisplay();
-                AddLog($"SOP配置已更新 | 模式: {_detectionModeConfig.DetectionMode} | 手部检测: {_detectionModeConfig.EnableHandPoseEstimation}");
             }
         }
 

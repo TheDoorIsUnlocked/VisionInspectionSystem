@@ -80,3 +80,21 @@ sop:
     iou: 0.45
     useGpu: true
     classes: ["phone", "case_top", "charger"]    # 与训练时的类别名完全一致
+
+  # ---------------- 区域监控配置 ----------------
+  # 区域监控任务：在「🎯 标定区域」标定的区域内，若出现"未戴安全帽的人"则播放 ng.wav。
+  # 启用前提：
+  #   1) 已用「🎯 标定区域」标定至少一个区域（上面 regions 节点）；
+  #   2) model.path 指向能检测"人 + 安全帽"的模型，且 person_classes / helmet_classes
+  #      与模型训练类别名完全一致（如 COCO 的人=person；自训安全帽=helmet 等）。
+  # 判定规则：
+  #   · 人体框中心落入任一监控区域 → 该区域出现人；
+  #   · 安全帽框与人体头部区域（人体框上部 35%）相交 → 视为戴了安全帽；
+  #   · 有人的安全帽缺失 → 播放 ng.wav（带 cooldown_seconds 冷却，防止连续报警）。
+  monitoring:
+    enabled: true                 # false = 关闭区域监控
+    person_classes: ["person"]    # 人体类别名（与模型 classes 一致）
+    helmet_classes: ["helmet", "safe_helmet", "hard_hat"]  # 安全帽类别名
+    regions: []                   # 空 = 监控全部标定区域；可填区域 ID，如 ["danger_zone"]
+    min_confidence: 0.5           # 检测置信度阈值 (0-1)
+    cooldown_seconds: 5           # 报警冷却时间（秒）

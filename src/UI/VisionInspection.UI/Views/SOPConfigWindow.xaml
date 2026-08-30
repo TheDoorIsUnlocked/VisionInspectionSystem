@@ -6,183 +6,381 @@
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         mc:Ignorable="d"
         Icon="/Assets/AppIcon.ico"
-        Title="SOP流程配置" Height="900" Width="1000"
+        Title="SOP流程预览与编辑" Height="880" Width="1200"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize">
+    <Window.Resources>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="#333"/>
+            <Setter Property="Margin" Value="0,5,0,5"/>
+        </Style>
+        <Style x:Key="FieldLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="#666"/>
+            <Setter Property="Margin" Value="0,8,0,4"/>
+        </Style>
+        <Style x:Key="FieldInput" TargetType="TextBox">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="FieldCombo" TargetType="ComboBox">
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="8,0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <Style x:Key="HintText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="#999"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Resources>
+
     <Grid Background="#F5F5F5">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- 标题栏 -->
-        <Border Grid.Row="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="20,15">
+        <!-- 工具栏 -->
+        <Border Grid.Row="0" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="20,12">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal">
-                    <TextBlock Text="⚙️" FontSize="24" Margin="0,0,10,0"/>
-                    <StackPanel>
-                        <TextBlock Text="SOP流程配置" FontSize="18" FontWeight="Bold"/>
-                        <TextBlock Text="配置检测流程步骤和参数" FontSize="12" Foreground="#999" Margin="0,5,0,0"/>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="📋" FontSize="22" Margin="0,0,10,0" VerticalAlignment="Center"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="SOP流程预览与编辑" FontSize="16" FontWeight="Bold"/>
+                        <TextBlock x:Name="FilePathText" Text="未加载文件 — 请点「📂 打开YAML」选择配方" FontSize="11" Foreground="#999" Margin="0,2,0,0"/>
                     </StackPanel>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="20,0,0,0">
-                    <Button x:Name="LoadButton" Content="📂 加载配置" Padding="15,7" Click="LoadButton_Click"/>
-                    <TextBlock x:Name="StepTextBlock" Text="步骤 1" VerticalAlignment="Center" Margin="5,0,5,0" Foreground="#666"/>
-                    <Button x:Name="SaveButton" Content="💾 保存配置" Margin="5,0" Padding="15,7" Background="#1890FF" Foreground="White" Click="SaveButton_Click"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="OpenButton" Content="📂 打开YAML" Padding="14,7" Click="OpenButton_Click"/>
+                    <Button x:Name="SaveAsButton" Content="📑 另存为" Margin="8,0,0,0" Padding="14,7" Click="SaveAsButton_Click"/>
+                    <Button x:Name="SaveButton" Content="💾 保存并关闭" Margin="8,0,0,0" Padding="14,7" Background="#1890FF" Foreground="White" Click="SaveButton_Click"/>
                 </StackPanel>
-            </Grid>
-        </Border>
-
-        <!-- 全局配置栏 -->
-        <Border Grid.Row="1" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,0,0,1" Padding="15,10" Margin="15,15,15,0">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="200"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="150"/>
-                    <ColumnDefinition Width="Auto"/>
-                    <ColumnDefinition Width="100"/>
-                    <ColumnDefinition Width="*"/>
-                </Grid.ColumnDefinitions>
-
-                <!-- 统一检测模式说明 -->
-                <TextBlock Grid.Column="0" Text="检测模式:" VerticalAlignment="Center" Margin="0,0,10,0" FontWeight="Bold"/>
-                <TextBlock Grid.Column="1" Text="统一检测（物体检测 + 手部检测）" VerticalAlignment="Center" Foreground="#666"/>
-
-                <!-- 手部检测开关 -->
-                <CheckBox x:Name="EnableHandPoseCheckBox" Grid.Column="2" Content="启用手部检测" VerticalAlignment="Center" Margin="20,0,10,0" Checked="EnableHandPoseCheckBox_Checked" Unchecked="EnableHandPoseCheckBox_Unchecked" IsChecked="True"/>
-
-                <!-- 最大手数 -->
-                <TextBlock Grid.Column="3" Text="最大手数:" VerticalAlignment="Center" Margin="10,0,5,0"/>
-                <ComboBox x:Name="MaxHandsComboBox" Grid.Column="4" Height="28" Padding="8,0" VerticalContentAlignment="Center" IsEnabled="False">
-                    <ComboBoxItem Content="1" IsSelected="True"/>
-                    <ComboBoxItem Content="2"/>
-                </ComboBox>
-
-                <!-- GPU加速 -->
-                <CheckBox x:Name="UseGpuCheckBox" Grid.Column="5" Content="GPU加速" VerticalAlignment="Center" Margin="20,0,0,0" IsChecked="True"/>
-                
-                <!-- 高级参数按钮 -->
-                <Button x:Name="AdvancedParamsButton" Grid.Column="6" Content="⚙️ 高级参数" HorizontalAlignment="Right" Padding="10,5" Click="AdvancedParamsButton_Click"/>
             </Grid>
         </Border>
 
         <!-- 主内容区 -->
-        <Grid Grid.Row="2" Margin="15">
+        <Grid Grid.Row="1" Margin="15" x:Name="MainContentGrid">
             <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="330"/>
                 <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="350"/>
             </Grid.ColumnDefinitions>
 
-            <!-- 步骤列表 -->
+            <!-- 左：步骤列表 -->
             <Border Grid.Column="0" Background="White" CornerRadius="6" Margin="0,0,10,0">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-
-                    <!-- 列表标题 -->
                     <Border Grid.Row="0" Background="#FAFAFA" Padding="15,12" CornerRadius="6,6,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="50"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="100"/>
-                                <ColumnDefinition Width="100"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="序号" FontWeight="Bold" Foreground="#666"/>
-                            <TextBlock Grid.Column="1" Text="步骤名称" FontWeight="Bold" Foreground="#666" Margin="10,0"/>
-                            <TextBlock Grid.Column="2" Text="检测类型" FontWeight="Bold" Foreground="#666"/>
-                            <TextBlock Grid.Column="3" Text="操作" FontWeight="Bold" Foreground="#666" HorizontalAlignment="Center"/>
-                        </Grid>
+                        <TextBlock x:Name="StepsHeader" Text="步骤列表" FontWeight="Bold" Foreground="#666"/>
                     </Border>
-
-                    <!-- 步骤列表 -->
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <StackPanel x:Name="StepsListPanel" Margin="10"/>
+                        <StackPanel x:Name="StepsListPanel" Margin="8"/>
                     </ScrollViewer>
+                    <Button Grid.Row="2" x:Name="AddStepButton" Content="➕ 添加步骤" Margin="10" Padding="10,7"
+                            Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
                 </Grid>
             </Border>
 
-            <!-- 步骤编辑区 -->
-            <Border Grid.Column="1" Background="White" CornerRadius="6" Padding="20">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
+            <!-- 右：编辑区 -->
+            <TabControl Grid.Column="1" Background="White">
+                <!-- Tab 1: 步骤详情 -->
+                <TabItem Header="步骤详情">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="15,10,15,15">
+                            <TextBlock Text="基本信息" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="步骤 ID（英文标识，供 transitions 引用）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="StepIdTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="步骤名称" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="StepNameTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="步骤描述" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="StepDescTextBox" Height="50" Padding="8,6" TextWrapping="Wrap" AcceptsReturn="True"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="超时（秒）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="TimeoutTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="下一步骤（逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="TransitionsTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
 
-                    <TextBlock Grid.Row="0" Text="编辑步骤" FontSize="16" FontWeight="Bold" Margin="0,0,0,20"/>
+                            <TextBlock Text="检测条件（detection）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
+                            <TextBlock Text="检测方法" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox x:Name="DetectionMethodCombo" Style="{StaticResource FieldCombo}"
+                                      SelectionChanged="DetectionMethodCombo_SelectionChanged">
+                                <ComboBoxItem Content="人员在场（person_present）" Tag="person_present"/>
+                                <ComboBoxItem Content="物体存在（object_present）" Tag="object_present"/>
+                                <ComboBoxItem Content="物体在区域内（object_in_zone）" Tag="object_in_zone"/>
+                                <ComboBoxItem Content="手在区域内（hand_in_region）" Tag="hand_in_region"/>
+                                <ComboBoxItem Content="手不在区域内（hand_not_in_region）" Tag="hand_not_in_region"/>
+                                <ComboBoxItem Content="手稳定不动（hand_stable）" Tag="hand_stable"/>
+                                <ComboBoxItem Content="手从A区移到B区（hand_move）" Tag="hand_move"/>
+                                <ComboBoxItem Content="手动作：拿起/放下（hand_action）" Tag="hand_action"/>
+                                <ComboBoxItem Content="手靠近物体（hand_near_object）" Tag="hand_near_object"/>
+                                <ComboBoxItem Content="姿态稳定（pose_stable）" Tag="pose_stable"/>
+                                <ComboBoxItem Content="等待时长（time_elapsed）" Tag="time_elapsed"/>
+                            </ComboBox>
 
-                    <StackPanel Grid.Row="1">
-                        <!-- 步骤名称 -->
-                        <TextBlock Text="步骤名称" FontSize="12" Foreground="#666" Margin="0,0,0,5"/>
-                        <TextBox x:Name="StepNameTextBox" Height="32" Padding="10,0" VerticalContentAlignment="Center"/>
+                            <StackPanel x:Name="TargetObjectPanel">
+                                <TextBlock Text="目标物体类别（target_object）" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="TargetObjectTextBox" Style="{StaticResource FieldInput}"/>
+                            </StackPanel>
+                            <StackPanel x:Name="HandPanel">
+                                <TextBlock Text="手（hand）" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="HandCombo" Style="{StaticResource FieldCombo}">
+                                    <ComboBoxItem Content="任意手（any）" Tag="any"/>
+                                    <ComboBoxItem Content="左手（left）" Tag="left"/>
+                                    <ComboBoxItem Content="右手（right）" Tag="right"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel x:Name="ActionPanel">
+                                <TextBlock Text="动作（action）" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="ActionCombo" Style="{StaticResource FieldCombo}">
+                                    <ComboBoxItem Content="拿起（pickup）" Tag="pickup"/>
+                                    <ComboBoxItem Content="放下（putdown）" Tag="putdown"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <StackPanel x:Name="RegionPanel">
+                                <TextBlock Text="区域（region，来自下方区域列表）" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="RegionCombo" Style="{StaticResource FieldCombo}" IsEditable="True"/>
+                            </StackPanel>
+                            <StackPanel x:Name="FromToPanel">
+                                <TextBlock Text="起始区域（from_region）" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="FromRegionCombo" Style="{StaticResource FieldCombo}" IsEditable="True"/>
+                                <TextBlock Text="目标区域（to_region）" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="ToRegionCombo" Style="{StaticResource FieldCombo}" IsEditable="True"/>
+                            </StackPanel>
+                            <StackPanel x:Name="TolerancePanel">
+                                <TextBlock Text="容差（tolerance，像素）" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="ToleranceTextBox" Style="{StaticResource FieldInput}"/>
+                            </StackPanel>
+                            <StackPanel x:Name="DurationPanel">
+                                <TextBlock Text="等待时长（duration_ms，毫秒）" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="DurationMsTextBox" Style="{StaticResource FieldInput}"/>
+                            </StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="最小置信度（min_confidence）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="MinConfTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="稳定帧数（stable_frames）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="StableFramesTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="检测条件描述（可选）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="DetectionDescTextBox" Height="46" Padding="8,6" TextWrapping="Wrap"/>
 
-                        <!-- 检测类型 -->
-                        <TextBlock Text="检测类型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
-                        <ComboBox x:Name="DetectionTypeComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
-                            <ComboBoxItem Content="物体检测"/>
-                            <ComboBoxItem Content="OCR识别"/>
-                            <ComboBoxItem Content="二维码识别"/>
-                            <ComboBoxItem Content="尺寸测量"/>
-                            <ComboBoxItem Content="颜色检测"/>
-                            <ComboBoxItem Content="自定义脚本"/>
-                        </ComboBox>
+                            <TextBlock Text="违规防护" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
+                            <TextBlock Text="禁止出现物体（forbidden_objects，逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="ForbiddenTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="必须保持物体（must_keep，逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="MustKeepTextBox" Style="{StaticResource FieldInput}"/>
 
-                        <!-- 模型选择 -->
-                        <TextBlock Text="使用模型" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
-                        <ComboBox x:Name="ModelComboBox" Height="32" Padding="10,0" VerticalContentAlignment="Center">
-                            <ComboBoxItem Content="默认YOLOv8模型"/>
-                            <ComboBoxItem Content="车牌识别模型"/>
-                            <ComboBoxItem Content="人脸检测模型"/>
-                            <ComboBoxItem Content="自定义模型..."/>
-                        </ComboBox>
+                            <Button x:Name="ApplyStepButton" Content="✓ 应用修改" HorizontalAlignment="Right"
+                                    Margin="0,15,0,0" Padding="16,7" Background="#1890FF" Foreground="White"
+                                    Click="ApplyStepButton_Click"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
 
-                        <!-- 描述 -->
-                        <TextBlock Text="步骤描述" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
-                        <TextBox x:Name="StepDescriptionTextBox" Height="60" Padding="10" TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"/>
+                <!-- Tab 2: 流程信息 -->
+                <TabItem Header="流程信息">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="15,10,15,15">
+                            <TextBlock Text="流程基本信息" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="流程名称（name）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="FlowNameTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="版本（version）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="FlowVersionTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="流程描述（description）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="FlowDescTextBox" Height="50" Padding="8,6" TextWrapping="Wrap"/>
 
-                        <!-- 图标选择 -->
-                        <TextBlock Text="步骤图标" FontSize="12" Foreground="#666" Margin="0,10,0,5"/>
-                        <WrapPanel x:Name="IconPanel">
-                            <Button Content="🔍" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📄" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="✓" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🔌" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📷" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🔧" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="📏" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                            <Button Content="🎨" Width="36" Height="36" Margin="2" Click="IconButton_Click"/>
-                        </WrapPanel>
-                    </StackPanel>
+                            <TextBlock Text="全局设置（settings）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="置信度阈值（confidenceThreshold）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="SettingsConfTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="稳定帧数（stableFrames）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="SettingsStableTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="全局超时秒数（timeoutSeconds）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="SettingsTimeoutTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="完成重置延迟秒（reset_delay_sec）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="ResetDelayTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox x:Name="SettingsSkipCheckBox" Content="启用跳步检测（enableSkipDetection）" Margin="0,12,0,0"/>
+                            <CheckBox x:Name="SettingsTimeoutDetectCheckBox" Content="启用超时检测（enableTimeoutDetection）" Margin="0,8,0,0"/>
+                            <CheckBox x:Name="AutoResetCheckBox" Content="完成后自动重置循环检测（auto_reset_on_complete）" Margin="0,8,0,0"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
 
-                    <!-- 按钮 -->
-                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0">
-                        <Button x:Name="ClearButton" Content="🗑️ 清空" Margin="5,0" Padding="15,7" Click="ClearButton_Click"/>
-                        <Button x:Name="AddStepButton" Content="➕ 添加步骤" Margin="5,0" Padding="15,7" Background="#52C41A" Foreground="White" Click="AddStepButton_Click"/>
-                        <Button x:Name="UpdateStepButton" Content="💾 更新步骤" Margin="5,0" Padding="15,7" Background="#1890FF" Foreground="White" Click="UpdateStepButton_Click" Visibility="Collapsed"/>
-                    </StackPanel>
-                </Grid>
-            </Border>
+                <!-- Tab 3: 区域与模型 -->
+                <TabItem Header="区域与模型">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="15,10,15,15">
+                            <TextBlock Text="区域列表（regions）" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="区域坐标请使用主界面的「🎯 标定区域」工具修改，此处仅预览。" Style="{StaticResource HintText}" Margin="0,0,0,8"/>
+                            <StackPanel x:Name="RegionsPanel"/>
+
+                            <TextBlock Text="模型配置（model）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
+                            <TextBlock Text="ONNX 模型路径（path）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="ModelPathTextBox" Style="{StaticResource FieldInput}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="模型类型（type）" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox x:Name="ModelTypeCombo" Style="{StaticResource FieldCombo}">
+                                        <ComboBoxItem Content="物体检测（ObjectDetection）" Tag="ObjectDetection"/>
+                                        <ComboBoxItem Content="分割（Segmentation）" Tag="Segmentation"/>
+                                        <ComboBoxItem Content="姿态（PoseEstimation）" Tag="PoseEstimation"/>
+                                        <ComboBoxItem Content="旋转框（OBBDetection）" Tag="OBBDetection"/>
+                                    </ComboBox>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="GPU 设备 ID（gpu_id）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="ModelGpuIdTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="置信度（confidence）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="ModelConfTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="NMS IoU（iou）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="ModelIouTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <CheckBox x:Name="ModelGpuCheckBox" Content="使用 GPU（use_gpu）" Margin="0,10,0,0"/>
+                            <TextBlock Text="可检测类别（classes，逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="ModelClassesTextBox" Style="{StaticResource FieldInput}"/>
+
+                            <TextBlock Text="区域监控配置（monitoring）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
+                            <TextBlock Text="仅当原配置存在 monitoring 节点或勾选下方启用时才会写入该节点。" Style="{StaticResource HintText}" Margin="0,0,0,8"/>
+                            <CheckBox x:Name="MonitorEnabledCheckBox" Content="启用区域监控（enabled）"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="人体类别（person_classes，逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="PersonClassesTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="安全帽类别（helmet_classes，逗号分隔）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="HelmetClassesTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Text="监控区域 ID（regions，逗号分隔，留空监控全部区域）" Style="{StaticResource FieldLabel}"/>
+                            <TextBox x:Name="MonitorRegionsTextBox" Style="{StaticResource FieldInput}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="检测置信度（min_confidence）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="MonitorConfTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="报警冷却秒数（cooldown_seconds）" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="CooldownTextBox" Style="{StaticResource FieldInput}"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Tab 4: 运行时设置 -->
+                <TabItem Header="运行时设置">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="15,10,15,15">
+                            <TextBlock Text="运行时手部检测设置" Style="{StaticResource SectionHeader}"/>
+                            <TextBlock Text="这些参数不写入 YAML，仅影响当前程序的实时检测行为。" Style="{StaticResource HintText}" Margin="0,0,0,8"/>
+                            <CheckBox x:Name="EnableHandPoseCheckBox" Content="启用手部检测"
+                                      Checked="EnableHandPoseCheckBox_Checked" Unchecked="EnableHandPoseCheckBox_Unchecked"
+                                      IsChecked="True" Margin="0,8,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBlock Text="最大手数:" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="MaxHandsComboBox" Width="80" Height="28" Margin="8,0,0,0"
+                                          VerticalContentAlignment="Center">
+                                    <ComboBoxItem Content="1" IsSelected="True"/>
+                                    <ComboBoxItem Content="2"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <CheckBox x:Name="UseGpuCheckBox" Content="GPU加速" IsChecked="True" Margin="0,12,0,0"/>
+                            <Button x:Name="AdvancedParamsButton" Content="⚙️ 手部检测高级参数"
+                                    HorizontalAlignment="Left" Padding="14,7" Margin="0,18,0,0"
+                                    Click="AdvancedParamsButton_Click"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
         </Grid>
 
-        <!-- 底部按钮 -->
-        <Border Grid.Row="3" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,12">
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                <Button x:Name="ClearAllButton" Content="🗑️ 清空全部" Margin="5,0" Padding="20,7" Click="ClearAllButton_Click"/>
-                <Button x:Name="CancelButton" Content="❌ 取消" Margin="5,0" Padding="20,7" Click="CancelButton_Click"/>
-                <Button x:Name="ConfirmButton" Content="✓ 确定" Margin="5,0" Padding="20,7" Background="#1890FF" Foreground="White" Click="ConfirmButton_Click"/>
-            </StackPanel>
+        <!-- 底部 -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,10">
+            <Grid>
+                <TextBlock Text="提示：在左侧列表点击其他步骤会自动应用当前修改；所有改动需点「💾 保存并关闭」写回 YAML 后生效"
+                           Foreground="#999" FontSize="11" VerticalAlignment="Center"/>
+                <Button Content="❌ 关闭" HorizontalAlignment="Right" Padding="18,7" Click="CloseButton_Click"/>
+            </Grid>
         </Border>
     </Grid>
 </Window>
