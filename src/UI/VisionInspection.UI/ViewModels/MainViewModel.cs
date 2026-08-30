@@ -85,6 +85,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private string _status = "就绪";
 
+    /// <summary>底部状态栏显示的当前连接相机型号（未连接时为空）</summary>
+    [ObservableProperty]
+    private string _cameraModelText = "";
+
     [ObservableProperty]
     private string _sopStatus = "SOP模块未初始化";
 
@@ -1151,7 +1155,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (!_isDisposed)
             {
-                Status = isConnected ? "相机已连接" : "相机已断开";
+                if (isConnected)
+                {
+                    var cam = _cameraManager.CurrentCamera;
+                    string model = !string.IsNullOrEmpty(cam?.Model) ? cam.Model
+                                 : !string.IsNullOrEmpty(cam?.Name) ? cam.Name
+                                 : "未知";
+                    CameraModelText = $"📷 {model}";
+                    Status = "相机已连接";
+                }
+                else
+                {
+                    CameraModelText = "";
+                    Status = "相机已断开";
+                }
             }
         });
     }
@@ -1261,18 +1278,42 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// 切换主检测计算设备（GPU/CPU）。立即释放并重建推理会话，并持久化到 configs/sop_config.json。
+    /// 切换主检测计算设备（GPU/CPU）。立即释放并重建主检测服务（实时相机检测的推理引擎），
+    /// 同时同步 SOP 模块，并持久化到 configs/sop_config.json。
     /// </summary>
     [RelayCommand]
     private async Task ToggleGpuAsync()
     {
-        if (_sopModule == null)
-        {
-            Status = "请先启动 SOP 实时检测，再切换计算设备";
-            return;
-        }
         bool next = !UseGpu;
-        bool finalGpu = await _sopModule.SetUseGpuAsync(next);
+        bool finalGpu = next;
+
+        // 1) 切换主检测服务（实时相机检测走 _detectionService）
+        if (_loadedModel != null && _detectionService.IsInitialized)
+        {
+            // 避免重建期间与正在处理的帧竞争
+            if (IsRealTimeDetecting)
+                StopRealTimeDetection();
+
+            _loadedModel.UseGpu = next;
+            if (await _detectionService.InitializeAsync(_loadedModel))
+            {
+                finalGpu = next;
+            }
+            else
+            {
+                // CUDA 初始化失败 → 回退 CPU
+                finalGpu = false;
+                _loadedModel.UseGpu = false;
+                await _detectionService.InitializeAsync(_loadedModel);
+            }
+        }
+
+        // 2) 同步 SOP 模块（若已初始化）
+        if (_sopModule != null)
+        {
+            finalGpu = await _sopModule.SetUseGpuAsync(finalGpu);
+        }
+
         UseGpu = finalGpu;
         SaveUseGpuToConfig(finalGpu);
         Status = finalGpu ? "主检测已切换到 GPU (CUDA)" : "主检测运行在 CPU";

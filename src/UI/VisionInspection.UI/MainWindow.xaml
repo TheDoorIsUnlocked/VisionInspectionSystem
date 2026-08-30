@@ -342,6 +342,22 @@
 
         <!-- 状态栏 -->
         <StatusBar Grid.Row="4" Height="30">
+            <!-- 左下角：当前连接相机型号 -->
+            <StatusBarItem>
+                <TextBlock Text="{Binding CameraModelText}" Margin="0,0,12,0">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="#1890FF"/>
+                            <Setter Property="FontWeight" Value="Bold"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding CameraModelText}" Value="">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </StatusBarItem>
             <StatusBarItem>
                 <TextBlock Text="{Binding Status}" />
             </StatusBarItem>

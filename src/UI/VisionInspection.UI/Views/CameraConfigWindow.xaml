@@ -68,8 +68,16 @@
                             <!-- 相机类型选择 -->
                             <ComboBox x:Name="CameraTypeComboBox" Margin="0,0,0,10" SelectedIndex="0" SelectionChanged="CameraTypeComboBox_SelectionChanged">
                                 <ComboBoxItem Content="🎥 笔记本摄像头"/>
-                                <ComboBoxItem Content="📷 海康工业相机"/>
+                                <ComboBoxItem Content="📷 GigE相机"/>
+                                <ComboBoxItem Content="🌐 网络相机 (ONVIF)"/>
                             </ComboBox>
+                            <!-- 网络相机 RTSP 地址（ONVIF 类型时显示，可手动填写/修改） -->
+                            <StackPanel x:Name="RtspPanel" Margin="0,0,0,10" Visibility="Collapsed">
+                                <TextBlock Text="RTSP 地址" FontSize="12" Foreground="#666" Margin="0,0,0,4"/>
+                                <TextBox x:Name="RtspUrlTextBox" Padding="4,3" BorderBrush="#B0BEC5" BorderThickness="1"
+                                         TextChanged="RtspUrlTextBox_TextChanged"
+                                         ToolTip="支持 rtsp://user:pass@ip:554/... 格式；发现相机后自动填充，也可手动输入"/>
+                            </StackPanel>
                             <Button x:Name="EnumInterfaceButton" Content="🔍 搜索相机" Padding="15,2" Margin="0,0,0,10"
                                     Click="EnumInterfaceButton_Click"/>
                             <Button x:Name="EnumDeviceButton" Content="🔄 刷新列表" Padding="15,2" Margin="0,0,0,10"

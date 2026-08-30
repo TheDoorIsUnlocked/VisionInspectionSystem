@@ -505,6 +505,14 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
+        /// RTSP 地址输入变化时刷新连接按钮状态
+        /// </summary>
+        private void RtspUrlTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            UpdateUIState();
+        }
+
+        /// <summary>
         /// 相机选择改变
         /// </summary>
         private void CameraRadioButton_Checked(object sender, RoutedEventArgs e)
@@ -512,6 +520,14 @@ namespace VisionInspection.UI.Views
             if (sender is RadioButton radioButton && radioButton.Tag is CameraInfo camera)
             {
                 _selectedCamera = camera;
+
+                // 网络相机：把发现的 RTSP 地址回填到输入框，便于手动修改
+                if (CameraTypeComboBox.SelectedIndex == 2 && camera.ExtInfo is OnvifCameraExt ext)
+                {
+                    if (RtspUrlTextBox != null)
+                        RtspUrlTextBox.Text = ext.RtspUrl;
+                }
+
                 UpdateUIState();
             }
         }
@@ -521,6 +537,32 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private async void ConnectButton_Click(object sender, RoutedEventArgs e)
         {
+            // 网络相机：允许手动输入 RTSP 地址直接连接（无需先发现设备）
+            if (CameraTypeComboBox.SelectedIndex == 2)
+            {
+                string rtsp = RtspUrlTextBox?.Text.Trim() ?? "";
+                if (string.IsNullOrEmpty(rtsp))
+                {
+                    MessageBox.Show("请输入 RTSP 地址（可先点「搜索相机」自动发现，再修改地址中的账号密码）",
+                        "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                var ext = (_selectedCamera?.ExtInfo as OnvifCameraExt) ?? new OnvifCameraExt();
+                ext.RtspUrl = rtsp;
+                _selectedCamera ??= new CameraInfo
+                {
+                    Id = $"onvif_manual",
+                    Name = "网络相机（手动）",
+                    Model = ext.Name,
+                    SerialNumber = ext.Ip,
+                    InterfaceType = "ONVIF",
+                    DisplayName = $"🌐 网络相机（手动）",
+                    ExtInfo = ext
+                };
+                ((OnvifCameraExt)_selectedCamera.ExtInfo!).RtspUrl = rtsp;
+            }
+
             if (_selectedCamera == null)
             {
                 MessageBox.Show("请先选择相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -781,8 +823,11 @@ namespace VisionInspection.UI.Views
             EnumInterfaceButton.IsEnabled = true;
             EnumDeviceButton.IsEnabled = _cameras.Count > 0;
 
-            // 连接按钮
-            ConnectButton.IsEnabled = _selectedCamera != null && !IsConnected;
+            // 连接按钮（网络相机可在未发现设备时凭 RTSP 地址直接连接）
+            bool canConnect = !IsConnected &&
+                              (_selectedCamera != null ||
+                               (CameraTypeComboBox.SelectedIndex == 2 && !string.IsNullOrWhiteSpace(RtspUrlTextBox?.Text)));
+            ConnectButton.IsEnabled = canConnect;
             DisconnectButton.IsEnabled = IsConnected;
 
             // 参数控制 - 连接后可用，采集时也可调整
@@ -843,12 +888,21 @@ namespace VisionInspection.UI.Views
                 // 笔记本摄像头
                 _cameraManager.SetCameraService(new WebCameraService());
                 ShowStatus("已切换到笔记本摄像头模式");
+                if (RtspPanel != null) RtspPanel.Visibility = Visibility.Collapsed;
+            }
+            else if (CameraTypeComboBox.SelectedIndex == 2)
+            {
+                // 网络相机（ONVIF 自动发现 + RTSP）
+                _cameraManager.SetCameraService(new OnvifCameraService());
+                ShowStatus("已切换到网络相机模式（ONVIF 自动发现）");
+                if (RtspPanel != null) RtspPanel.Visibility = Visibility.Visible;
             }
             else
             {
-                // 海康工业相机
+                // GigE 工业相机
                 _cameraManager.SetCameraService(new HikvisionCameraService());
-                ShowStatus("已切换到海康工业相机模式");
+                ShowStatus("已切换到GigE相机模式");
+                if (RtspPanel != null) RtspPanel.Visibility = Visibility.Collapsed;
             }
 
             // 清空设备列表
