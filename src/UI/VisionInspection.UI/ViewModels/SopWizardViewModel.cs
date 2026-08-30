@@ -33,6 +33,8 @@ public partial class SopWizardViewModel : ObservableObject
     [ObservableProperty] private string _sopName = "";
     [ObservableProperty] private string _sopDescription = "";
     [ObservableProperty] private bool _includePersonEntry = true;
+    /// <summary>是否启用超时检测（settings.enableTimeoutDetection；false 时每步超时不生效）</summary>
+    [ObservableProperty] private bool _enableTimeoutDetection = true;
 
     /// <summary>第①步定义的区域名称预设（英文标识）</summary>
     [ObservableProperty] private ObservableCollection<string> _regionPresets = new();
@@ -321,6 +323,7 @@ public partial class SopWizardViewModel : ObservableObject
             Name = SopName,
             Description = SopDescription,
             IncludePersonEntry = IncludePersonEntry,
+            EnableTimeoutDetection = EnableTimeoutDetection,
             RegionPresets = RegionPresets.ToList(),
             ObjectPresets = ObjectPresets.ToList()
         };
@@ -564,6 +567,8 @@ public partial class WizardActionVM : ObservableObject
         _owner = owner;
         Model = new WizardAction(template);
         _stepName = template.DefaultStepName;
+        _timeoutSec = Model.TimeoutSec;
+        _enableTimeout = Model.TimeoutSec > 0;
         foreach (var p in template.Params)
         {
             var proxy = new ParamProxy(this, p);
@@ -580,6 +585,15 @@ public partial class WizardActionVM : ObservableObject
 
     [ObservableProperty] private string _stepName;
     partial void OnStepNameChanged(string value) => Model.StepName = value;
+
+    /// <summary>是否启用本步超时（取消勾选 = 0/不限制）</summary>
+    [ObservableProperty] private bool _enableTimeout = true;
+    /// <summary>本步超时秒数（启用时写入 Model.TimeoutSec）</summary>
+    [ObservableProperty] private int _timeoutSec = 30;
+    partial void OnEnableTimeoutChanged(bool value) => SyncTimeoutToModel();
+    partial void OnTimeoutSecChanged(int value) => SyncTimeoutToModel();
+
+    private void SyncTimeoutToModel() => Model.TimeoutSec = EnableTimeout ? Math.Max(0, TimeoutSec) : 0;
 }
 
 /// <summary>动作参数的单个编辑器（桥接模板参数与 WizardAction.Params 字典）</summary>

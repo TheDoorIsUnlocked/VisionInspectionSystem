@@ -32,14 +32,14 @@ public static class SopYamlGenerator
                     MinConfidence = 0.6f,
                     StableFrames = 3,
                     Description = "检测到人员在场（COCO person 类别）"
-                }));
+                }, timeout: 30));
         }
 
-        // 用户编排的动作
+        // 用户编排的动作（使用向导里设置的每步超时）
         foreach (var action in input.Actions)
         {
             var det = BuildDetection(action);
-            steps.Add(MakeStep(ref order, action.StepName, TemplateHint(action), det));
+            steps.Add(MakeStep(ref order, action.StepName, TemplateHint(action), det, timeout: action.TimeoutSec));
         }
 
         // 最后一步"完成"（time_elapsed, duration_ms=0），状态机到此判定全部通过并循环
@@ -49,7 +49,7 @@ public static class SopYamlGenerator
                 Method = "time_elapsed",
                 DurationMs = 0,
                 Description = "所有步骤完成后立即判定通过（duration_ms=0 表示到达此步即触发 SOP 全部通过，自动循环下一轮）"
-            }));
+            }, timeout: 0));
 
         // 串联 transitions（仅作可读性保留；状态机实际按 StepId 顺序线性推进）
         for (int i = 0; i < steps.Count; i++)
@@ -71,7 +71,7 @@ public static class SopYamlGenerator
                 DetectionMode = "pose_based",
                 ConfidenceThreshold = 0.6f,
                 StableFrames = 3,
-                EnableTimeoutDetection = false, // 不限制每步时间，做完才推进
+                EnableTimeoutDetection = input.EnableTimeoutDetection, // true=按每步 timeout 判定；false=所有步骤不限制超时
                 EnableSkipDetection = true,
                 AutoResetOnComplete = true,
                 ResetDelaySec = 1
@@ -138,7 +138,7 @@ public static class SopYamlGenerator
 
     // ===== 内部辅助 =====
 
-    private static SopyamlStep MakeStep(ref int order, string name, string desc, SopyamlDetection detection)
+    private static SopyamlStep MakeStep(ref int order, string name, string desc, SopyamlDetection detection, int timeout = 30)
     {
         order++;
         return new SopyamlStep
@@ -146,7 +146,7 @@ public static class SopYamlGenerator
             Id = order.ToString(),
             Name = name,
             Description = desc,
-            Timeout = 30,
+            Timeout = timeout,
             Detection = detection
         };
     }

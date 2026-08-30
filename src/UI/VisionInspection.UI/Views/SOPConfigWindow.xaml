@@ -61,7 +61,13 @@
                     </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="OpenButton" Content="📂 打开YAML" Padding="14,7" Click="OpenButton_Click"/>
+                    <TextBlock Text="配方文件:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                    <ComboBox x:Name="YamlFilesCombo" Width="220" Height="30" VerticalContentAlignment="Center"
+                              ToolTip="选择 configs/sop 目录下的 YAML 配方文件"
+                              SelectionChanged="YamlFilesCombo_SelectionChanged"/>
+                    <Button x:Name="RefreshYamlButton" Content="🔄" Width="34" Height="30" Margin="4,0,0,0"
+                            ToolTip="刷新 YAML 文件列表" Click="RefreshYamlButton_Click"/>
+                    <Button x:Name="OpenButton" Content="📂 打开YAML" Padding="14,7" Margin="8,0,0,0" Click="OpenButton_Click"/>
                     <Button x:Name="SaveAsButton" Content="📑 另存为" Margin="8,0,0,0" Padding="14,7" Click="SaveAsButton_Click"/>
                     <Button x:Name="SaveButton" Content="💾 保存并关闭" Margin="8,0,0,0" Padding="14,7" Background="#1890FF" Foreground="White" Click="SaveButton_Click"/>
                 </StackPanel>
@@ -114,8 +120,12 @@
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
-                                    <TextBlock Text="超时（秒）" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox x:Name="TimeoutTextBox" Style="{StaticResource FieldInput}"/>
+                                    <TextBlock Text="超时（秒，0/取消勾选=不限制）" Style="{StaticResource FieldLabel}"/>
+                                    <DockPanel>
+                                        <TextBox x:Name="TimeoutTextBox" Style="{StaticResource FieldInput}" DockPanel.Dock="Left" Width="120"/>
+                                        <CheckBox x:Name="EnableTimeoutCheckBox" Content="启用本步超时" VerticalAlignment="Center" Margin="10,0,0,0"
+                                                  Checked="EnableTimeoutCheckBox_Checked" Unchecked="EnableTimeoutCheckBox_Unchecked"/>
+                                    </DockPanel>
                                 </StackPanel>
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="下一步骤（逗号分隔）" Style="{StaticResource FieldLabel}"/>

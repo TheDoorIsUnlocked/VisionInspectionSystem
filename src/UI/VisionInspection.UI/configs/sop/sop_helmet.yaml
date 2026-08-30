@@ -1,0 +1,66 @@
+# 安全帽监控任务（独立监控配方）
+# ------------------------------------------------------------
+# 用途：在「🎯 标定区域」标定的区域内，检测是否出现"未戴安全帽的人"，
+#       出现即播放 ng.wav 并界面告警。
+# 本配方与手机/水杯等"步骤型任务"完全独立：不包含任何作业步骤（steps），
+# 仅做持续安全帽监控，在「产品配方」下拉框中显示为独立任务「安全帽监控」。
+#
+# ⚠️ 生效路径（重要）：
+#   本文件源码位于 src/UI/VisionInspection.UI/configs/sop/ ，由 csproj 复制到
+#   bin/.../configs/sop/ ，程序运行时读的是【输出目录】里的副本；
+#   根目录 configs/sop/ 下的同名副本仅供编辑器查看，程序【不读】。
+#
+# ⚠️ 使用前必须：
+#   1) 用「🎯 标定区域」按真机画面重框 monitor_zone 区域（坐标请以实际画面为准）；
+#   2) 将 model.path 换成能检测"人 + 安全帽"的模型，classes 与训练类别一致；
+#   3) monitoring.person_classes / helmet_classes 与模型类别名完全一致（含大小写）。
+# ============================================================
+
+sop:
+  # 产品配方下拉框中显示的独立任务名（简短）
+  name: "安全帽"
+  version: "1.0"
+  description: "独立安全帽监控任务：标定区域内出现未戴安全帽的人时播放 ng.wav"
+
+  # 全局设置
+  settings:
+    confidenceThreshold: 0.5         # 检测置信度阈值 (0-1)
+    stableFrames: 3
+    enableTimeoutDetection: false    # 无步骤型任务，不涉及超时/跳步
+
+  # ---------------- 监控区域 ----------------
+  # 坐标需在「🎯 标定区域」工具里按真机画面重新标定；monitoring.regions 为空时监控全部区域。
+  regions:
+    monitor_zone:
+      x1: 100
+      y1: 100
+      x2: 400
+      y2: 500
+      name: "监控区域"
+      description: "在该区域内检测未戴安全帽的人（请用标定工具按真机画面重设）"
+
+  # ---------------- 步骤 ----------------
+  # 本任务为独立监控，刻意不配置 steps：检测持续运行，不做步骤推进。
+  # （状态机在无步骤配方下保持运行态，检测结果每帧送入安全帽监控判定）
+
+  # ---------------- 模型配置 ----------------
+  # ⚠️ 临时验证：当前指向通用 COCO 模型 yolov8s.onnx（能识别 person，无 helmet 类别，
+  #    所以"区域内出现人"即报警，用于跑通流程）。拿到安全帽模型后改回：
+  #    path: "yolo_models/helmet_detection_yolov8s.onnx"  且 classes 换成实际类别名。
+  model:
+    path: "yolo_models/yolov8s.onnx"
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    use_gpu: true                   # 注意是下划线命名 use_gpu（不是 useGpu）
+    gpu_id: 0
+    classes: ["person", "helmet"]   # 临时验证用 COCO 模型；拿到安全帽模型后改 classes
+
+  # ---------------- 安全帽监控配置 ----------------
+  monitoring:
+    enabled: true                    # false = 关闭本配方的安全帽监控
+    person_classes: ["person"]       # 人体类别名（与模型 classes 一致）
+    helmet_classes: ["helmet"]       # 安全帽类别名
+    regions: []                      # 空 = 监控全部标定区域；可填 ["monitor_zone"]
+    min_confidence: 0.5              # 检测置信度阈值 (0-1)
+    cooldown_seconds: 5              # 报警冷却时间（秒），防止连续播放 ng.wav

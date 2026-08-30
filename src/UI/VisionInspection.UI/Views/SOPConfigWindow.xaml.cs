@@ -44,6 +44,7 @@ namespace VisionInspection.UI.Views
         {
             InitializeComponent();
             InitializeRuntimeDefaults();
+            RefreshYamlFilesList();
 
             if (!string.IsNullOrEmpty(yamlPath) && File.Exists(yamlPath))
             {
@@ -72,6 +73,126 @@ namespace VisionInspection.UI.Views
             UseGpuCheckBox.IsChecked = true;
         }
 
+        // ==================== YAML 文件列表 ====================
+
+        /// <summary>获取 SOP 配方目录（与 TryGetSopDirectory 一致，附带文件系统真实路径兜底）</summary>
+        private string? GetSopDirectory()
+        {
+            var dir = TryGetSopDirectory();
+            if (!string.IsNullOrEmpty(dir)) return dir;
+
+            // 兜底：当前工作目录下查找 configs/sop
+            try
+            {
+                var cwdDir = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "configs", "sop"));
+                if (Directory.Exists(cwdDir)) return cwdDir;
+            }
+            catch { /* 忽略 */ }
+            return null;
+        }
+
+        /// <summary>扫描 SOP 目录下所有 yaml/yml 文件，填充到 ComboBox</summary>
+        private void RefreshYamlFilesList()
+        {
+            _isLoading = true;
+            try
+            {
+                YamlFilesCombo.Items.Clear();
+                var dir = GetSopDirectory();
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
+                {
+                    YamlFilesCombo.Items.Add(new ComboBoxItem { Content = "（未找到 configs/sop 目录）", IsEnabled = false });
+                    YamlFilesCombo.SelectedIndex = 0;
+                    return;
+                }
+
+                var files = Directory.EnumerateFiles(dir, "*.yaml")
+                    .Concat(Directory.EnumerateFiles(dir, "*.yml"))
+                    .Distinct()
+                    .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (files.Count == 0)
+                {
+                    YamlFilesCombo.Items.Add(new ComboBoxItem { Content = "（目录下没有 YAML 文件）", IsEnabled = false });
+                    YamlFilesCombo.SelectedIndex = 0;
+                    return;
+                }
+
+                foreach (var f in files)
+                    YamlFilesCombo.Items.Add(new ComboBoxItem
+                    {
+                        Content = Path.GetFileName(f),
+                        Tag = f,
+                        ToolTip = f
+                    });
+
+                // 若当前已加载文件在列表中，则选中它
+                if (!string.IsNullOrEmpty(_yamlPath))
+                {
+                    var match = YamlFilesCombo.Items.OfType<ComboBoxItem>()
+                        .FirstOrDefault(i => string.Equals(i.Tag as string, _yamlPath, StringComparison.OrdinalIgnoreCase));
+                    if (match != null)
+                    {
+                        YamlFilesCombo.SelectedItem = match;
+                        return;
+                    }
+                }
+                YamlFilesCombo.SelectedIndex = -1;
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+        }
+
+        private void YamlFilesCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isLoading) return;
+            if (YamlFilesCombo.SelectedItem is not ComboBoxItem item || item.Tag is not string path) return;
+
+            if (!File.Exists(path))
+            {
+                MessageBox.Show($"文件不存在：{path}", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                RefreshYamlFilesList();
+                return;
+            }
+
+            // 已加载同一文件则跳过
+            if (string.Equals(_yamlPath, path, StringComparison.OrdinalIgnoreCase)) return;
+
+            try
+            {
+                LoadYaml(path);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"加载 YAML 失败: {ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void RefreshYamlButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshYamlFilesList();
+        }
+
+        /// <summary>让 ComboBox 选中项与当前 _yamlPath 同步（不触发重新加载）</summary>
+        private void SyncYamlComboSelection()
+        {
+            _isLoading = true;
+            try
+            {
+                var match = YamlFilesCombo.Items.OfType<ComboBoxItem>()
+                    .FirstOrDefault(i => string.Equals(i.Tag as string, _yamlPath, StringComparison.OrdinalIgnoreCase));
+                YamlFilesCombo.SelectedItem = match; // 找不到则清空选中
+            }
+            finally
+            {
+                _isLoading = false;
+            }
+        }
+
         private void SetEmptyState()
         {
             MainContentGrid.IsEnabled = false;
@@ -94,6 +215,7 @@ namespace VisionInspection.UI.Views
             SavedYamlPath = null;
             MainContentGrid.IsEnabled = true;
             FilePathText.Text = path;
+            SyncYamlComboSelection();
 
             _isLoading = true;
             try
@@ -212,7 +334,7 @@ namespace VisionInspection.UI.Views
             });
             namePanel.Children.Add(new TextBlock
             {
-                Text = $"{step.Id} · {step.Detection?.Method ?? "无检测"} · {step.Timeout}s",
+                Text = $"{step.Id} · {step.Detection?.Method ?? "无检测"} · 超时{(step.Timeout > 0 ? step.Timeout + "s" : "不限")}",
                 FontSize = 11,
                 Foreground = new SolidColorBrush(Color.FromRgb(153, 153, 153)),
                 TextTrimming = TextTrimming.CharacterEllipsis
@@ -286,6 +408,9 @@ namespace VisionInspection.UI.Views
             StepNameTextBox.Text = step.Name ?? "";
             StepDescTextBox.Text = step.Description ?? "";
             TimeoutTextBox.Text = step.Timeout.ToString();
+            bool timeoutEnabled = step.Timeout > 0;
+            EnableTimeoutCheckBox.IsChecked = timeoutEnabled;
+            TimeoutTextBox.IsEnabled = timeoutEnabled;
             TransitionsTextBox.Text = string.Join(", ", step.Transitions ?? new List<string>());
 
             var d = step.Detection ?? new SopyamlDetection();
@@ -314,6 +439,8 @@ namespace VisionInspection.UI.Views
             StepNameTextBox.Text = "";
             StepDescTextBox.Text = "";
             TimeoutTextBox.Text = "";
+            EnableTimeoutCheckBox.IsChecked = true;
+            TimeoutTextBox.IsEnabled = true;
             TransitionsTextBox.Text = "";
             TargetObjectTextBox.Text = "";
             RegionCombo.Text = "";
@@ -340,7 +467,12 @@ namespace VisionInspection.UI.Views
                 ? $"step_{_selectedIndex + 1}"
                 : StepIdTextBox.Text.Trim();
             step.Description = string.IsNullOrWhiteSpace(StepDescTextBox.Text) ? null : StepDescTextBox.Text.Trim();
-            if (int.TryParse(TimeoutTextBox.Text, out var timeout)) step.Timeout = timeout;
+            // 未勾选"启用本步超时"或填 0 → 该步骤不限制超时
+            if (EnableTimeoutCheckBox.IsChecked == true
+                && int.TryParse(TimeoutTextBox.Text, out var timeout) && timeout > 0)
+                step.Timeout = timeout;
+            else
+                step.Timeout = 0;
             step.Transitions = SplitList(TransitionsTextBox.Text) ?? new List<string>();
 
             step.Detection ??= new SopyamlDetection();
@@ -750,6 +882,21 @@ namespace VisionInspection.UI.Views
         {
             if (MaxHandsComboBox != null)
                 MaxHandsComboBox.IsEnabled = false;
+        }
+
+        private void EnableTimeoutCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            if (TimeoutTextBox != null)
+            {
+                TimeoutTextBox.IsEnabled = true;
+                if (string.IsNullOrWhiteSpace(TimeoutTextBox.Text)) TimeoutTextBox.Text = "30";
+            }
+        }
+
+        private void EnableTimeoutCheckBox_Unchecked(object sender, RoutedEventArgs e)
+        {
+            if (TimeoutTextBox != null)
+                TimeoutTextBox.IsEnabled = false;
         }
 
         /// <summary>获取检测模式配置（供 SOPModuleView 读取运行时参数）</summary>

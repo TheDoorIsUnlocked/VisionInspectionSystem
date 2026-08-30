@@ -99,7 +99,8 @@ public class ViolationDetector
     {
         var elapsedSeconds = (timestamp - _stateMachine.StepStartTime).TotalSeconds;
 
-        if (elapsedSeconds > step.TimeoutSec)
+        // TimeoutSec <= 0 表示该步骤不限制超时（"启用本步超时"未勾选）
+        if (step.TimeoutSec > 0 && elapsedSeconds > step.TimeoutSec)
         {
             return new ViolationRecord
             {

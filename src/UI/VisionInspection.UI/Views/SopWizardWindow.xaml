@@ -78,6 +78,19 @@
                                 Width="34" Margin="3,0,0,0" Style="{StaticResource ButtonDanger}" ToolTip="删除该动作"/>
                     </StackPanel>
                     <ItemsControl ItemsSource="{Binding ParamEditors}" ItemTemplate="{StaticResource ParamEditorTemplate}"/>
+                    <!-- 本步超时设置 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <CheckBox Content="启用本步超时" IsChecked="{Binding EnableTimeout, Mode=TwoWay}"
+                                  VerticalAlignment="Center" Foreground="#455A64"/>
+                        <TextBlock Text="超时（秒）" VerticalAlignment="Center" Margin="10,0,4,0"
+                                   Foreground="#455A64" FontSize="12"/>
+                        <TextBox Text="{Binding TimeoutSec, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="60" Padding="3" IsEnabled="{Binding EnableTimeout}"
+                                 BorderBrush="#B0BEC5" BorderThickness="1"
+                                 ToolTip="超过该秒数仍未通过则判超时；0/取消勾选 = 不限制"/>
+                        <TextBlock Text="（需在第①步勾选「启用超时检测」才生效）" VerticalAlignment="Center"
+                                   Foreground="#90A4AE" FontSize="11" Margin="8,0,0,0"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
         </DataTemplate>
@@ -256,6 +269,9 @@
                         </StackPanel>
                     </Border>
                     <CheckBox Content="第一步等待人员就位（画面里有人才开始）" IsChecked="{Binding IncludePersonEntry, Mode=TwoWay}" Margin="0,8" Foreground="#455A64"/>
+                    <CheckBox Content="启用超时检测（每步超过设定时间未完成则报警）" IsChecked="{Binding EnableTimeoutDetection, Mode=TwoWay}"
+                              Margin="0,4" Foreground="#455A64"
+                              ToolTip="关闭后所有步骤都不做超时限制；开启后按第③步每步填写的超时秒数判定"/>
                 </StackPanel>
 
                 <!-- 步骤② 选择区域 -->

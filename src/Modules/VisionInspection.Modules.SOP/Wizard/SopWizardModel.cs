@@ -94,6 +94,9 @@ public class WizardAction
     /// <summary>参数值：key = SopParamSpec.Name</summary>
     public Dictionary<string, string> Params { get; set; } = new();
 
+    /// <summary>该步超时秒数（0 = 不限制），生成 YAML 时写入 step.timeout</summary>
+    public int TimeoutSec { get; set; } = 30;
+
     public string GetParam(string name) => Params.TryGetValue(name, out var v) ? v : "";
 }
 
@@ -108,8 +111,11 @@ public class SopWizardInput
     /// <summary>SOP 描述</summary>
     public string Description { get; set; } = "";
 
-    /// <summary>是否在第一步骤前插入"等待人员就位"（person_present）</summary>
+    /// <summary>是否在第一步前插入"等待人员就位"（person_present）</summary>
     public bool IncludePersonEntry { get; set; } = true;
+
+    /// <summary>是否启用超时检测（settings.enableTimeoutDetection；false 时每步 timeout 不生效）</summary>
+    public bool EnableTimeoutDetection { get; set; } = true;
 
     /// <summary>本流程使用的区域名称预设（英文标识，用于第③步下拉选择）</summary>
     public List<string> RegionPresets { get; set; } = new();
