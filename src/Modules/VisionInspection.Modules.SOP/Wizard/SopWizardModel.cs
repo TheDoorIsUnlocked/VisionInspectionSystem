@@ -18,7 +18,9 @@ public enum SopParamKind
     /// <summary>手别：any / left / right</summary>
     Hand,
     /// <summary>停留/等待秒数</summary>
-    Duration
+    Duration,
+    /// <summary>自由文本（method / action 等自定义参数）</summary>
+    Text
 }
 
 /// <summary>
@@ -321,6 +323,27 @@ public static class SopActionCatalog
             Params = new List<SopParamSpec>
             {
                 new SopParamSpec("target_object", "物体", SopParamKind.Object, true)
+            }
+        },
+
+        new SopActionTemplate
+        {
+            Key = "custom",
+            Label = "自定义动作（高级）",
+            Method = "custom",
+            Hint = "手动填写底层检测方法名与所需参数，覆盖引擎支持但未预设的场景。方法名必须是引擎认识的（如 hand_in_region / object_present / hand_action ...）。",
+            DefaultStepName = "自定义动作",
+            Params = new List<SopParamSpec>
+            {
+                new SopParamSpec("method", "检测方法（method）", SopParamKind.Text, true),
+                new SopParamSpec("region", "区域（可选）", SopParamKind.Region, false),
+                new SopParamSpec("from_region", "起始区域（可选）", SopParamKind.Region, false),
+                new SopParamSpec("to_region", "目标区域（可选）", SopParamKind.Region, false),
+                new SopParamSpec("target_object", "物体（可选）", SopParamKind.Object, false),
+                new SopParamSpec("hand", "用哪只手（可选）", SopParamKind.Hand, false),
+                new SopParamSpec("action", "动作（可选，如 pickup/putdown）", SopParamKind.Text, false),
+                new SopParamSpec("tolerance", "容差像素（可选）", SopParamKind.Duration, false),
+                new SopParamSpec("duration_ms", "等待毫秒（可选）", SopParamKind.Duration, false)
             }
         },
 

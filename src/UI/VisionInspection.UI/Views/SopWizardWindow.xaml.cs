@@ -8,9 +8,14 @@ namespace VisionInspection.UI.Views;
 /// </summary>
 public partial class SopWizardWindow : Window
 {
+    /// <summary>是否保存过新配方（供调用方刷新产品配方下拉）</summary>
+    public bool RecipeChanged { get; private set; }
+
     public SopWizardWindow()
     {
         InitializeComponent();
-        DataContext = new SopWizardViewModel();
+        var vm = new SopWizardViewModel();
+        vm.RecipeSaved += () => RecipeChanged = true;
+        DataContext = vm;
     }
 }

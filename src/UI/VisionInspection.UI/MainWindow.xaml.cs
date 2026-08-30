@@ -215,6 +215,9 @@ public partial class MainWindow : Window
         var wizard = new SopWizardWindow();
         wizard.Owner = this;
         wizard.ShowDialog();
+        // 保存了新配方 → 立即刷新产品配方下拉（无需重启程序）
+        if (wizard.RecipeChanged && SOPModule != null)
+            SOPModule.RefreshRecipeList();
     }
 
     /// <summary>

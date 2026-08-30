@@ -258,6 +258,11 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
+        /// 刷新产品配方下拉列表（生成/另存新配方后可调用，无需重启程序）
+        /// </summary>
+        public void RefreshRecipeList() => LoadRecipeList();
+
+        /// <summary>
         /// 产品配方下拉框切换：重载对应工作流并同步给运行时
         /// </summary>
         private void RecipeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)

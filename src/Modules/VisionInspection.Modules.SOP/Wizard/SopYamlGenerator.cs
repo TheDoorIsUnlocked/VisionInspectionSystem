@@ -250,6 +250,21 @@ public static class SopYamlGenerator
                 det.TargetObject = Obj();
                 break;
 
+            case "custom":
+                // 自定义动作：method 由用户手填，其余字段按名称映射（留空不写入）
+                det.Method = string.IsNullOrWhiteSpace(action.GetParam("method"))
+                    ? "object_present"
+                    : action.GetParam("method").Trim();
+                det.Region = action.GetParam("region");
+                det.FromRegion = action.GetParam("from_region");
+                det.ToRegion = action.GetParam("to_region");
+                det.TargetObject = Obj();
+                det.Hand = Hand();
+                det.Action = string.IsNullOrWhiteSpace(action.GetParam("action")) ? null : action.GetParam("action");
+                if (float.TryParse(action.GetParam("tolerance"), out var tol)) det.Tolerance = tol;
+                if (int.TryParse(action.GetParam("duration_ms"), out var dur)) det.DurationMs = dur;
+                break;
+
             case "complete":
                 det.Method = "time_elapsed";
                 det.DurationMs = 0;

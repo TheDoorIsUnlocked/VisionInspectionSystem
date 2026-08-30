@@ -84,6 +84,12 @@ public partial class SopWizardViewModel : ObservableObject
     [ObservableProperty] private ObservableCollection<RegionOption> _sourceRegionOptions = new();
     /// <summary>区域预设 -> 来源区域 的映射（key=预设名, value=来源区域id）</summary>
     [ObservableProperty] private ObservableCollection<RegionPresetMapping> _regionPresetMappings = new();
+    /// <summary>画面分辨率宽（用于计算默认居中 200×200 区域框）</summary>
+    [ObservableProperty] private string _defaultImageWidth = "1920";
+    /// <summary>画面分辨率高（用于计算默认居中 200×200 区域框）</summary>
+    [ObservableProperty] private string _defaultImageHeight = "1080";
+    /// <summary>保存成功事件（供窗口通知主界面刷新配方下拉）</summary>
+    public event Action? RecipeSaved;
     #endregion
 
     #region ③ 编排动作
@@ -150,11 +156,13 @@ public partial class SopWizardViewModel : ObservableObject
     private void LoadRegionsFromSource(string yamlPath)
     {
         SourceRegionOptions.Clear();
+        // 首项：不映射 → 生成默认居中 200×200 区域框（非强制映射）
+        SourceRegionOptions.Add(new RegionOption { Id = "", Display = "（默认：居中 200×200）" });
         var dict = SopRegionLibrary.LoadRegions(yamlPath);
         if (dict.Count == 0)
         {
-            RegionStatus = $"该 SOP 文件没有已标定的区域。请先用「🎯 标定区域」在此文件里画好区域。";
-            RegionPresetMappings.Clear();
+            RegionStatus = "该 SOP 文件没有已标定的区域。未映射的区域预设将使用默认居中 200×200 框，之后可用「🎯 标定区域」调整。";
+            RebuildRegionPresetMappings();
             return;
         }
         foreach (var (id, region) in dict.OrderBy(k => k.Key))
@@ -163,7 +171,7 @@ public partial class SopWizardViewModel : ObservableObject
             SourceRegionOptions.Add(new RegionOption { Id = id, Display = display });
         }
         RebuildRegionPresetMappings();
-        RegionStatus = $"已载入 {dict.Count} 个区域，请为左侧每个区域预设选择对应的已标定区域。";
+        RegionStatus = $"已载入 {dict.Count} 个区域；可为每个区域预设选择来源区域，不选则使用默认居中 200×200 框。";
     }
 
     /// <summary>根据当前 RegionPresets 和 SourceRegionOptions 重建映射表（尽量保留已有选择）</summary>
@@ -328,13 +336,14 @@ public partial class SopWizardViewModel : ObservableObject
             ObjectPresets = ObjectPresets.ToList()
         };
 
-        // 第②步：把区域预设映射到来源区域坐标
+        // 第②步：把区域预设映射到来源区域坐标；未映射的预设生成默认居中 200×200 区域框（非强制）
         var sourceDict = SelectedRegionSource == null
             ? new Dictionary<string, SopyamlRegion>()
             : SopRegionLibrary.LoadRegions(SelectedRegionSource.Path);
-        foreach (var mapping in RegionPresetMappings.Where(m => !string.IsNullOrWhiteSpace(m.SourceRegionId)))
+        foreach (var mapping in RegionPresetMappings)
         {
-            if (sourceDict.TryGetValue(mapping.SourceRegionId, out var r))
+            if (!string.IsNullOrWhiteSpace(mapping.SourceRegionId)
+                && sourceDict.TryGetValue(mapping.SourceRegionId, out var r))
             {
                 input.Regions[mapping.PresetName] = new SopyamlRegion
                 {
@@ -342,10 +351,30 @@ public partial class SopWizardViewModel : ObservableObject
                     Name = mapping.PresetName, Description = r.Description, Color = r.Color
                 };
             }
+            else
+            {
+                input.Regions[mapping.PresetName] = BuildDefaultRegion(mapping.PresetName);
+            }
         }
         foreach (var a in Actions)
             input.Actions.Add(a.Model);
         return input;
+    }
+
+    /// <summary>生成默认区域框：以画面分辨率中心为基准，200×200 像素居中框</summary>
+    private SopyamlRegion BuildDefaultRegion(string presetName)
+    {
+        if (!int.TryParse(DefaultImageWidth, out var w) || w <= 0) w = 1920;
+        if (!int.TryParse(DefaultImageHeight, out var h) || h <= 0) h = 1080;
+        const float BoxSize = 200f;
+        float x1 = (w - BoxSize) / 2f;
+        float y1 = (h - BoxSize) / 2f;
+        return new SopyamlRegion
+        {
+            X1 = x1, Y1 = y1, X2 = x1 + BoxSize, Y2 = y1 + BoxSize,
+            Name = presetName,
+            Description = "默认区域框（居中 200×200），可用「🎯 标定区域」调整"
+        };
     }
 
     [RelayCommand]
@@ -368,7 +397,6 @@ public partial class SopWizardViewModel : ObservableObject
 
         var regionPresetSet = new HashSet<string>(RegionPresets, StringComparer.OrdinalIgnoreCase);
         var objectPresetSet = new HashSet<string>(ObjectPresets, StringComparer.OrdinalIgnoreCase);
-        var mappedRegions = new HashSet<string>(input.Regions.Keys, StringComparer.OrdinalIgnoreCase);
 
         foreach (var a in Actions)
         {
@@ -385,12 +413,7 @@ public partial class SopWizardViewModel : ObservableObject
                         ValidationMessage = $"⚠️ 动作「{a.StepName}」引用的区域「{v}」不是预设区域，请先在第①步添加。";
                         return;
                     }
-                    if (!mappedRegions.Contains(v))
-                    {
-                        ValidationOk = false;
-                        ValidationMessage = $"⚠️ 区域「{v}」未在第②步映射到已标定区域，请先选择坐标来源。";
-                        return;
-                    }
+                    // 区域映射非强制：未映射的预设会生成默认居中 200×200 框
                 }
                 else if (p.Kind == SopParamKind.Object)
                 {
@@ -447,6 +470,7 @@ public partial class SopWizardViewModel : ObservableObject
             SavedPath = dlg.FileName;
             // 同步到运行时 configs/sop，规避 PreserveNewest 副本不刷新坑，立即生效
             CopyToRuntimeSopDir(dlg.FileName);
+            RecipeSaved?.Invoke(); // 通知主界面刷新产品配方下拉（无需重启）
             StatusMessage = $"✅ 已保存到：{dlg.FileName}（并已同步到运行时目录，重启/重载 SOP 模块即可加载）";
         }
         catch (Exception ex)

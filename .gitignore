@@ -48,6 +48,9 @@ models/*.weights
 configs/system.local.json
 configs/*.local.json
 
+# SSH keys (never commit private keys)
+.github-keys/
+
 # OS
 .DS_Store
 Thumbs.db

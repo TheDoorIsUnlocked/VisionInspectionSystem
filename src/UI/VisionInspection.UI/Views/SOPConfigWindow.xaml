@@ -210,10 +210,6 @@
                             <TextBox x:Name="ForbiddenTextBox" Style="{StaticResource FieldInput}"/>
                             <TextBlock Text="必须保持物体（must_keep，逗号分隔）" Style="{StaticResource FieldLabel}"/>
                             <TextBox x:Name="MustKeepTextBox" Style="{StaticResource FieldInput}"/>
-
-                            <Button x:Name="ApplyStepButton" Content="✓ 应用修改" HorizontalAlignment="Right"
-                                    Margin="0,15,0,0" Padding="16,7" Background="#1890FF" Foreground="White"
-                                    Click="ApplyStepButton_Click"/>
                         </StackPanel>
                     </ScrollViewer>
                 </TabItem>
@@ -387,9 +383,13 @@
         <!-- 底部 -->
         <Border Grid.Row="2" Background="White" BorderBrush="#E8E8E8" BorderThickness="0,1,0,0" Padding="20,10">
             <Grid>
-                <TextBlock Text="提示：在左侧列表点击其他步骤会自动应用当前修改；所有改动需点「💾 保存并关闭」写回 YAML 后生效"
+                <TextBlock Text="提示：修改后请点「✓ 应用修改」立即写回 YAML；点「💾 保存并关闭」可保存并退出"
                            Foreground="#999" FontSize="11" VerticalAlignment="Center"/>
-                <Button Content="❌ 关闭" HorizontalAlignment="Right" Padding="18,7" Click="CloseButton_Click"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="ApplyStepButton" Content="✓ 应用修改" Margin="0,0,8,0" Padding="16,7"
+                            Background="#1890FF" Foreground="White" Click="ApplyStepButton_Click"/>
+                    <Button Content="❌ 关闭" Padding="18,7" Click="CloseButton_Click"/>
+                </StackPanel>
             </Grid>
         </Border>
     </Grid>

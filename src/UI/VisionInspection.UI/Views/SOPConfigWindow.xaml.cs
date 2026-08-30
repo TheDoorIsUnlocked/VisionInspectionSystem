@@ -513,8 +513,28 @@ namespace VisionInspection.UI.Views
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
-            ApplyEditorToStep();
-            RefreshStepsList();
+            if (_config?.Sop == null || string.IsNullOrEmpty(_yamlPath))
+            {
+                MessageBox.Show("请先点「📂 打开YAML」加载一个配方文件。", "提示",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // 将当前编辑内容写回模型并立即保存到 YAML 文件（不关闭窗口，可继续编辑）
+            try
+            {
+                CommitAllTabs();
+                SOPYamlConverter.SaveFullConfig(_yamlPath, _config);
+                SavedYamlPath = _yamlPath;
+                RefreshStepsList();
+                MessageBox.Show($"修改已保存到:\n{_yamlPath}", "保存成功",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"保存失败: {ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         // ==================== 步骤增删移动 ====================

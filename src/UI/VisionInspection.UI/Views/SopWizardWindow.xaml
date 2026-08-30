@@ -52,6 +52,9 @@
                               SelectedValuePath="Value" SelectedValue="{Binding Value, Mode=TwoWay}"/>
                     <TextBox Width="90" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Duration}"
                              Text="{Binding Value, Mode=TwoWay}" ToolTip="稳定停留秒数（数字）"/>
+                    <TextBox Width="140" Visibility="{Binding Spec.Kind, Converter={StaticResource KindVisibility}, ConverterParameter=Text}"
+                             Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="自由文本参数（如检测方法名 method / 动作 action）"/>
                 </StackPanel>
             </Grid>
         </DataTemplate>
@@ -277,13 +280,24 @@
                 <!-- 步骤② 选择区域 -->
                 <StackPanel Visibility="{Binding CurrentStep, Converter={StaticResource EqualVisibility}, ConverterParameter=2}">
                     <TextBlock Text="第二步：把区域预设映射到已标定区域" FontSize="16" FontWeight="Bold" Foreground="#009688" Margin="0,0,0,10"/>
-                    <TextBlock Text="区域坐标已在「🎯 标定区域」里画好并保存在某个 SOP 文件中。为第①步的每个区域预设选择一个来源区域，生成 YAML 时会用预设名作为区域名、并继承来源区域的坐标。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
+                    <TextBlock Text="为第①步的每个区域预设选择一个已标定区域即可继承其坐标；也可以不选，此时将生成画面居中的 200×200 默认框，之后再在「🎯 标定区域」里调整。" Foreground="#607D8B" Margin="0,0,0,8" TextWrapping="Wrap"/>
                     <StackPanel Orientation="Horizontal" Margin="0,4">
                         <Button Content="🔄 刷新区域来源" Command="{Binding LoadRegionSourcesCommand}" Style="{StaticResource ButtonInfo}" Margin="0,0,8,0"/>
                         <ComboBox ItemsSource="{Binding RegionSources}" SelectedItem="{Binding SelectedRegionSource, Mode=TwoWay}"
                                   DisplayMemberPath="Name" Width="320" VerticalAlignment="Center"/>
                     </StackPanel>
                     <TextBlock Text="{Binding RegionStatus}" Foreground="#78909C" Margin="0,6" TextWrapping="Wrap"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,4">
+                        <TextBlock Text="画面分辨率（用于默认居中框）：" VerticalAlignment="Center"
+                                   Foreground="#455A64" FontSize="12"/>
+                        <TextBox Text="{Binding DefaultImageWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="70" Padding="3" BorderBrush="#B0BEC5" BorderThickness="1" ToolTip="默认框所在画面的像素宽度"/>
+                        <TextBlock Text="×" VerticalAlignment="Center" Margin="4,0" Foreground="#455A64"/>
+                        <TextBox Text="{Binding DefaultImageHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Width="70" Padding="3" BorderBrush="#B0BEC5" BorderThickness="1" ToolTip="默认框所在画面的像素高度"/>
+                        <TextBlock Text="（未映射的区域将生成居中 200×200 默认框）" VerticalAlignment="Center"
+                                   Margin="8,0,0,0" Foreground="#90A4AE" FontSize="11" TextWrapping="Wrap"/>
+                    </StackPanel>
                     <Border Background="#F2F6F7" BorderBrush="#CFD8DC" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,6">
                         <ItemsControl ItemsSource="{Binding RegionPresetMappings}">
                             <ItemsControl.ItemTemplate>
@@ -318,7 +332,7 @@
                             </ItemsControl.Style>
                         </ItemsControl>
                     </Border>
-                    <TextBlock Text="💡 没看到区域？请先在「🎯 标定区域」里打开某个 SOP 文件画好区域并保存。若预设名和某个源区域同名，会自动匹配。" Foreground="#90A4AE" FontSize="11" Margin="0,6" TextWrapping="Wrap"/>
+                    <TextBlock Text="💡 提示：映射是可选操作。不映射时每个区域预设都会生成一个居中 200×200 的默认框，之后可用「🎯 标定区域」打开该 SOP 文件调整位置和大小。若预设名和某个源区域同名，会自动匹配。" Foreground="#90A4AE" FontSize="11" Margin="0,6" TextWrapping="Wrap"/>
                 </StackPanel>
 
                 <!-- 步骤③ 编排动作 -->
