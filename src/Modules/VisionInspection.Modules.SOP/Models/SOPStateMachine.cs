@@ -53,7 +53,10 @@ public class SOPStateMachine
         _stepHistory.Clear();
         _violations.Clear();
         _trackedObjects.Clear();
-        CurrentStepId = 1;
+        // ⭐ 修复：起始步骤取工作流中最小的 StepId（配方步骤不一定从 1 开始，
+        // 例如配置窗口重排后 id 可能是 2,3,4...；硬编码 1 会导致找不到步骤而卡在第一步）。
+        var firstStep = workflow.Steps.OrderBy(s => s.StepId).FirstOrDefault();
+        CurrentStepId = firstStep?.StepId ?? 1;
         StepStartTime = DateTime.Now;
         ChangeState(SOPExecutionState.Running);
         StepChanged?.Invoke(this, new StepChangedEventArgs(0, CurrentStepId, workflow.Steps.FirstOrDefault(s => s.StepId == CurrentStepId)?.StepName ?? ""));

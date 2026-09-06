@@ -122,6 +122,62 @@ public partial class SopWizardViewModel : ObservableObject
     public ObservableCollection<string> RegionOptions => RegionPresets;
     /// <summary>动作编辑器中"物体"下拉的数据源（来自第①步的物体预设）</summary>
     public ObservableCollection<string> ObjectOptions => ObjectPresets;
+
+    /// <summary>动作编辑器中"相机"下拉的数据源（主相机 + cam_2..cam_4，显示已连接槽位名）</summary>
+    public List<CameraOptionItem> CameraOptions => BuildCameraOptions();
+
+    private List<ModelOptionItem>? _modelOptionsCache;
+    /// <summary>动作编辑器中"模型"下拉的数据源（扫描 yolo_models 目录下的 .onnx 文件）</summary>
+    public List<ModelOptionItem> ModelOptions => _modelOptionsCache ??= BuildModelOptions();
+
+    /// <summary>
+    /// 构建相机下拉：主相机 + 最多 4 路（cam_2..cam_4），已注册槽位显示其名称。
+    /// 即使未连接也保留选项，便于提前编排多相机流程。
+    /// </summary>
+    private static List<CameraOptionItem> BuildCameraOptions()
+    {
+        var list = new List<CameraOptionItem>
+        {
+            new CameraOptionItem("main_camera", "主相机（相机1）")
+        };
+        var slots = Core.Services.CameraManager.Instance.Slots;
+        for (int i = 2; i <= Core.Services.CameraManager.MaxCameraCount; i++)
+        {
+            string id = $"cam_{i}";
+            var slot = slots.FirstOrDefault(s => string.Equals(s.CameraId, id, StringComparison.OrdinalIgnoreCase));
+            string display = slot != null && !string.IsNullOrEmpty(slot.DisplayName)
+                ? $"{id}（{slot.DisplayName}）"
+                : $"{id}（未连接）";
+            list.Add(new CameraOptionItem(id, display));
+        }
+        return list;
+    }
+
+    /// <summary>
+    /// 扫描模型目录下的 .onnx 文件，转为 (相对路径, 相对路径) 选项。
+    /// 相对路径形如 "yolo_models/xxx.onnx"，与现有配方 sop.model.path 风格一致，可被 ResolveModelPath 解析。
+    /// </summary>
+    private static List<ModelOptionItem> BuildModelOptions()
+    {
+        var list = new List<ModelOptionItem>();
+        List<string> files;
+        try
+        {
+            files = new Services.ModelManager().ScanOnnxFiles();
+        }
+        catch
+        {
+            files = new List<string>();
+        }
+        foreach (var file in files)
+        {
+            // 提取 "yolo_models/..." 相对片段；找不到则保留完整路径
+            var idx = file.IndexOf("yolo_models", StringComparison.OrdinalIgnoreCase);
+            string rel = idx >= 0 ? file.Substring(idx).Replace('\\', '/') : file;
+            list.Add(new ModelOptionItem { Display = rel, Value = rel });
+        }
+        return list;
+    }
     #endregion
 
     public SopWizardViewModel()
@@ -607,6 +663,24 @@ public partial class WizardActionVM : ObservableObject
     public SopWizardViewModel Owner => _owner;
     public ObservableCollection<ParamProxy> ParamEditors { get; } = new();
 
+    /// <summary>相机下拉数据源（主相机 + cam_2..cam_4）</summary>
+    public List<CameraOptionItem> CameraOptions => _owner.CameraOptions;
+    /// <summary>模型下拉数据源（扫描 yolo_models 目录）</summary>
+    public List<ModelOptionItem> ModelOptions => _owner.ModelOptions;
+    /// <summary>模型下拉数据源（含"（默认：全局模型）"空选项）</summary>
+    public List<ModelOptionItem> ModelOptionsWithDefault
+    {
+        get
+        {
+            var list = new List<ModelOptionItem>
+            {
+                new ModelOptionItem { Display = "（默认：全局模型）", Value = "" }
+            };
+            list.AddRange(ModelOptions);
+            return list;
+        }
+    }
+
     [ObservableProperty] private string _stepName;
     partial void OnStepNameChanged(string value) => Model.StepName = value;
 
@@ -618,6 +692,18 @@ public partial class WizardActionVM : ObservableObject
     partial void OnTimeoutSecChanged(int value) => SyncTimeoutToModel();
 
     private void SyncTimeoutToModel() => Model.TimeoutSec = EnableTimeout ? Math.Max(0, TimeoutSec) : 0;
+
+    /// <summary>该步骤使用的相机 ID（同步到 Model.CameraId，生成 YAML 时写入 step.camera）</summary>
+    [ObservableProperty] private string _cameraId = "main_camera";
+    partial void OnCameraIdChanged(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) value = "main_camera";
+        Model.CameraId = value;
+    }
+
+    /// <summary>该步骤使用的模型路径（空 = 全局模型；同步到 Model.ModelPath，生成 YAML 时写入 step.model）</summary>
+    [ObservableProperty] private string _modelPath = "";
+    partial void OnModelPathChanged(string value) => Model.ModelPath = string.IsNullOrWhiteSpace(value) ? null : value;
 }
 
 /// <summary>动作参数的单个编辑器（桥接模板参数与 WizardAction.Params 字典）</summary>
@@ -637,4 +723,25 @@ public partial class ParamProxy : ObservableObject
 
     [ObservableProperty] private string _value = "";
     partial void OnValueChanged(string value) => _owner.Model.Params[_spec.Name] = value ?? "";
+}
+
+/// <summary>相机下拉选项（向导动作/配置窗口步骤共用）</summary>
+public class CameraOptionItem
+{
+    public CameraOptionItem(string id, string display)
+    {
+        Id = id;
+        Display = display;
+    }
+    public string Id { get; }
+    public string Display { get; }
+    public override string ToString() => Display;
+}
+
+/// <summary>模型下拉选项（向导动作/配置窗口步骤共用；Value 为 YAML 中保存的路径）</summary>
+public class ModelOptionItem
+{
+    public string Display { get; set; } = "";
+    public string Value { get; set; } = "";
+    public override string ToString() => Display;
 }

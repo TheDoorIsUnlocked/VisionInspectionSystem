@@ -67,6 +67,12 @@ public partial class MainWindow : Window
     {
         // 根据权限控制菜单显示
         UpdateMenuByPermission();
+
+        // 初始化多相机画面布局（恢复已连接槽位对应的画面格子）
+        if (DataContext is MainViewModel vm)
+        {
+            vm.InitCameraLayout();
+        }
     }
 
     private void UpdateMenuByPermission()
@@ -296,3 +302,4 @@ public partial class MainWindow : Window
         return angle;
     }
 }
+

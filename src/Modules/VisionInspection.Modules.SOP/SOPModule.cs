@@ -34,6 +34,10 @@ public class SOPModule : IDetectionModule
     // 模型动态加载相关
     private string _lastLoadedModelPath = "";
 
+    // ⭐ 步骤级多模型缓存：key = 模型路径（YAML step.model），value = Yolo 实例。
+    // 支持给每个相机/步骤指定不同模型，按需懒加载并缓存复用。
+    private readonly Dictionary<string, Yolo> _modelCache = new(StringComparer.OrdinalIgnoreCase);
+
     // 姿态估计相关
     private IPoseEstimationService? _poseService;
     private PoseConditionEvaluator? _poseEvaluator;
@@ -171,8 +175,7 @@ public class SOPModule : IDetectionModule
             return _config.UseGpu;
 
         // 释放旧会话并清空缓存，绕过 LoadYoloAsync 内部"路径未变跳过重建"逻辑
-        try { _yolo?.Dispose(); } catch { /* 忽略释放异常 */ }
-        _yolo = null;
+        DisposeAllModels();
         _lastLoadedModelPath = null;
 
         _config.UseGpu = useGpu;
@@ -718,7 +721,7 @@ public class SOPModule : IDetectionModule
 
             lock (_lockObject)
             {
-                ProcessFrameInternal(mainFrame, result);
+                ProcessMultiCameraFrames(frames, result);
             }
 
             stopwatch.Stop();
@@ -739,35 +742,254 @@ public class SOPModule : IDetectionModule
         return Task.FromResult<ModuleResult>(result);
     }
 
-    private void ProcessFrameInternal(CaptureFrame frame, SOPModuleResult result)
+    /// <summary>
+    /// 多相机帧处理：在同一个锁内串行遍历各相机帧做 YOLO 推理。
+    /// 支持步骤级 (相机, 模型)：每路相机可用自身绑定的模型（步骤中该相机首次指定，无则全局模型）；
+    /// 状态机评估当前步骤时，使用该步骤指定相机的检测结果（不再固定主相机）。
+    /// 注意：YoloDotNet 的 ObjectDetectionModuleV26 复用实例级结果 List，并发调用会互相覆盖，
+    /// 必须串行且每路立即 ToList 拷贝。
+    /// </summary>
+    private void ProcessMultiCameraFrames(Dictionary<string, CaptureFrame> frames, SOPModuleResult result)
     {
         var timestamp = DateTime.Now;
 
-        // 统一检测模式：同时进行物体检测和手部姿态检测
-        var detections = ProcessUnifiedDetection(frame, result, timestamp);
+        // 0) 当前步骤 → 该步使用的 (相机, 模型)
+        var step = GetCurrentStep();
+        string stepCamera = string.IsNullOrWhiteSpace(step?.CameraId) ? "main_camera" : step.CameraId;
+        string? stepModel = string.IsNullOrWhiteSpace(step?.ModelPath) ? null : step.ModelPath;
 
-        // 关键：把感知结果（物体 + 手部）喂给状态机驱动步骤推进
-        _stateMachine?.ProcessFrame(detections, _lastHandPoseResult, timestamp);
+        // 1) 为每路相机确定"该相机使用的模型"（工作流中该相机首次指定；无则全局模型）
+        var cameraModelMap = BuildCameraModelMap();
 
-        // 更新结果
-        if (_stateMachine != null)
+        // 2) 每路独立 YOLO 推理（串行，防 Yolo 实例级结果 List 被覆盖）
+        foreach (var (cameraId, frame) in frames)
         {
-            result.CurrentStepId = _stateMachine.CurrentStepId;
-            result.CurrentState = _stateMachine.CurrentState;
-            result.StepHistory = _stateMachine.StepHistory.ToList();
-            result.Violations = _stateMachine.Violations.ToList();
-            result.IsPass = !_stateMachine.Violations.Any();
-            result.Level = result.IsPass ? DefectLevel.Good : DefectLevel.Critical;
+            var modelPath = cameraModelMap.TryGetValue(cameraId, out var camModel) ? camModel : null;
+            var detections = RunObjectDetectionSafe(frame, modelPath);
+            result.PerCameraDetections[cameraId] = detections;
 
-            // 更新StepResults（用于UI显示）
-            var currentStep = _currentWorkflow?.Steps.FirstOrDefault(s => s.StepId == _stateMachine.CurrentStepId);
-            result.StepResults = new StepResults
+            if (cameraId == "main_camera")
             {
-                Message = currentStep?.StepName ?? "等待开始",
-                CurrentStep = _stateMachine.CurrentStepId,
-                TotalSteps = _currentWorkflow?.Steps.Count ?? 0
-            };
+                result.Detections = detections;
+            }
         }
+
+        // 3) 手部姿态 + 状态机推进：
+        //    - 状态机检测结果严格取"当前步骤指定相机"的检测（不做跨相机 fallback，
+        //      否则 cam_2 步骤会错误地拿主相机检测评估，导致无杯子也通过等误判）；
+        //    - 手部检测同样使用当前步骤相机的画面，该相机无帧则不做手部。
+        var mainFrame = frames.TryGetValue("main_camera", out var mf) ? mf : frames.Values.FirstOrDefault();
+
+        List<ObjectDetection> stateDetections;
+        if (frames.ContainsKey(stepCamera))
+        {
+            // 步骤相机帧在：取该相机本轮检测（可能为空，但语义正确）
+            stateDetections = result.PerCameraDetections.TryGetValue(stepCamera, out var stepDets)
+                ? stepDets
+                : new List<ObjectDetection>();
+        }
+        else if (stepCamera == CameraManager.PrimaryCameraId && result.Detections != null)
+        {
+            // 主相机帧缺失时的兜底（兼容旧单相机路径）
+            stateDetections = result.Detections;
+        }
+        else
+        {
+            // 步骤相机无帧：不通过
+            stateDetections = new List<ObjectDetection>();
+        }
+
+        var handFrame = frames.TryGetValue(stepCamera, out var hf) ? hf : mainFrame;
+        var handResult = handFrame != null
+            ? RunHandPoseDetection(handFrame, result, timestamp, stepCamera)
+            : null;
+
+        DebugLog($"步骤评估: step={step?.StepName}({stepCamera}) frames=[{string.Join(",", frames.Keys)}] perCam=[{string.Join(",", result.PerCameraDetections.Select(kv => $"{kv.Key}:{kv.Value.Count}"))}] stateDet={stateDetections.Count}");
+        _stateMachine?.ProcessFrame(stateDetections, handResult, timestamp);
+
+        // 4) 状态机结果回填
+        UpdateStateMachineResult(result);
+    }
+
+    /// <summary>
+    /// 当前状态机所在步骤（用于步骤级相机/模型选择）
+    /// </summary>
+    private SOPStep? GetCurrentStep()
+    {
+        var id = _stateMachine?.CurrentStepId ?? 0;
+        return _currentWorkflow?.Steps.FirstOrDefault(s => s.StepId == id);
+    }
+
+    /// <summary>
+    /// 构建"相机 → 模型路径"映射：取工作流中每路相机首次被步骤指定的模型（无则全局）。
+    /// </summary>
+    private Dictionary<string, string?> BuildCameraModelMap()
+    {
+        var map = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (_currentWorkflow == null) return map;
+
+        foreach (var s in _currentWorkflow.Steps.OrderBy(s => s.Order))
+        {
+            var cam = string.IsNullOrWhiteSpace(s.CameraId) ? "main_camera" : s.CameraId;
+            if (!map.ContainsKey(cam))
+                map[cam] = string.IsNullOrWhiteSpace(s.ModelPath) ? null : s.ModelPath;
+        }
+        return map;
+    }
+
+    /// <summary>
+    /// 单路 YOLO 物体检测（线程安全封装：串行锁内调用 + 立即 ToList 拷贝）
+    /// modelPath 为空/全局路径时使用全局 _yolo；否则从缓存取步骤模型（未加载则懒加载）。
+    /// </summary>
+    private List<ObjectDetection> RunObjectDetectionSafe(CaptureFrame frame, string? modelPath = null)
+    {
+        var detections = new List<ObjectDetection>();
+        var yolo = GetYoloForModel(modelPath);
+        if (yolo == null)
+        {
+            DebugLog("YOLO 未初始化，跳过物体检测");
+            return detections;
+        }
+
+        try
+        {
+            detections = yolo.RunObjectDetection(frame.Image, _config.ConfidenceThreshold).ToList();
+            DebugLog($"YOLO 物体检测 ({frame.CameraId}): {detections.Count} 个目标");
+        }
+        catch (Exception ex)
+        {
+            DebugLog($"YOLO 物体检测失败 ({frame.CameraId}): {ex.Message}");
+        }
+        return detections;
+    }
+
+    /// <summary>
+    /// 获取指定模型路径对应的 Yolo 实例：
+    /// - 空/全局路径 → 返回全局 _yolo（由 InitializeAsync 加载）
+    /// - 步骤路径 → 从 _modelCache 缓存取，未加载则懒加载（同一 _lockObject 保护加载与推理）
+    /// </summary>
+    private Yolo? GetYoloForModel(string? modelPath)
+    {
+        var path = string.IsNullOrWhiteSpace(modelPath) ? _config.ModelPath : modelPath.Trim();
+        if (string.Equals(path, _config.ModelPath, StringComparison.OrdinalIgnoreCase))
+            return _yolo;
+
+        lock (_lockObject)
+        {
+            if (_modelCache.TryGetValue(path, out var cached) && cached != null)
+                return cached;
+
+            var resolved = ResolveModelPath(path);
+            if (resolved == null)
+            {
+                DebugLog($"步骤模型文件不存在: {path}");
+                return null;
+            }
+
+            try
+            {
+                var options = new YoloOptions
+                {
+                    ExecutionProvider = _config.UseGpu
+                        ? new CudaExecutionProvider(resolved, 0)
+                        : new CpuExecutionProvider(resolved),
+                    ImageResize = ImageResize.Proportional,
+                    SamplingOptions = new(SKFilterMode.Nearest, SKMipmapMode.None)
+                };
+                var yolo = new Yolo(options);
+                _modelCache[path] = yolo;
+                DebugLog($"步骤模型已加载: {Path.GetFileName(resolved)}");
+                return yolo;
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"步骤模型加载失败: {path}: {ex.Message}");
+                return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 释放全部模型（全局 + 步骤缓存）
+    /// </summary>
+    private void DisposeAllModels()
+    {
+        try { _yolo?.Dispose(); } catch { /* 忽略 */ }
+        _yolo = null;
+
+        lock (_lockObject)
+        {
+            foreach (var kv in _modelCache)
+            {
+                try { kv.Value.Dispose(); } catch { /* 忽略 */ }
+            }
+            _modelCache.Clear();
+        }
+    }
+
+    /// <summary>
+    /// 指定相机画面的手部姿态检测（复用原 ProcessUnifiedDetection 的手部段）
+    /// </summary>
+    private HandPoseEstimationResult? RunHandPoseDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp, string cameraId = "main_camera")
+    {
+        // 确保服务已初始化
+        if (_handPoseService == null || !_handPoseService.IsInitialized)
+        {
+            try
+            {
+                InitializeHandPoseEstimationAsync().GetAwaiter().GetResult();
+            }
+            catch (Exception ex)
+            {
+                DebugLog($"初始化手部姿态估计服务失败: {ex.Message}");
+            }
+        }
+
+        if (_handPoseService == null || !_handPoseService.IsInitialized)
+            return null;
+
+        try
+        {
+            var handResult = _handPoseService.DetectHandsAsync(frame.Image).Result;
+            _lastHandPoseResult = handResult;
+            result.HandPoseResult = handResult;
+            // ⭐ 记录手部结果来自哪路相机，供 UI 在该相机画面上绘制手部骨架
+            result.HandPoseCameraId = cameraId;
+
+            if (handResult.Hands.Count > 0)
+            {
+                OnHandPoseDetected(handResult, timestamp);
+            }
+            return handResult;
+        }
+        catch (Exception ex)
+        {
+            DebugLog($"手部姿态估计失败: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 状态机结果回填（CurrentStepId / Violations / StepResults 等）
+    /// </summary>
+    private void UpdateStateMachineResult(SOPModuleResult result)
+    {
+        if (_stateMachine == null) return;
+
+        result.CurrentStepId = _stateMachine.CurrentStepId;
+        result.CurrentState = _stateMachine.CurrentState;
+        result.StepHistory = _stateMachine.StepHistory.ToList();
+        result.Violations = _stateMachine.Violations.ToList();
+        result.IsPass = !_stateMachine.Violations.Any();
+        result.Level = result.IsPass ? DefectLevel.Good : DefectLevel.Critical;
+
+        var currentStep = _currentWorkflow?.Steps.FirstOrDefault(s => s.StepId == _stateMachine.CurrentStepId);
+        result.StepResults = new StepResults
+        {
+            Message = currentStep?.StepName ?? "等待开始",
+            CurrentStep = _stateMachine.CurrentStepId,
+            TotalSteps = _currentWorkflow?.Steps.Count ?? 0
+        };
     }
 
     /// <summary>
@@ -784,69 +1006,9 @@ public class SOPModule : IDetectionModule
     }
 
     /// <summary>
-    /// 统一检测模式处理：物体检测（YOLO）+ 手部姿态（MediaPipe），结果一并喂给状态机
+    /// 统一检测模式处理（已拆分为 RunObjectDetectionSafe + RunHandPoseDetection，
+    /// 见 ProcessMultiCameraFrames）
     /// </summary>
-    private List<ObjectDetection> ProcessUnifiedDetection(CaptureFrame frame, SOPModuleResult result, DateTime timestamp)
-    {
-        // ========== 1. 物体检测（YOLO）==========
-        var detections = new List<ObjectDetection>();
-        if (_yolo != null)
-        {
-            try
-            {
-                detections = _yolo.RunObjectDetection(frame.Image, _config.ConfidenceThreshold).ToList();
-                result.Detections = detections;
-                DebugLog($"YOLO 物体检测: {detections.Count} 个目标");
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"YOLO 物体检测失败: {ex.Message}");
-            }
-        }
-        else
-        {
-            DebugLog("YOLO 未初始化，跳过物体检测");
-        }
-
-        // ========== 2. 手部姿态检测 ==========
-
-        // 确保服务已初始化
-        if (_handPoseService == null || !_handPoseService.IsInitialized)
-        {
-            try
-            {
-                InitializeHandPoseEstimationAsync().GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"初始化手部姿态估计服务失败: {ex.Message}");
-            }
-        }
-
-        // 进行手部姿态检测
-        if (_handPoseService != null && _handPoseService.IsInitialized)
-        {
-            try
-            {
-                var handResult = _handPoseService.DetectHandsAsync(frame.Image).Result;
-                _lastHandPoseResult = handResult;
-
-                result.HandPoseResult = handResult;
-
-                if (handResult.Hands.Count > 0)
-                {
-                    OnHandPoseDetected(handResult, timestamp);
-                }
-            }
-            catch (Exception ex)
-            {
-                DebugLog($"手部姿态估计失败: {ex.Message}");
-            }
-        }
-
-        return detections;
-    }
-
     public void StartWorkflow(SOPWorkflow workflow)
     {
         if (_stateMachine == null)
@@ -972,9 +1134,8 @@ public class SOPModule : IDetectionModule
                 _handPoseService = null;
             }
 
-            // 释放 YOLO
-            _yolo?.Dispose();
-            _yolo = null;
+            // 释放 YOLO（全局 + 步骤级多模型缓存）
+            DisposeAllModels();
 
             // 释放姿态服务
             _poseService = null;
@@ -1106,9 +1267,15 @@ public class SOPModuleResult : ModuleResult
     public bool IsPass { get; set; }
 
     /// <summary>
-    /// 检测测结果果（物体检测测模式式）
+    /// 检测测结果果（物体检测测模式式）——主相机结果（兼容旧逻辑）
     /// </summary>
     public List<ObjectDetection> Detections { get; set; } = new();
+
+    /// <summary>
+    /// 每路相机的检测结果（key = frames 字典的 key，如 "main_camera" / "cam_2"）。
+    /// 每路均为独立 ToList 拷贝，供跨相机协同规则（CrossCameraEvaluator）使用。
+    /// </summary>
+    public Dictionary<string, List<ObjectDetection>> PerCameraDetections { get; set; } = new();
 
     /// <summary>
     /// 检测测到的人体姿态数量（姿态模式式）
@@ -1116,8 +1283,14 @@ public class SOPModuleResult : ModuleResult
     public int PoseCount { get; set; }
 
     /// <summary>
-    /// 手部姿态检测测结果?    /// </summary>
+    /// 手部姿态检测结果
+    /// </summary>
     public HandPoseEstimationResult? HandPoseResult { get; set; }
+
+    /// <summary>
+    /// 手部姿态结果来自哪路相机的画面（用于 UI 在该相机画面上绘制手部骨架）
+    /// </summary>
+    public string HandPoseCameraId { get; set; } = "main_camera";
 
     /// <summary>
     /// 步骤结果果信息（用于UI显示?    /// </summary>

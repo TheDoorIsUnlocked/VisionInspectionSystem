@@ -139,6 +139,25 @@ namespace VisionInspection.Core.Services
         }
 
         /// <summary>
+        /// 保存多相机槽位配置列表
+        /// </summary>
+        public void SaveCameras(List<CameraSlotConfig> cameras)
+        {
+            var config = LoadConfig();
+            config.Cameras = cameras ?? new List<CameraSlotConfig>();
+            SaveConfig(config);
+        }
+
+        /// <summary>
+        /// 加载多相机槽位配置列表（无配置时返回空列表）
+        /// </summary>
+        public List<CameraSlotConfig> LoadCameras()
+        {
+            var config = LoadConfig();
+            return config.Cameras ?? new List<CameraSlotConfig>();
+        }
+
+        /// <summary>
         /// 清除配置缓存，强制下次从文件重新加载
         /// </summary>
         public void ClearCache()

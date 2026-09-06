@@ -90,6 +90,26 @@ namespace VisionInspection.UI.Services
         public string YoloModelsDirectory => _yoloModelsDirectory;
 
         /// <summary>
+        /// 轻量扫描：列出探测到的所有 yolo_models 目录下的 .onnx 文件（不分析模型元数据，速度快）。
+        /// 供向导/配置窗口的"模型选择"下拉使用。
+        /// </summary>
+        public List<string> ScanOnnxFiles()
+        {
+            var results = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var dir in _yoloModelsDirectories)
+            {
+                if (!Directory.Exists(dir)) continue;
+                foreach (var filePath in Directory.GetFiles(dir, "*.onnx", SearchOption.AllDirectories))
+                {
+                    var fullPath = Path.GetFullPath(filePath);
+                    if (seen.Add(fullPath)) results.Add(fullPath);
+                }
+            }
+            return results.OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+
+        /// <summary>
         /// 扫描模型文件夹中的ONNX模型（自动探测到的所有 yolo_models 目录，合并去重）
         /// </summary>
         public async Task<List<ModelScanResult>> ScanModelsDirectoryAsync(string? directoryPath = null)

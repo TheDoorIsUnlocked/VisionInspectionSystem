@@ -41,10 +41,21 @@ public class MediaPipeHandDetector : IDisposable
     private readonly bool _enableFaceFilter;              // 是否启用面部过滤
     private readonly float _faceFilterUpperRatio;         // 面部过滤画面上边界比例
 
-    // 日志（仅控制台，不写文件避免 I/O 卡顿）
+    // 日志（控制台 + 文件，便于排查"手部检测是否执行"）
+    private static readonly object _fileLogLock = new();
     private static void DebugLog(string message)
     {
         System.Diagnostics.Debug.WriteLine($"[MediaPipe] {message}");
+        lock (_fileLogLock)
+        {
+            try
+            {
+                System.IO.File.AppendAllText(
+                    "sop_module_debug.log",
+                    $"[{DateTime.Now:HH:mm:ss.fff}] [MediaPipe] {message}{Environment.NewLine}");
+            }
+            catch { /* 日志失败不影响检测 */ }
+        }
     }
 
     public bool IsInitialized => _palmSession != null && _landmarkSession != null;

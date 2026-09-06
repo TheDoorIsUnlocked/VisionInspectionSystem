@@ -51,6 +51,10 @@ public class SopyamlSop
     // ⭐ 新增：区域监控配置（在标定区域内检测"未戴安全帽的人"）
     [YamlMember(Alias = "monitoring")]
     public SopyamlMonitoring? Monitoring { get; set; }
+
+    // ⭐ 新增：跨相机协同规则配置（多相机分别检测后按规则组合报警）
+    [YamlMember(Alias = "cross_camera")]
+    public SopyamlCrossCamera? CrossCamera { get; set; }
 }
 
 public class SopyamlStep
@@ -72,6 +76,20 @@ public class SopyamlStep
 
     [YamlMember(Alias = "description")]
     public string? Description { get; set; }
+
+    /// <summary>
+    /// 该步骤使用的相机 ID（如 main_camera / cam_2），缺省主相机。
+    /// 状态机评估该步检测条件时，取该相机画面的检测结果。
+    /// </summary>
+    [YamlMember(Alias = "camera")]
+    public string? Camera { get; set; }
+
+    /// <summary>
+    /// 该步骤使用的 YOLO 模型路径；缺省使用 sop.model.path 全局模型。
+    /// 支持给每个相机/步骤指定不同模型（如不同相机用不同模型检测不同物体）。
+    /// </summary>
+    [YamlMember(Alias = "model")]
+    public string? Model { get; set; }
 
     [YamlMember(Alias = "violation_rules")]
     public List<SopyamlViolationRule>? ViolationRules { get; set; }
@@ -217,6 +235,10 @@ public class SopyamlRegion
 
     [YamlMember(Alias = "color")]
     public string? Color { get; set; }
+
+    /// <summary>区域所属相机 ID（可选，缺省主相机 main_camera）</summary>
+    [YamlMember(Alias = "camera")]
+    public string? Camera { get; set; }
 }
 
 public class SopyamlViolationRule
@@ -349,6 +371,68 @@ public class SopyamlMonitoring
 }
 
 /// <summary>
+/// 跨相机协同规则配置（YAML sop.cross_camera 节点）
+/// </summary>
+public class SopyamlCrossCamera
+{
+    /// <summary>是否启用跨相机协同规则</summary>
+    [YamlMember(Alias = "enabled")]
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>报警冷却时间（秒），防止每帧连续播放 ng.wav</summary>
+    [YamlMember(Alias = "cooldown_seconds")]
+    public double CooldownSeconds { get; set; } = 5;
+
+    /// <summary>规则列表</summary>
+    [YamlMember(Alias = "rules")]
+    public List<SopyamlCrossRule> Rules { get; set; } = new();
+}
+
+/// <summary>
+/// 跨相机规则：一组条件全部满足即命中
+/// </summary>
+public class SopyamlCrossRule
+{
+    [YamlMember(Alias = "id")]
+    public string Id { get; set; } = "";
+
+    [YamlMember(Alias = "name")]
+    public string Name { get; set; } = "";
+
+    [YamlMember(Alias = "severity")]
+    public int Severity { get; set; } = 1;
+
+    [YamlMember(Alias = "conditions")]
+    public List<SopyamlCrossCondition> Conditions { get; set; } = new();
+}
+
+/// <summary>
+/// 跨相机规则条件：指定相机在指定区域内出现/不出现某类别
+/// </summary>
+public class SopyamlCrossCondition
+{
+    /// <summary>相机 ID（如 main_camera / cam_2）</summary>
+    [YamlMember(Alias = "camera")]
+    public string Camera { get; set; } = "main_camera";
+
+    /// <summary>区域 ID（与 regions 中的 key 对应）</summary>
+    [YamlMember(Alias = "region")]
+    public string Region { get; set; } = "";
+
+    /// <summary>目标类别名（与模型 classes 一致）</summary>
+    [YamlMember(Alias = "object")]
+    public string Object { get; set; } = "";
+
+    /// <summary>true=出现触发；false=不出现触发</summary>
+    [YamlMember(Alias = "present")]
+    public bool Present { get; set; } = true;
+
+    /// <summary>检测置信度阈值（0-1），默认 0.5</summary>
+    [YamlMember(Alias = "min_confidence")]
+    public float MinConfidence { get; set; } = 0.5f;
+}
+
+/// <summary>
 /// YAML配置转换器
 /// </summary>
 public static class SOPYamlConverter
@@ -432,7 +516,8 @@ public static class SOPYamlConverter
                     X = region.X1,
                     Y = region.Y1,
                     Width = region.X2 - region.X1,
-                    Height = region.Y2 - region.Y1
+                    Height = region.Y2 - region.Y1,
+                    CameraId = string.IsNullOrWhiteSpace(region.Camera) ? "main_camera" : region.Camera
                 });
             }
         }
@@ -454,7 +539,10 @@ public static class SOPYamlConverter
                 Order = stepOrder++,
                 TimeoutSec = yamlStep.Timeout,
                 PassConditions = new List<StepCondition>(),
-                ViolationRules = new List<ViolationRule>()
+                ViolationRules = new List<ViolationRule>(),
+                // ⭐ 步骤级相机/模型（缺省主相机 + 全局模型）
+                CameraId = string.IsNullOrWhiteSpace(yamlStep.Camera) ? "main_camera" : yamlStep.Camera.Trim(),
+                ModelPath = string.IsNullOrWhiteSpace(yamlStep.Model) ? null : yamlStep.Model.Trim()
             };
 
             // 转换检测条件
@@ -584,6 +672,35 @@ public static class SOPYamlConverter
                 CooldownSeconds = yamlSop.Monitoring.CooldownSeconds
             };
             Console.WriteLine($"[SOP] 安全帽监控任务已加载: enabled={workflow.Monitoring.Enabled} | person={string.Join(",", workflow.Monitoring.PersonClasses)} | helmet={string.Join(",", workflow.Monitoring.HelmetClasses)}");
+        }
+
+        // ⭐ 转换跨相机协同规则配置
+        if (yamlSop.CrossCamera != null)
+        {
+            workflow.CrossCamera = new SOPCrossCameraConfig
+            {
+                Enabled = yamlSop.CrossCamera.Enabled,
+                CooldownSeconds = yamlSop.CrossCamera.CooldownSeconds,
+                Rules = yamlSop.CrossCamera.Rules
+                    .Select(r => new SOPCrossCameraRule
+                    {
+                        Id = r.Id,
+                        Name = r.Name,
+                        Severity = r.Severity,
+                        Conditions = r.Conditions
+                            .Select(c => new SOPCrossCameraCondition
+                            {
+                                CameraId = string.IsNullOrWhiteSpace(c.Camera) ? "main_camera" : c.Camera,
+                                RegionId = c.Region,
+                                ObjectClass = c.Object,
+                                Present = c.Present,
+                                MinConfidence = c.MinConfidence
+                            })
+                            .ToList()
+                    })
+                    .ToList()
+            };
+            Console.WriteLine($"[SOP] 跨相机协同规则已加载: enabled={workflow.CrossCamera.Enabled} | rules={workflow.CrossCamera.Rules.Count}");
         }
 
         // ⭐ 转换违规定义（如果有）
@@ -781,7 +898,8 @@ public static class SOPYamlConverter
                 Y1 = region.Y,
                 X2 = region.X + region.Width,
                 Y2 = region.Y + region.Height,
-                Name = region.Name
+                Name = region.Name,
+                Camera = region.CameraId == "main_camera" ? null : region.CameraId
             };
         }
 
@@ -794,7 +912,12 @@ public static class SOPYamlConverter
                 Name = step.StepName,
                 Timeout = step.TimeoutSec,
                 Description = step.Description,
-                Transitions = step.NextSteps?.ToList() ?? new List<string>()
+                Transitions = step.NextSteps?.ToList() ?? new List<string>(),
+                // ⭐ 步骤级相机/模型：主相机与空模型不写（缺省语义），其余写入
+                Camera = string.IsNullOrWhiteSpace(step.CameraId) || step.CameraId == "main_camera"
+                    ? null
+                    : step.CameraId.Trim(),
+                Model = string.IsNullOrWhiteSpace(step.ModelPath) ? null : step.ModelPath.Trim()
             };
 
             // 转换第一个条件为检测配置
@@ -833,6 +956,34 @@ public static class SOPYamlConverter
             }
 
             yamlSop.Steps.Add(yamlStep);
+        }
+
+        // 转换跨相机协同规则配置
+        if (workflow.CrossCamera != null)
+        {
+            yamlSop.CrossCamera = new SopyamlCrossCamera
+            {
+                Enabled = workflow.CrossCamera.Enabled,
+                CooldownSeconds = workflow.CrossCamera.CooldownSeconds,
+                Rules = workflow.CrossCamera.Rules
+                    .Select(r => new SopyamlCrossRule
+                    {
+                        Id = r.Id,
+                        Name = r.Name,
+                        Severity = r.Severity,
+                        Conditions = r.Conditions
+                            .Select(c => new SopyamlCrossCondition
+                            {
+                                Camera = c.CameraId,
+                                Region = c.RegionId,
+                                Object = c.ObjectClass,
+                                Present = c.Present,
+                                MinConfidence = c.MinConfidence
+                            })
+                            .ToList()
+                    })
+                    .ToList()
+            };
         }
 
         return yamlSop;

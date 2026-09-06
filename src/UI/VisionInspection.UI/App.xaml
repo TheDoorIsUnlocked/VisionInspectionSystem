@@ -18,6 +18,7 @@
             <converters:BooleanAndConverter x:Key="BooleanAndConverter"/>
             <converters:Boolean2BooleanReConverter x:Key="Boolean2BooleanReConverter"/>
             <converters:ObjectToVisibilityReConverter x:Key="Object2VisibilityReConverter"/>
+            <converters:CountToVisibilityConverter x:Key="CountToVisibilityConverter"/>
 
             <!-- 按钮样式 -->
             <Style x:Key="ButtonPrimary" TargetType="Button">

@@ -9,6 +9,7 @@ using System.Windows.Shapes;
 using System.Windows.Threading;
 using VisionInspection.Core.Models;
 using VisionInspection.Core.Services;
+using VisionInspection.UI.Services;
 using VisionInspection.UI.ViewModels;
 using VisionInspection.Modules.SOP;
 using VisionInspection.Modules.SOP.Models;
@@ -1106,27 +1107,45 @@ namespace VisionInspection.UI.Views
         /// 配置按钮点击
         /// </summary>
         /// <summary>
-        /// 打开 SOP 区域标定窗口：传入当前相机帧与当前 YAML，保存后重载工作流
+        /// 打开 SOP 区域标定窗口（多相机）：收集所有已连接相机的最新帧与当前 YAML，
+        /// 区域按所属相机自动加载到对应画面，保存后重载工作流。
         /// </summary>
         private void RegionButton_Click(object sender, RoutedEventArgs e)
         {
             var vm = GetMainViewModel();
             if (vm == null) return;
 
-            // 相机预览帧实时写入 RoiEditorViewModel.CurrentImage；
+            // 收集所有已连接相机的最新帧（主相机优先取 ROI 预览帧；其余取槽位最新帧）
+            var frames = new Dictionary<string, SKBitmap>();
+
+            // 主相机：相机预览帧实时写入 RoiEditorViewModel.CurrentImage；
             // 仅运行 SOP 检测时才会同步到 MainViewModel.CurrentImage。
             // 优先取相机预览帧，保证"只开相机、未运行 SOP"也能标定。
-            var frame = vm.RoiEditorViewModel?.CurrentImage ?? vm.CurrentImage;
-            if (frame == null)
+            var mainFrame = vm.RoiEditorViewModel?.CurrentImage ?? vm.CurrentImage;
+            if (mainFrame != null)
+            {
+                frames[CameraManager.PrimaryCameraId] = mainFrame.Copy();
+            }
+
+            foreach (var slot in CameraManager.Instance.Slots)
+            {
+                if (slot.CameraId == CameraManager.PrimaryCameraId) continue;
+                if (!slot.IsConnected || slot.LatestImageData == null) continue;
+                var bmp = CameraFrameConverter.ToSKBitmap(slot.LatestImageData);
+                if (bmp != null)
+                {
+                    frames[slot.CameraId] = bmp;
+                }
+            }
+
+            if (frames.Count == 0)
             {
                 MessageBox.Show("请先开启相机并采集一帧画面，再标定区域。", "提示",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
 
-            // 复制一帧，避免被实时帧复用导致绘制异常
-            var snapshot = frame.Copy();
-            var win = new SOPRegionEditorWindow(snapshot, _currentYamlPath);
+            var win = new SOPRegionEditorWindow(frames, _currentYamlPath);
             if (win.ShowDialog() == true && !string.IsNullOrEmpty(win.SavedYamlPath))
             {
                 ReloadFromYaml(win.SavedYamlPath);

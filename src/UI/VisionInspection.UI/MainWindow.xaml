@@ -279,20 +279,54 @@
                 <ColumnDefinition Width="300" MinWidth="200" MaxWidth="500" />
             </Grid.ColumnDefinitions>
 
-            <!-- 图像显示区 -->
+            <!-- 图像显示区：多相机宫格布局（1路单画面 / 2路左右 / 4路2x2） -->
             <Border Grid.Column="0" BorderBrush="Gray" BorderThickness="1" Background="#333"
                     CornerRadius="4" ClipToBounds="True">
                 <Grid>
-                    <controls:ROIEditorControl 
-                        ViewModel="{Binding RoiEditorViewModel}"
-                        HorizontalAlignment="Stretch"
-                        VerticalAlignment="Stretch"/>
-                    
-                    <!-- 提示信息 -->
-                    <TextBlock Text="点击'加载图像'按钮选择图片" 
-                              HorizontalAlignment="Center" VerticalAlignment="Center"
-                              Foreground="White" FontSize="16"
-                              Visibility="{Binding RoiEditorViewModel.CurrentImage, Converter={StaticResource Object2VisibilityReConverter}}"/>
+                    <ItemsControl ItemsSource="{Binding CameraViews}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="{Binding GridRows}" Columns="{Binding GridColumns}"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplateSelector>
+                            <controls:CameraCellTemplateSelector>
+                                <controls:CameraCellTemplateSelector.PrimaryTemplate>
+                                    <DataTemplate>
+                                        <controls:ROIEditorControl
+                                            ViewModel="{Binding DataContext.RoiEditorViewModel, RelativeSource={RelativeSource AncestorType=Window}}"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch"/>
+                                    </DataTemplate>
+                                </controls:CameraCellTemplateSelector.PrimaryTemplate>
+                                <controls:CameraCellTemplateSelector.SecondaryTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <controls:CameraPreviewControl/>
+                                            <Border BorderBrush="#FF4D4F" BorderThickness="4" CornerRadius="2" Margin="-4"
+                                                    Visibility="{Binding IsAlerting, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:CameraCellTemplateSelector.SecondaryTemplate>
+                            </controls:CameraCellTemplateSelector>
+                        </ItemsControl.ItemTemplateSelector>
+                        <ItemsControl.Style>
+                            <Style TargetType="ItemsControl">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding CameraViews.Count}" Value="0">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </ItemsControl.Style>
+                    </ItemsControl>
+
+                    <!-- 无相机时提示 -->
+                    <TextBlock Text="连接相机后显示实时画面"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="#AAA" FontSize="16"
+                               Visibility="{Binding CameraViews.Count, Converter={StaticResource CountToVisibilityConverter}}"/>
                 </Grid>
             </Border>
 

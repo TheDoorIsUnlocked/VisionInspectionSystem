@@ -133,6 +133,25 @@
                                 </StackPanel>
                             </Grid>
 
+                            <!-- ⭐ 步骤级相机 + 模型（多相机/多模型支持） -->
+                            <Grid Margin="0,12,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="12"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="检测相机（camera，缺省主相机）" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox x:Name="StepCameraCombo" Style="{StaticResource FieldCombo}"
+                                              ToolTip="该步骤使用哪路相机的画面进行检测（缺省主相机）"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2">
+                                    <TextBlock Text="检测模型（model，留空=全局模型）" Style="{StaticResource FieldLabel}"/>
+                                    <ComboBox x:Name="StepModelCombo" Style="{StaticResource FieldCombo}"
+                                              ToolTip="该步骤使用的 YOLO 模型；选「（默认：全局模型）」即使用 sop.model.path；选项自动扫描模型目录"/>
+                                </StackPanel>
+                            </Grid>
+
                             <TextBlock Text="检测条件（detection）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
                             <TextBlock Text="检测方法" Style="{StaticResource FieldLabel}"/>
                             <ComboBox x:Name="DetectionMethodCombo" Style="{StaticResource FieldCombo}"
@@ -273,8 +292,9 @@
                             <StackPanel x:Name="RegionsPanel"/>
 
                             <TextBlock Text="模型配置（model）" Style="{StaticResource SectionHeader}" Margin="0,18,0,5"/>
-                            <TextBlock Text="ONNX 模型路径（path）" Style="{StaticResource FieldLabel}"/>
-                            <TextBox x:Name="ModelPathTextBox" Style="{StaticResource FieldInput}"/>
+                            <TextBlock Text="ONNX 模型路径（path，可下拉选择或手动填写）" Style="{StaticResource FieldLabel}"/>
+                            <ComboBox x:Name="ModelPathCombo" Style="{StaticResource FieldCombo}" IsEditable="True"
+                                      ToolTip="下拉选择模型目录（yolo_models）中的 ONNX 文件，也可手动输入路径"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>

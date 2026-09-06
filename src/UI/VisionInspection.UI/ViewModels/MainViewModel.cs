@@ -3,6 +3,8 @@ using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Win32;
 using SkiaSharp;
+using System.Collections.Concurrent;
+using System.Collections.ObjectModel;
 using System.IO;
 using NAudio.Wave;
 using System.Media;
@@ -16,7 +18,9 @@ using VisionInspection.Core.ViewModels;
 using VisionInspection.Modules.Detection;
 using VisionInspection.Modules.SOP;
 using VisionInspection.Modules.SOP.Models;
+using VisionInspection.Modules.SOP.Services;
 using VisionInspection.UI.Services;
+using YoloDotNet.Models;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -81,6 +85,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     [ObservableProperty]
     private SKBitmap? _detectionResultImage;
+
+    // ===== 多相机画面 =====
+
+    /// <summary>多相机画面集合（主相机在前，供主界面宫格布局）</summary>
+    public ObservableCollection<CameraViewItem> CameraViews { get; } = new();
+
+    /// <summary>画面宫格行数（1 路=1，2 路=1，3/4 路=2）</summary>
+    [ObservableProperty]
+    private int _gridRows = 1;
+
+    /// <summary>画面宫格列数（1 路=1，2 路=2，3/4 路=2）</summary>
+    [ObservableProperty]
+    private int _gridColumns = 1;
+
+    /// <summary>每路相机的推理通道（容量 1，DropOldest；ConcurrentDictionary 允许运行中动态补建新相机通道）</summary>
+    private readonly ConcurrentDictionary<string, Channel<SKBitmap>> _perCameraInferenceQueues = new();
+
+    /// <summary>每路相机最近一次用于推理的帧（跨相机规则需要同时刻的多路帧）</summary>
+    private readonly Dictionary<string, SKBitmap> _lastInferenceFrames = new();
+
+    /// <summary>每路相机最近一次的检测结果（供对应画面叠加渲染）</summary>
+    private readonly Dictionary<string, List<ObjectDetection>> _perCameraLastResults = new();
+
+    /// <summary>跨相机协同规则评估器</summary>
+    private readonly CrossCameraEvaluator _crossEvaluator = new();
 
     [ObservableProperty]
     private string _status = "就绪";
@@ -156,6 +185,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     // 缓存最后一次手部骨架结果，在原始帧上绘制，消除"原始帧→骨架帧"交替闪烁
     private HandPoseEstimationResult? _lastHandPoseResult;
+    // ⭐ 手部骨架结果来自哪路相机（多相机：手部骨架画到产生它的相机画面，而非固定主相机）
+    private string _lastHandPoseCameraId = "main_camera";
     // 连续无手部检测帧计数器，用于清除残留骨架
     private int _noHandsFrameCount = 0;
     private const int MaxNoHandsFrames = 8;
@@ -178,27 +209,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // 参数从当前加载的 ModelInfo 读取，模型管理对话框可调。
     private DetectionTrackSmoother _realtimeSmoother = new(ema: 0.2f, maxMissed: 5);
 
-    // 实时检测结果缓存：最近一次平滑后的检测对象，由 OnCameraImageGrabbed 在最新相机帧上叠加渲染。
+    // 实时检测结果缓存：最近一次平滑后的检测对象，由 OnCameraFrameGrabbed 在最新相机帧上叠加渲染。
     // 与 SOP 的 _lastSopResult 同理，避免「无框原始帧」与「有框帧」交替造成的闪烁。
     private List<DetectedObject>? _lastRealtimeObjects;
     private int _noRealtimeResultFrameCount;
     private const int MaxNoRealtimeResultFrames = 15; // 连续多少帧无新实时结果则清空缓存
     
-    // 修复：添加异步推理队列 - 改为可重新创建
-    private Channel<SKBitmap> _inferenceQueue;
     private CancellationTokenSource? _inferenceCts;
     private Task? _inferenceWorkerTask;
-    
-    /// <summary>
-    /// 创建新的推理队列
-    /// </summary>
-    private void CreateInferenceQueue()
-    {
-        _inferenceQueue = Channel.CreateBounded<SKBitmap>(new BoundedChannelOptions(2)
-        {
-            FullMode = BoundedChannelFullMode.DropOldest
-        });
-    }
 
     public MainViewModel()
     {
@@ -212,137 +230,289 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _detectionService.DetectionError += OnDetectionError;
         
         // 订阅相机图像事件
-        _cameraManager.ImageGrabbed += OnCameraImageGrabbed;
+        _cameraManager.FrameGrabbed += OnCameraFrameGrabbed;
+        _cameraManager.SlotStatusChanged += OnCameraSlotStatusChanged;
         _cameraManager.ConnectionStatusChanged += OnCameraConnectionStatusChanged;
+    }
+
+    /// <summary>
+    /// 初始化多相机画面布局（主窗口 Loaded 后调用，重建已连接槽位对应的画面格子）
+    /// </summary>
+    public void InitCameraLayout()
+    {
+        RebuildCameraLayout();
     }
     
     /// <summary>
-    /// 相机图像采集回调 - 修复：使用异步队列避免阻塞UI线程
-    /// 关键修复（卡顿/显示上一帧）：
-    ///   1. 用 BeginInvoke 异步投递到 UI 线程，不再阻塞相机采集线程
-    ///   2. 检测结果统一在「最新相机帧」上叠加，不再用"推理旧帧+检测框"覆盖画面
+    /// 多相机帧到达回调：按 CameraId 分发给对应画面，SOP 运行时每路克隆入推理通道。
+    /// 主相机（main_camera）额外更新 ROI 编辑画面与实时检测。
     /// </summary>
-    private void OnCameraImageGrabbed(object? sender, CameraImageData e)
+    private void OnCameraFrameGrabbed(object? sender, CameraFrameEventArgs e)
     {
         // 检查应用程序是否仍在运行
         if (System.Windows.Application.Current == null || _isDisposed)
             return;
 
-        // 将相机图像转换为 SKBitmap 并显示
-        var skBitmap = ConvertCameraImageToSKBitmap(e);
-        if (skBitmap != null)
+        var skBitmap = ConvertCameraImageToSKBitmap(e.ImageData);
+        if (skBitmap == null) return;
+
+        bool isPrimary = string.Equals(e.CameraId, CameraManager.PrimaryCameraId, StringComparison.OrdinalIgnoreCase);
+
+        // SOP 运行中：每路克隆入对应推理通道（主相机兼容旧路径）
+        if (IsSOPDetecting && _sopModule != null)
         {
-            // 先克隆用于推理（在绘制任何 overlay 前复制，确保推理用原始图像）
-            SKBitmap? inferenceBitmap = null;
-            if (IsSOPDetecting && _sopModule != null)
+            // 相机在 SOP 运行期间才连接/开始采集：动态补建该相机的单槽推理通道，
+            // 否则其帧会被丢弃，导致该相机画面无推理、步骤相机取不到检测。
+            var ch = _perCameraInferenceQueues.GetOrAdd(e.CameraId, _ =>
+                Channel.CreateBounded<SKBitmap>(
+                    new BoundedChannelOptions(1)
+                    {
+                        FullMode = BoundedChannelFullMode.DropOldest
+                    }));
+            var clone = skBitmap.Copy();
+            if (!ch.Writer.TryWrite(clone))
             {
-                inferenceBitmap = skBitmap.Copy();
+                clone.Dispose(); // 队列未就绪或满了，丢弃旧帧
             }
+        }
 
-            // 在最新相机帧上叠加最后一次 SOP 检测结果（检测框 + 手部骨架 + 违规）
-            // 这是消除"画面退回上一帧"卡顿感的关键：
-            //   - 之前是"推理完成后用旧帧+检测框覆盖 CurrentImage"，造成画面回退
-            //   - 现在是"每收到一帧新画面，用最新的检测结果叠加渲染"，画面永远是最新帧
-            var cachedSopResult = _lastSopResult;
-            if (IsSOPDetecting && cachedSopResult != null)
+        // 在最新相机帧上叠加该相机缓存的检测结果（检测框 + 手部骨架，两者同时绘制，
+        // 不再互斥：多相机下相机画面常有检测框，互斥会导致手部骨架被检测框分支跳过）
+        if (IsSOPDetecting)
+        {
+            try
             {
-                try
-                {
-                    using var canvas = new SKCanvas(skBitmap);
-                    DrawSOPDetectionOverlay(canvas, skBitmap.Info, cachedSopResult);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[OnCameraImageGrabbed] 叠加 SOP 结果异常: {ex.Message}");
-                }
+                using var canvas = new SKCanvas(skBitmap);
 
-                // 老化计数：如果连续 N 帧没新检测结果，清空缓存避免残留
-                _noSopResultFrameCount++;
-                if (_noSopResultFrameCount >= MaxNoSopResultFrames)
+                // ① 该相机的检测框
+                if (_perCameraLastResults.TryGetValue(e.CameraId, out var cachedDets) && cachedDets.Count > 0)
                 {
-                    _lastSopResult = null;
-                    _noSopResultFrameCount = 0;
-                }
-            }
-            else if (IsSOPDetecting)
-            {
-                // 还没收到第一次检测结果时，至少画上缓存的手部骨架（保留原行为）
-                var cachedHand = _lastHandPoseResult;
-                if (cachedHand != null && cachedHand.Hands.Count > 0)
-                {
-                    using var canvas = new SKCanvas(skBitmap);
-                    DrawHandPoses(canvas, cachedHand);
-                }
-            }
-
-            // 实时检测：在最新相机帧上叠加缓存的实时检测结果（与 SOP 同一架构，保证每帧都有框、丝滑不闪）
-            if (IsRealTimeDetecting && _lastRealtimeObjects != null)
-            {
-                try
-                {
-                    using var canvas = new SKCanvas(skBitmap);
-                    DrawDetectedObjects(canvas, _lastRealtimeObjects, 32f);
-                }
-                catch (Exception ex)
-                {
-                    System.Diagnostics.Debug.WriteLine($"[OnCameraImageGrabbed] 叠加实时结果异常: {ex.Message}");
+                    DrawObjectDetectionBoxes(canvas, cachedDets);
                 }
 
-                // 老化计数：连续 N 帧没新检测结果则清空缓存，避免残留旧框
-                _noRealtimeResultFrameCount++;
-                if (_noRealtimeResultFrameCount >= MaxNoRealtimeResultFrames)
+                // ② 手部骨架：画到产生手部结果的相机画面上（跟随当前步骤相机）
+                if (string.Equals(_lastHandPoseCameraId, e.CameraId, StringComparison.OrdinalIgnoreCase)
+                    && _lastHandPoseResult is { Hands.Count: > 0 })
                 {
-                    _lastRealtimeObjects = null;
-                    _noRealtimeResultFrameCount = 0;
+                    DrawHandPoses(canvas, _lastHandPoseResult);
                 }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[OnCameraFrameGrabbed] 叠加 SOP 结果异常: {ex.Message}");
+            }
+        }
+
+        // 实时检测（仅主相机）：在最新帧上叠加缓存的实时检测结果
+        if (isPrimary && IsRealTimeDetecting && _lastRealtimeObjects != null)
+        {
+            try
+            {
+                using var canvas = new SKCanvas(skBitmap);
+                DrawDetectedObjects(canvas, _lastRealtimeObjects, 32f);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[OnCameraFrameGrabbed] 叠加实时结果异常: {ex.Message}");
             }
 
-            // 在UI线程更新图像（用 BeginInvoke 避免阻塞相机采集线程）
-            System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+            _noRealtimeResultFrameCount++;
+            if (_noRealtimeResultFrameCount >= MaxNoRealtimeResultFrames)
             {
-                if (!_isDisposed && RoiEditorViewModel != null)
-                {
-                    RoiEditorViewModel.CurrentImage = skBitmap;
-                }
-            }));
+                _lastRealtimeObjects = null;
+                _noRealtimeResultFrameCount = 0;
+            }
+        }
 
-            // 将推理图像放入队列
-            if (inferenceBitmap != null)
+        // 在UI线程更新对应画面（主相机同步到 ROI 编辑画面，避免阻塞相机采集线程）
+        System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_isDisposed) return;
+
+            var item = CameraViews.FirstOrDefault(v => string.Equals(v.CameraId, e.CameraId, StringComparison.OrdinalIgnoreCase));
+            if (item != null)
             {
-                if (!_inferenceQueue.Writer.TryWrite(inferenceBitmap))
+                item.CurrentImage?.Dispose();
+                item.CurrentImage = skBitmap;
+                item.IsConnected = true;
+            }
+            else
+            {
+                skBitmap.Dispose();
+                return;
+            }
+
+            if (isPrimary && RoiEditorViewModel != null)
+            {
+                RoiEditorViewModel.CurrentImage = skBitmap;
+            }
+        }));
+
+        // 实时检测（仅主相机）触发推理
+        if (isPrimary && IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
+        {
+            _ = PerformRealTimeDetectionAsync(skBitmap);
+        }
+    }
+
+    /// <summary>
+    /// 槽位状态变化：重建宫格布局
+    /// </summary>
+    private void OnCameraSlotStatusChanged(object? sender, CameraSlotEventArgs e)
+    {
+        System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_isDisposed) return;
+            RebuildCameraLayout();
+        }));
+    }
+
+    /// <summary>
+    /// 根据已连接槽位重建 CameraViews 与宫格行列数
+    /// </summary>
+    private void RebuildCameraLayout()
+    {
+        var connected = _cameraManager.Slots.Where(s => s.IsConnected).ToList();
+        int count = connected.Count;
+
+        GridRows = count <= 2 ? 1 : 2;
+        GridColumns = count == 1 ? 1 : 2;
+
+        // 移除已断开或已注销的槽位
+        foreach (var removed in CameraViews.Where(v => !connected.Any(c => string.Equals(c.CameraId, v.CameraId, StringComparison.OrdinalIgnoreCase))).ToList())
+        {
+            removed.CurrentImage?.Dispose();
+            CameraViews.Remove(removed);
+        }
+
+        // 新增/更新已连接槽位（主相机在前）
+        foreach (var slot in connected.OrderByDescending(s => s.IsPrimary).ThenBy(s => s.CameraId, StringComparer.OrdinalIgnoreCase))
+        {
+            var item = CameraViews.FirstOrDefault(v => string.Equals(v.CameraId, slot.CameraId, StringComparison.OrdinalIgnoreCase));
+            if (item == null)
+            {
+                CameraViews.Add(new CameraViewItem
                 {
-                    inferenceBitmap.Dispose(); // 队列满了，丢弃旧帧
-                }
+                    CameraId = slot.CameraId,
+                    DisplayName = string.IsNullOrEmpty(slot.DisplayName) ? slot.CameraId : slot.DisplayName,
+                    IsPrimary = slot.IsPrimary
+                });
             }
-            else if (IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
+            else
             {
-                _ = PerformRealTimeDetectionAsync(skBitmap);
+                item.IsConnected = slot.IsConnected;
             }
+        }
+
+        UpdateCameraModelText();
+    }
+
+    /// <summary>
+    /// 从已连接槽位聚合相机型号摘要（如 "📷 ModelA | ModelB"）
+    /// </summary>
+    private void UpdateCameraModelText()
+    {
+        var models = _cameraManager.Slots
+            .Where(s => s.IsConnected && s.CameraInfo != null)
+            .Select(s => !string.IsNullOrEmpty(s.CameraInfo!.Model) ? s.CameraInfo.Model : s.CameraInfo.Name)
+            .Where(m => !string.IsNullOrEmpty(m))
+            .Distinct()
+            .ToList();
+
+        CameraModelText = models.Count > 0 ? $"📷 {string.Join(" | ", models)}" : "";
+    }
+
+    /// <summary>
+    /// 绘制通用检测框（供多相机画面叠加：label + 置信度，颜色按置信度分级）
+    /// </summary>
+    private static void DrawObjectDetectionBoxes(SKCanvas canvas, List<ObjectDetection> detections)
+    {
+        foreach (var det in detections)
+        {
+            var label = det.Label?.Name ?? "?";
+            var conf = (float)det.Confidence;
+            var box = det.BoundingBox;
+
+            var color = conf > 0.7 ? SKColors.LimeGreen : conf > 0.5 ? SKColors.Yellow : SKColors.Orange;
+
+            using var boxPaint = new SKPaint
+            {
+                Color = color,
+                StrokeWidth = 3,
+                IsAntialias = true,
+                Style = SKPaintStyle.Stroke
+            };
+            canvas.DrawRect(box, boxPaint);
+
+            var labelText = $"{label} {conf * 100:F0}%";
+            using var textPaint = new SKPaint
+            {
+                Color = SKColors.White,
+                TextSize = 18,
+                IsAntialias = true,
+                FakeBoldText = true
+            };
+            using var bgPaint = new SKPaint { Color = color.WithAlpha(200), Style = SKPaintStyle.Fill };
+
+            var textBounds = new SKRect();
+            textPaint.MeasureText(labelText, ref textBounds);
+            canvas.DrawRect(box.Left, box.Top - textBounds.Height - 6, textBounds.Width + 8, textBounds.Height + 6, bgPaint);
+            canvas.DrawText(labelText, box.Left + 4, box.Top - 4, textPaint);
         }
     }
     
     /// <summary>
-    /// 启动推理工作线程
+    /// 启动推理工作线程（多相机批量：每 tick 收集各相机最新帧一次性推理）
     /// </summary>
     private void StartInferenceWorker()
     {
-        // 修复：创建新的队列
-        CreateInferenceQueue();
-        
+        // 为每个已连接槽位创建单槽推理通道（容量 1，DropOldest）
+        CreateInferenceQueues();
+
         _inferenceCts = new CancellationTokenSource();
         _inferenceWorkerTask = Task.Run(async () =>
         {
             try
             {
-                await foreach (var bitmap in _inferenceQueue.Reader.ReadAllAsync(_inferenceCts.Token))
+                while (!_inferenceCts.Token.IsCancellationRequested)
                 {
-                    try
+                    // 等待任一相机通道有数据
+                    var reads = _perCameraInferenceQueues.Values
+                        .Select(ch => ch.Reader.WaitToReadAsync(_inferenceCts.Token).AsTask())
+                        .ToArray();
+                    if (reads.Length == 0)
                     {
-                        await PerformSOPDetectionAsync(bitmap);
+                        await Task.Delay(50, _inferenceCts.Token);
+                        continue;
                     }
-                    finally
+                    await Task.WhenAny(reads);
+
+                    // 收集各相机最新帧（单槽通道天然是"最新帧"）
+                    var frames = new Dictionary<string, CaptureFrame>();
+                    foreach (var (camId, ch) in _perCameraInferenceQueues)
                     {
-                        bitmap.Dispose(); // 确保释放克隆的图像
+                        if (ch.Reader.TryRead(out var bitmap))
+                        {
+                            // 替换保留的最近帧
+                            if (_lastInferenceFrames.TryGetValue(camId, out var old))
+                                old.Dispose();
+                            _lastInferenceFrames[camId] = bitmap;
+                        }
+                        if (_lastInferenceFrames.TryGetValue(camId, out var img))
+                        {
+                            frames[camId] = new CaptureFrame
+                            {
+                                CameraId = camId,
+                                Image = img,
+                                Timestamp = DateTime.Now,
+                                FrameNumber = _frameCount++
+                            };
+                        }
+                    }
+
+                    if (frames.Count > 0)
+                    {
+                        await PerformSOPDetectionAsync(frames);
                     }
                 }
             }
@@ -361,9 +531,40 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // 其他异常记录
                 System.Diagnostics.Debug.WriteLine($"[InferenceWorker] 异常: {ex.GetType().Name}: {ex.Message}");
             }
+            finally
+            {
+                // 释放保留的推理帧
+                foreach (var kv in _lastInferenceFrames)
+                {
+                    kv.Value?.Dispose();
+                }
+                _lastInferenceFrames.Clear();
+            }
         }, _inferenceCts.Token);
     }
-    
+
+    /// <summary>
+    /// 为每个已连接槽位创建单槽推理通道
+    /// </summary>
+    private void CreateInferenceQueues()
+    {
+        foreach (var ch in _perCameraInferenceQueues.Values)
+        {
+            ch.Writer.TryComplete();
+        }
+        _perCameraInferenceQueues.Clear();
+
+        foreach (var slot in _cameraManager.Slots.Where(s => s.IsConnected))
+        {
+            _perCameraInferenceQueues.GetOrAdd(slot.CameraId, _ =>
+                Channel.CreateBounded<SKBitmap>(
+                    new BoundedChannelOptions(1)
+                    {
+                        FullMode = BoundedChannelFullMode.DropOldest
+                    }));
+        }
+    }
+
     /// <summary>
     /// 停止推理工作线程
     /// </summary>
@@ -372,7 +573,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         try
         {
             _inferenceCts?.Cancel();
-            _inferenceQueue?.Writer.TryComplete();
+            foreach (var ch in _perCameraInferenceQueues.Values)
+            {
+                ch.Writer.TryComplete();
+            }
         }
         catch (Exception)
         {
@@ -403,6 +607,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 _inferenceWorkerTask = null;
             }
         }
+        _perCameraInferenceQueues.Clear();
     }
     
     /// <summary>
@@ -623,9 +828,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     #region SOP实时检测
 
     /// <summary>
-    /// 执行 SOP 实时检测（每帧调用）
+    /// 执行 SOP 实时检测（多相机批量帧，由推理 worker 调用）
     /// </summary>
-    private async Task PerformSOPDetectionAsync(SKBitmap bitmap)
+    private async Task PerformSOPDetectionAsync(Dictionary<string, CaptureFrame> frames)
     {
         // 使用信号量防止并发
         if (!await _sopInferenceLock.WaitAsync(0))
@@ -640,19 +845,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            // 构建帧数据
-            var frames = new Dictionary<string, CaptureFrame>
-            {
-                ["main_camera"] = new CaptureFrame
-                {
-                    CameraId = "main_camera",
-                    Image = bitmap,
-                    Timestamp = DateTime.Now,
-                    FrameNumber = _frameCount++
-                }
-            };
-
-            // 执行 SOP 检测
+            // 执行 SOP 检测（SOPModule 内部按相机串行推理，主相机推进状态机）
             var result = await _sopModule.ProcessAsync(frames);
 
             if (result is SOPModuleResult sopResult)
@@ -660,14 +853,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 // 在 UI 线程更新（只更新数据字段，不再覆盖画面）
                 // 关键修复：之前这里会用"推理旧帧 + 检测框"覆盖 CurrentImage，
                 // 导致画面退回上一帧、看起来一卡一卡。
-                // 现在改为：缓存 sopResult，让 OnCameraImageGrabbed 收到下一帧新画面时再叠加渲染。
+                // 现在改为：缓存 sopResult，让 OnCameraFrameGrabbed 收到下一帧新画面时再叠加渲染。
                 System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
                 {
                     if (_isDisposed) return;
 
-                    // 缓存 SOP 检测结果（供 OnCameraImageGrabbed 在最新帧上叠加）
+                    // 缓存 SOP 检测结果（供 OnCameraFrameGrabbed 在最新帧上叠加）
                     _lastSopResult = sopResult;
                     _noSopResultFrameCount = 0;
+
+                    // 缓存每路相机检测结果（供对应画面叠加渲染；ToList 拷贝防 Yolo 复用列表污染）
+                    _perCameraLastResults.Clear();
+                    foreach (var (camId, dets) in sopResult.PerCameraDetections)
+                    {
+                        _perCameraLastResults[camId] = dets.ToList();
+                    }
 
                     // 更新检测框时序平滑器（仅在推理出新结果时更新，渲染时读取）
                     _detectionSmoother.Update(sopResult.Detections);
@@ -676,6 +876,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     if (sopResult.HandPoseResult != null && sopResult.HandPoseResult.Hands.Count > 0)
                     {
                         _lastHandPoseResult = sopResult.HandPoseResult;
+                        // ⭐ 记录手部结果来自哪路相机，绘制时画到该相机画面
+                        _lastHandPoseCameraId = sopResult.HandPoseCameraId;
                         _noHandsFrameCount = 0;
                     }
                     else
@@ -714,12 +916,14 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     // 区域监控：在标定区域内检测"未戴安全帽的人"，命中则播放 ng.wav
                     EvaluateRegionMonitoring(sopResult);
 
+                    // 跨相机协同规则：多相机检测结果按规则组合评估，命中则报警
+                    EvaluateCrossCameraRules(sopResult);
+
                     // 不再在此处覆盖 RoiEditorViewModel.CurrentImage：
-                    // 让 OnCameraImageGrabbed 在收到下一帧新画面时统一叠加渲染，
+                    // 让 OnCameraFrameGrabbed 在收到下一帧新画面时统一叠加渲染，
                     // 画面永远是"最新相机帧 + 最新检测结果"，消除卡顿和上一帧残留。
 
-                    // 释放原始bitmap（推理队列里克隆的）
-                    bitmap.Dispose();
+                    // 推理帧由 worker 线程统一管理生命周期（_lastInferenceFrames），此处不释放
 
                     // 计算推理 FPS
                     _inferenceFrameCount++;
@@ -750,6 +954,40 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         finally
         {
             _sopInferenceLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// 跨相机协同规则评估：多相机分别检测后按规则组合（全部条件满足）触发报警。
+    /// 命中 → 状态栏提示 + 播放 ng.wav + 对应画面格子红框闪烁。
+    /// 冷却由 CrossCameraEvaluator 按规则 Id 维护。
+    /// </summary>
+    private void EvaluateCrossCameraRules(SOPModuleResult sopResult)
+    {
+        try
+        {
+            var workflow = _sopModule?.CurrentWorkflow;
+            var cfg = workflow?.CrossCamera;
+            if (workflow == null || cfg == null || !cfg.Enabled || cfg.Rules.Count == 0) return;
+
+            var hit = _crossEvaluator.Evaluate(sopResult.PerCameraDetections, workflow.Regions, cfg, DateTime.Now);
+            if (hit == null) return;
+
+            SopStatus = $"⚠ 跨相机规则: {hit.Rule.Name}";
+            Status = $"⚠ 跨相机协同报警: {hit.Detail}";
+            DebugLog($"[CrossCamera] rule={hit.Rule.Id} {hit.Detail} -> 播放 ng.wav");
+            PlayNgSound();
+
+            // 对应画面格子红框闪烁（涉及的相机）
+            foreach (var cond in hit.Rule.Conditions)
+            {
+                var item = CameraViews.FirstOrDefault(v => string.Equals(v.CameraId, cond.CameraId, StringComparison.OrdinalIgnoreCase));
+                item?.MarkAlert(5);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"跨相机规则评估异常: {ex.Message}");
         }
     }
 
@@ -1516,13 +1754,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             IsBusy = true;
 
-            // 1. 检查相机
-            if (!_cameraManager.IsConnected)
+            // 1. 检查相机（至少一路已连接且在采集）
+            if (!_cameraManager.Slots.Any(s => s.IsConnected))
             {
                 MessageBox.Show("请先连接相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
-            if (!_cameraManager.IsGrabbing)
+            if (!_cameraManager.Slots.Any(s => s.IsGrabbing))
             {
                 MessageBox.Show("请先开始相机采集", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
@@ -1684,6 +1922,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _detectionSmoother.Clear();
         _lastSopResult = null;
         _noSopResultFrameCount = 0;
+        // 清空多相机检测结果缓存与告警标记
+        _perCameraLastResults.Clear();
+        foreach (var item in CameraViews)
+        {
+            item.IsAlerting = false;
+        }
         // 重置区域监控报警状态
         _regionAlertActive = false;
         _regionAlertLastTime = DateTime.MinValue;
@@ -2299,7 +2543,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// 在画布上绘制 COCO 姿态关键点与骨骼连线
     /// </summary>
-    private void DrawPoseSkeleton(SKCanvas canvas, List<KeyPoint> kps)
+    private void DrawPoseSkeleton(SKCanvas canvas, List<VisionInspection.Core.Services.KeyPoint> kps)
     {
         // 按置信度过滤不可靠的关键点
         var valid = kps.Where(k => k.Confidence >= POSE_KEYPOINT_CONF).ToList();
@@ -2755,7 +2999,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _isDisposed = true;
             
             // 取消订阅相机/检测/SOP 事件，避免关闭过程中收到回调
-            _cameraManager.ImageGrabbed -= OnCameraImageGrabbed;
+            _cameraManager.FrameGrabbed -= OnCameraFrameGrabbed;
+            _cameraManager.SlotStatusChanged -= OnCameraSlotStatusChanged;
             _cameraManager.ConnectionStatusChanged -= OnCameraConnectionStatusChanged;
             _detectionService.DetectionError -= OnDetectionError;
             if (_sopModule != null)
@@ -2772,7 +3017,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             try
             {
                 _inferenceCts?.Cancel();
-                _inferenceQueue?.Writer.TryComplete();
+                foreach (var ch in _perCameraInferenceQueues.Values)
+                {
+                    ch.Writer.TryComplete();
+                }
                 _inferenceWorkerTask?.Wait(TimeSpan.FromSeconds(3));
             }
             catch (Exception)
@@ -2790,6 +3038,29 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             // 释放图像资源
             CurrentImage?.Dispose();
             DetectionResultImage?.Dispose();
+
+            // CameraViews 绑定到 ItemsControl（UI CollectionView），必须在 UI 线程清空，
+            // 否则关闭时在后台线程执行 Clear() 会抛 NotSupportedException
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+            {
+                dispatcher.Invoke(new Action(() =>
+                {
+                    foreach (var item in CameraViews)
+                    {
+                        item.CurrentImage?.Dispose();
+                    }
+                    CameraViews.Clear();
+                }));
+            }
+            else
+            {
+                foreach (var item in CameraViews)
+                {
+                    item.CurrentImage?.Dispose();
+                }
+                CameraViews.Clear();
+            }
 
             // 释放检测服务（YOLO 推理会话）
             try { _detectionService?.Dispose(); } catch (Exception) { }
@@ -2817,4 +3088,40 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     #endregion
+}
+
+/// <summary>
+/// 多相机画面项（主界面宫格中一个格子的数据源）
+/// </summary>
+public partial class CameraViewItem : ObservableObject
+{
+    public string CameraId { get; init; } = "";
+    public string DisplayName { get; init; } = "";
+    public bool IsPrimary { get; init; }
+
+    /// <summary>该路相机最新画面（已叠加检测框，UI 线程写入）</summary>
+    [ObservableProperty]
+    private SKBitmap? _currentImage;
+
+    [ObservableProperty]
+    private bool _isConnected;
+
+    /// <summary>跨相机规则命中时的告警高亮</summary>
+    [ObservableProperty]
+    private bool _isAlerting;
+
+    /// <summary>
+    /// 标记告警：红框高亮 seconds 秒后自动清除
+    /// </summary>
+    public void MarkAlert(int seconds)
+    {
+        IsAlerting = true;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(seconds));
+            sw.Stop();
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() => IsAlerting = false));
+        });
+    }
 }

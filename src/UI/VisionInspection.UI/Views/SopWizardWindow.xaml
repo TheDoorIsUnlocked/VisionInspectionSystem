@@ -81,6 +81,26 @@
                                 Width="34" Margin="3,0,0,0" Style="{StaticResource ButtonDanger}" ToolTip="删除该动作"/>
                     </StackPanel>
                     <ItemsControl ItemsSource="{Binding ParamEditors}" ItemTemplate="{StaticResource ParamEditorTemplate}"/>
+                    <!-- 本步相机 + 模型选择（多相机/多模型：每个相机可指定不同模型） -->
+                    <Grid Margin="0,6,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="检测相机" VerticalAlignment="Center"
+                                   Foreground="#455A64" FontSize="12"/>
+                        <ComboBox Grid.Column="1" ItemsSource="{Binding CameraOptions}" DisplayMemberPath="Display"
+                                  SelectedValuePath="Id" SelectedValue="{Binding CameraId, Mode=TwoWay}"
+                                  ToolTip="该步骤使用哪路相机的画面进行检测（缺省主相机）"/>
+                        <TextBlock Grid.Column="3" Text="检测模型" VerticalAlignment="Center"
+                                   Foreground="#455A64" FontSize="12"/>
+                        <ComboBox Grid.Column="4" ItemsSource="{Binding ModelOptionsWithDefault}" DisplayMemberPath="Display"
+                                  SelectedValuePath="Value" SelectedValue="{Binding ModelPath, Mode=TwoWay}"
+                                  ToolTip="该步骤使用的 YOLO 模型；选择「（默认：全局模型）」即使用 sop.model.path"/>
+                    </Grid>
                     <!-- 本步超时设置 -->
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <CheckBox Content="启用本步超时" IsChecked="{Binding EnableTimeout, Mode=TwoWay}"

@@ -26,7 +26,8 @@ namespace VisionInspection.UI.Views
         private readonly CameraManager _cameraManager;
         private readonly CameraConfigManager _configManager;
         private List<CameraInfo> _cameras = new();
-        private CameraInfo _selectedCamera = null;
+        private CameraInfo? _selectedCamera = null;
+        private readonly List<CameraInfo> _selectedCameras = new();   // 多选连接
         private CameraConfiguration _cameraConfig;
 
         #region 属性
@@ -141,33 +142,55 @@ namespace VisionInspection.UI.Views
         /// </summary>
         private async void CameraConfigWindow_Loaded(object sender, RoutedEventArgs e)
         {
-            // 如果相机已经在采集（主窗口正在使用），不要重新枚举，避免中断采集
-            if (_cameraManager.IsGrabbing)
+            // ===== 场景1：已有已连接的相机（无论是否在采集）→ 直接展示所有已连接槽位 =====
+            // 不重新枚举、不中断采集；允许用户查看/断开当前连接
+            var connectedSlots = _cameraManager.Slots.Where(s => s.IsConnected).ToList();
+            if (connectedSlots.Count > 0)
             {
-                Debug.WriteLine("相机配置窗口：检测到相机正在采集，跳过自动搜索，避免中断主窗口");
-                
-                // 如果已连接，显示当前相机信息
-                if (_cameraManager.IsConnected && _cameraManager.CurrentCamera != null)
+                Debug.WriteLine($"相机配置窗口：显示 {connectedSlots.Count} 台已连接相机，跳过枚举");
+
+                DeviceListPanel.Children.Clear();
+                _cameras.Clear();
+                _selectedCameras.Clear();
+
+                foreach (var slot in connectedSlots)
                 {
-                    _selectedCamera = _cameraManager.CurrentCamera;
-                    // 创建一个简单的UI项显示当前相机
-                    DeviceListPanel.Children.Clear();
-                    var radioButton = new RadioButton
+                    if (slot.CameraInfo == null) continue;
+
+                    var camera = slot.CameraInfo;
+                    _cameras.Add(camera);
+                    _selectedCameras.Add(camera);
+                    if (slot.IsPrimary) _selectedCamera = camera;
+
+                    var checkBox = new CheckBox
                     {
-                        Content = _cameraManager.CurrentCamera.DisplayName,
-                        Tag = _cameraManager.CurrentCamera,
+                        Content = $"{slot.DisplayName}{(slot.IsPrimary ? "（主相机）" : "")} · 已连接",
+                        Tag = camera,
                         Margin = new Thickness(5),
-                        GroupName = "CameraGroup",
                         IsChecked = true,
-                        IsEnabled = false // 禁用选择，因为正在使用中
+                        IsEnabled = false // 已连接状态不允许重复勾选，断开后恢复可搜索
                     };
-                    DeviceListPanel.Children.Add(radioButton);
-                    _cameras.Add(_cameraManager.CurrentCamera);
+                    DeviceListPanel.Children.Add(checkBox);
                 }
-                
+
+                IsConnected = true;
+
+                // 主相机已连接时加载参数范围（UVC / GigE 各自返回合理范围）
+                if (connectedSlots.Any(s => s.IsPrimary))
+                {
+                    await LoadCameraParameterRangesAsync();
+                    var currentExposure = await _cameraManager.GetExposureTimeAsync();
+                    var currentGain = await _cameraManager.GetGainAsync();
+                    if (currentExposure > 0) ExposureSlider.Value = currentExposure;
+                    if (currentGain > 0) GainSlider.Value = currentGain;
+                }
+
+                ShowStatus($"已显示 {connectedSlots.Count} 台已连接相机");
                 UpdateUIState();
                 return;
             }
+
+            // ===== 场景2：无已连接相机 → 尝试自动恢复上次配置 =====
             
             // 如果配置中有上次使用的相机，尝试自动搜索并选择
             if (!string.IsNullOrEmpty(_cameraConfig.LastCameraId) || 
@@ -479,15 +502,17 @@ namespace VisionInspection.UI.Views
 
                 foreach (var camera in _cameras)
                 {
-                    var radioButton = new RadioButton
+                    var checkBox = new CheckBox
                     {
                         Content = camera.DisplayName,
                         Tag = camera,
                         Margin = new Thickness(5),
-                        GroupName = "CameraGroup"
+                        IsChecked = _selectedCameras.Any(c =>
+                            c.Id == camera.Id || c.SerialNumber == camera.SerialNumber)
                     };
-                    radioButton.Checked += CameraRadioButton_Checked;
-                    DeviceListPanel.Children.Add(radioButton);
+                    checkBox.Checked += CameraCheckBox_CheckedChanged;
+                    checkBox.Unchecked += CameraCheckBox_CheckedChanged;
+                    DeviceListPanel.Children.Add(checkBox);
                 }
 
                 EnumDeviceButton.IsEnabled = true;
@@ -513,18 +538,27 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 相机选择改变
+        /// 相机多选改变：维护 _selectedCameras 集合
         /// </summary>
-        private void CameraRadioButton_Checked(object sender, RoutedEventArgs e)
+        private void CameraCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if (sender is RadioButton radioButton && radioButton.Tag is CameraInfo camera)
+            if (sender is CheckBox checkBox && checkBox.Tag is CameraInfo camera)
             {
-                _selectedCamera = camera;
+                if (checkBox.IsChecked == true)
+                {
+                    if (!_selectedCameras.Any(c => c.Id == camera.Id || c.SerialNumber == camera.SerialNumber))
+                        _selectedCameras.Add(camera);
+                    _selectedCamera = camera; // 兼容旧逻辑：最后选中的作为主相机参数来源
+                }
+                else
+                {
+                    _selectedCameras.RemoveAll(c => c.Id == camera.Id || c.SerialNumber == camera.SerialNumber);
+                }
 
                 // 网络相机：把发现的 RTSP 地址回填到输入框，便于手动修改
                 if (CameraTypeComboBox.SelectedIndex == 2 && camera.ExtInfo is OnvifCameraExt ext)
                 {
-                    if (RtspUrlTextBox != null)
+                    if (RtspUrlTextBox != null && checkBox.IsChecked == true)
                         RtspUrlTextBox.Text = ext.RtspUrl;
                 }
 
@@ -533,7 +567,7 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 连接相机按钮点击
+        /// 连接相机按钮点击：批量连接选中的相机到各槽位（第1台=主相机 main_camera，其余 cam_2..cam_4）
         /// </summary>
         private async void ConnectButton_Click(object sender, RoutedEventArgs e)
         {
@@ -550,7 +584,7 @@ namespace VisionInspection.UI.Views
 
                 var ext = (_selectedCamera?.ExtInfo as OnvifCameraExt) ?? new OnvifCameraExt();
                 ext.RtspUrl = rtsp;
-                _selectedCamera ??= new CameraInfo
+                var manualCam = new CameraInfo
                 {
                     Id = $"onvif_manual",
                     Name = "网络相机（手动）",
@@ -560,12 +594,16 @@ namespace VisionInspection.UI.Views
                     DisplayName = $"🌐 网络相机（手动）",
                     ExtInfo = ext
                 };
-                ((OnvifCameraExt)_selectedCamera.ExtInfo!).RtspUrl = rtsp;
+                ((OnvifCameraExt)manualCam.ExtInfo!).RtspUrl = rtsp;
+
+                // 手动 RTSP 走单台连接（主相机）
+                _selectedCameras.Clear();
+                _selectedCameras.Add(manualCam);
             }
 
-            if (_selectedCamera == null)
+            if (_selectedCameras.Count == 0)
             {
-                MessageBox.Show("请先选择相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show("请先勾选至少一个相机", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
@@ -573,28 +611,55 @@ namespace VisionInspection.UI.Views
             {
                 ConnectButton.IsEnabled = false;
 
-                if (await _cameraManager.ConnectAsync(_selectedCamera))
+                int successCount = 0;
+                var slotConfigs = new List<CameraSlotConfig>();
+
+                for (int i = 0; i < _selectedCameras.Count && i < CameraManager.MaxCameraCount; i++)
                 {
-                    // 保存当前相机信息到配置
-                    _configManager.UpdateLastCamera(
-                        _selectedCamera.Id, 
-                        _selectedCamera.Name, 
-                        _selectedCamera.SerialNumber);
+                    var camera = _selectedCameras[i];
+                    string slotId = i == 0 ? CameraManager.PrimaryCameraId : $"cam_{i + 1}";
 
-                    // 读取参数范围并设置Slider
-                    await LoadCameraParameterRangesAsync();
+                    // 按类型创建独立服务实例（每台相机一个实例）
+                    ICameraService service = CameraTypeComboBox.SelectedIndex switch
+                    {
+                        0 => new WebCameraService(),   // 笔记本摄像头仅支持 1 路
+                        2 => new OnvifCameraService(),
+                        _ => new HikvisionCameraService()
+                    };
 
-                    // 更新当前参数值
-                    var currentExposure = await _cameraManager.GetExposureTimeAsync();
-                    var currentGain = await _cameraManager.GetGainAsync();
-                    
-                    ExposureSlider.Value = currentExposure;
-                    GainSlider.Value = currentGain;
-                    
-                    // 保存当前参数值
-                    _configManager.UpdateCameraParameters(currentExposure, currentGain);
+                    _cameraManager.RegisterSlot(slotId, camera.DisplayName, isPrimary: i == 0);
+                    bool ok = await _cameraManager.ConnectSlotAsync(slotId, service, camera);
+                    if (ok)
+                    {
+                        successCount++;
+                        slotConfigs.Add(new CameraSlotConfig
+                        {
+                            CameraId = slotId,
+                            DisplayName = camera.DisplayName,
+                            SerialNumber = camera.SerialNumber,
+                            InterfaceType = camera.InterfaceType,
+                            IsPrimary = i == 0
+                        });
+                    }
+                }
 
-                    ShowStatus("相机连接成功");
+                if (successCount > 0)
+                {
+                    // 保存相机槽位列表
+                    _configManager.SaveCameras(slotConfigs);
+
+                    // 主相机参数读取（若主相机连接成功）
+                    if (_cameraManager.GetSlot(CameraManager.PrimaryCameraId)?.IsConnected == true)
+                    {
+                        await LoadCameraParameterRangesAsync();
+                        var currentExposure = await _cameraManager.GetExposureTimeAsync();
+                        var currentGain = await _cameraManager.GetGainAsync();
+                        ExposureSlider.Value = currentExposure;
+                        GainSlider.Value = currentGain;
+                        _configManager.UpdateCameraParameters(currentExposure, currentGain);
+                    }
+
+                    ShowStatus($"连接成功 {successCount} 台相机");
                 }
                 else
                 {
@@ -673,24 +738,32 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 断开连接按钮点击
+        /// 断开连接按钮点击：断开全部已连接槽位
         /// </summary>
         private void DisconnectButton_Click(object sender, RoutedEventArgs e)
         {
-            _cameraManager.Disconnect();
+            foreach (var slot in _cameraManager.Slots.Where(s => s.IsConnected).ToList())
+            {
+                _cameraManager.DisconnectSlot(slot.CameraId);
+            }
+            _selectedCameras.Clear();
+            _cameras.Clear();
+            DeviceListPanel.Children.Clear();
             PreviewImage.Source = null;
             NoImageText.Visibility = Visibility.Visible;
+            ShowStatus("已断开全部相机");
             UpdateUIState();
         }
 
         /// <summary>
-        /// 开始采集按钮点击
+        /// 开始采集按钮点击：启动全部已连接槽位采集
         /// </summary>
         private async void StartGrabButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
-                if (await _cameraManager.StartGrabbingAsync())
+                await _cameraManager.StartAllGrabbingAsync();
+                if (_cameraManager.IsGrabbing)
                 {
                     ShowStatus("开始采集");
                     UpdateUIState();
@@ -707,11 +780,11 @@ namespace VisionInspection.UI.Views
         }
 
         /// <summary>
-        /// 停止采集按钮点击
+        /// 停止采集按钮点击：停止全部槽位采集
         /// </summary>
         private void StopGrabButton_Click(object sender, RoutedEventArgs e)
         {
-            _cameraManager.StopGrabbing();
+            _cameraManager.StopAllGrabbing();
             UpdateUIState();
         }
 
@@ -823,9 +896,10 @@ namespace VisionInspection.UI.Views
             EnumInterfaceButton.IsEnabled = true;
             EnumDeviceButton.IsEnabled = _cameras.Count > 0;
 
-            // 连接按钮（网络相机可在未发现设备时凭 RTSP 地址直接连接）
+            // 连接按钮（网络相机可在未发现设备时凭 RTSP 地址直接连接；多选时至少勾选一台）
+            bool hasSelection = _selectedCameras.Count > 0 || _selectedCamera != null;
             bool canConnect = !IsConnected &&
-                              (_selectedCamera != null ||
+                              (hasSelection ||
                                (CameraTypeComboBox.SelectedIndex == 2 && !string.IsNullOrWhiteSpace(RtspUrlTextBox?.Text)));
             ConnectButton.IsEnabled = canConnect;
             DisconnectButton.IsEnabled = IsConnected;

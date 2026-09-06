@@ -127,5 +127,11 @@ namespace VisionInspection.Core.Services
         public int Height { get; set; }
         public bool IsColor { get; set; }
         public int Channels { get; set; }
+
+        /// <summary>所属相机 ID（由 CameraManager 按槽位填充，默认主相机）</summary>
+        public string CameraId { get; set; } = "main_camera";
+
+        /// <summary>所属相机显示名（由 CameraManager 按槽位填充）</summary>
+        public string CameraName { get; set; } = "";
     }
 }

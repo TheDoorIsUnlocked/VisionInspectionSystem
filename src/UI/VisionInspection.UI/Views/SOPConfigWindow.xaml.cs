@@ -7,6 +7,8 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using VisionInspection.Modules.SOP.Models;
+using VisionInspection.UI.Services;
+using VisionInspection.UI.ViewModels;
 
 namespace VisionInspection.UI.Views
 {
@@ -44,6 +46,7 @@ namespace VisionInspection.UI.Views
         {
             InitializeComponent();
             InitializeRuntimeDefaults();
+            FillStepCameraModelCombos();
             RefreshYamlFilesList();
 
             if (!string.IsNullOrEmpty(yamlPath) && File.Exists(yamlPath))
@@ -374,6 +377,65 @@ namespace VisionInspection.UI.Views
 
         // ==================== 步骤编辑 ====================
 
+        /// <summary>
+        /// 填充步骤级"相机/模型"下拉：相机 = 主相机 + cam_2..cam_4（显示已连接槽位名）；
+        /// 模型 = 扫描 yolo_models 目录下的 .onnx（含"（默认：全局模型）"空选项）。
+        /// </summary>
+        private void FillStepCameraModelCombos()
+        {
+            // 相机
+            StepCameraCombo.Items.Clear();
+            StepCameraCombo.Items.Add(new CameraOptionItem("main_camera", "主相机（相机1）"));
+            var slots = Core.Services.CameraManager.Instance.Slots;
+            for (int i = 2; i <= Core.Services.CameraManager.MaxCameraCount; i++)
+            {
+                string id = $"cam_{i}";
+                var slot = slots.FirstOrDefault(s => string.Equals(s.CameraId, id, StringComparison.OrdinalIgnoreCase));
+                string display = slot != null && !string.IsNullOrEmpty(slot.DisplayName)
+                    ? $"{id}（{slot.DisplayName}）"
+                    : $"{id}（未连接）";
+                StepCameraCombo.Items.Add(new CameraOptionItem(id, display));
+            }
+            StepCameraCombo.SelectedIndex = 0;
+
+            // 模型
+            StepModelCombo.Items.Clear();
+            StepModelCombo.Items.Add(new ModelOptionItem { Display = "（默认：全局模型）", Value = "" });
+            try
+            {
+                foreach (var file in new ModelManager().ScanOnnxFiles())
+                {
+                    var idx = file.IndexOf("yolo_models", StringComparison.OrdinalIgnoreCase);
+                    string rel = idx >= 0 ? file.Substring(idx).Replace('\\', '/') : file;
+                    StepModelCombo.Items.Add(new ModelOptionItem { Display = rel, Value = rel });
+                }
+            }
+            catch
+            {
+                // 扫描失败不影响窗口使用，仅保留"默认：全局模型"
+            }
+            StepModelCombo.SelectedIndex = 0;
+        }
+
+        /// <summary>按值选中 ComboBox 项（相机按 Id、模型按 Value）；未命中则选中第一项</summary>
+        private static void SelectComboItemByValue(ComboBox combo, string value)
+        {
+            foreach (var item in combo.Items)
+            {
+                if (item is CameraOptionItem c && string.Equals(c.Id, value, StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+                if (item is ModelOptionItem m && string.Equals(m.Value ?? "", value ?? "", StringComparison.OrdinalIgnoreCase))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            }
+            combo.SelectedIndex = 0;
+        }
+
         private void SelectStep(int index, bool commitCurrent = true)
         {
             var steps = Steps;
@@ -430,6 +492,10 @@ namespace VisionInspection.UI.Views
             ForbiddenTextBox.Text = string.Join(", ", step.ForbiddenObjects ?? new List<string>());
             MustKeepTextBox.Text = string.Join(", ", step.MustKeep ?? new List<string>());
 
+            // ⭐ 步骤级相机/模型
+            SelectComboItemByValue(StepCameraCombo, string.IsNullOrWhiteSpace(step.Camera) ? "main_camera" : step.Camera);
+            SelectComboItemByValue(StepModelCombo, step.Model ?? "");
+
             UpdateDetectionFieldVisibility();
         }
 
@@ -453,6 +519,9 @@ namespace VisionInspection.UI.Views
             DetectionDescTextBox.Text = "";
             ForbiddenTextBox.Text = "";
             MustKeepTextBox.Text = "";
+            // ⭐ 步骤级相机/模型复位为默认
+            StepCameraCombo.SelectedIndex = 0;
+            StepModelCombo.SelectedIndex = 0;
         }
 
         /// <summary>把编辑器内容写回当前选中的步骤（容错：非法输入保持原值）</summary>
@@ -503,6 +572,14 @@ namespace VisionInspection.UI.Views
 
             step.ForbiddenObjects = SplitList(ForbiddenTextBox.Text);
             step.MustKeep = SplitList(MustKeepTextBox.Text);
+
+            // ⭐ 步骤级相机/模型（主相机与空模型不写，保持缺省语义）
+            step.Camera = StepCameraCombo.SelectedItem is CameraOptionItem camSel && camSel.Id != "main_camera"
+                ? camSel.Id
+                : null;
+            step.Model = StepModelCombo.SelectedItem is ModelOptionItem modelSel && !string.IsNullOrWhiteSpace(modelSel.Value)
+                ? modelSel.Value.Trim()
+                : null;
         }
 
         private void ApplyStepButton_Click(object sender, RoutedEventArgs e)
@@ -692,7 +769,8 @@ namespace VisionInspection.UI.Views
             var md = sop.Model;
             _hadModel = md != null;
             md ??= new SopyamlModel();
-            ModelPathTextBox.Text = _hadModel ? md.Path : "";
+            FillModelPathCombo(); // ⭐ 扫描 yolo_models 目录填充模型下拉
+            ModelPathCombo.Text = _hadModel ? md.Path : "";
             SelectComboByTag(ModelTypeCombo, md.Type);
             ModelConfTextBox.Text = md.Confidence.ToString("0.##");
             ModelIouTextBox.Text = md.Iou.ToString("0.##");
@@ -712,15 +790,38 @@ namespace VisionInspection.UI.Views
             CooldownTextBox.Text = m.CooldownSeconds.ToString("0.##");
         }
 
+        /// <summary>
+        /// 填充模型路径下拉：扫描 yolo_models 目录下的 .onnx（相对路径形式，与配方 sop.model.path 风格一致）。
+        /// </summary>
+        private void FillModelPathCombo()
+        {
+            ModelPathCombo.Items.Clear();
+            try
+            {
+                foreach (var file in new ModelManager().ScanOnnxFiles())
+                {
+                    var idx = file.IndexOf("yolo_models", StringComparison.OrdinalIgnoreCase);
+                    string rel = idx >= 0 ? file.Substring(idx).Replace('\\', '/') : file;
+                    ModelPathCombo.Items.Add(rel);
+                }
+            }
+            catch
+            {
+                // 扫描失败不影响窗口使用
+            }
+        }
+
         private void ApplyModelMonitoringTab()
         {
             var sop = _config!.Sop!;
 
-            // 模型：原本有节点或用户填写了路径才写回
-            if (_hadModel || !string.IsNullOrWhiteSpace(ModelPathTextBox.Text))
+            // 模型：原本有节点、或用户填写了路径、或填写了类别，才写回（避免"只填类别不填路径"时丢失）
+            if (_hadModel
+                || !string.IsNullOrWhiteSpace(ModelPathCombo.Text)
+                || !string.IsNullOrWhiteSpace(ModelClassesTextBox.Text))
             {
                 var md = sop.Model ?? new SopyamlModel();
-                md.Path = ModelPathTextBox.Text.Trim();
+                md.Path = ModelPathCombo.Text.Trim();
                 md.Type = GetSelectedTag(ModelTypeCombo) ?? "ObjectDetection";
                 if (float.TryParse(ModelConfTextBox.Text, out var conf)) md.Confidence = conf;
                 if (float.TryParse(ModelIouTextBox.Text, out var iou)) md.Iou = iou;

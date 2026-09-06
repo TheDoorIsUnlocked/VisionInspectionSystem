@@ -39,7 +39,8 @@ public static class SopYamlGenerator
         foreach (var action in input.Actions)
         {
             var det = BuildDetection(action);
-            steps.Add(MakeStep(ref order, action.StepName, TemplateHint(action), det, timeout: action.TimeoutSec));
+            steps.Add(MakeStep(ref order, action.StepName, TemplateHint(action), det, timeout: action.TimeoutSec,
+                cameraId: action.CameraId, modelPath: action.ModelPath));
         }
 
         // 最后一步"完成"（time_elapsed, duration_ms=0），状态机到此判定全部通过并循环
@@ -138,7 +139,8 @@ public static class SopYamlGenerator
 
     // ===== 内部辅助 =====
 
-    private static SopyamlStep MakeStep(ref int order, string name, string desc, SopyamlDetection detection, int timeout = 30)
+    private static SopyamlStep MakeStep(ref int order, string name, string desc, SopyamlDetection detection, int timeout = 30,
+        string cameraId = "main_camera", string? modelPath = null)
     {
         order++;
         return new SopyamlStep
@@ -147,7 +149,10 @@ public static class SopYamlGenerator
             Name = name,
             Description = desc,
             Timeout = timeout,
-            Detection = detection
+            Detection = detection,
+            // ⭐ 步骤级相机/模型：主相机与空模型不写（缺省语义），其余写入
+            Camera = string.IsNullOrWhiteSpace(cameraId) || cameraId == "main_camera" ? null : cameraId.Trim(),
+            Model = string.IsNullOrWhiteSpace(modelPath) ? null : modelPath.Trim()
         };
     }
 

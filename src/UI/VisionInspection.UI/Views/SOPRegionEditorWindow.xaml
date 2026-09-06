@@ -4,9 +4,40 @@
         xmlns:local="clr-namespace:VisionInspection.UI.Views"
         xmlns:controls="clr-namespace:VisionInspection.UI.Controls"
         Icon="/Assets/AppIcon.ico"
-        Title="SOP 区域标定" Height="760" Width="1180">
+        Title="SOP 区域标定（多相机）" Height="760" Width="1180">
     <Window.Resources>
         <local:RoiRectConverter x:Key="RoiRectConverter"/>
+        <!-- 区域列表项模板（每个相机的区域列表共用） -->
+        <DataTemplate x:Key="RegionListItemTemplate">
+            <StackPanel Margin="8,5">
+                <TextBox Text="{Binding ROIName, UpdateSourceTrigger=PropertyChanged}"
+                         FontWeight="Bold" BorderThickness="0" Padding="0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
+                    <TextBlock Text="{Binding Converter={StaticResource RoiRectConverter}}"
+                               Foreground="#666" FontSize="11"/>
+                    <Button Content="删除" Tag="{Binding}" Click="DeleteRegion_Click"
+                            Margin="10,0,0,0" Padding="8,1" FontSize="11"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                    <TextBlock Text="X" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="0,0,2,0"/>
+                    <TextBox Width="48" FontSize="11" Padding="2,1"
+                             Text="{Binding Left, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
+                             LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
+                    <TextBlock Text="Y" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                    <TextBox Width="48" FontSize="11" Padding="2,1"
+                             Text="{Binding Top, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
+                             LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
+                    <TextBlock Text="W" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                    <TextBox Width="48" FontSize="11" Padding="2,1"
+                             Text="{Binding Width, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
+                             LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
+                    <TextBlock Text="H" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
+                    <TextBox Width="48" FontSize="11" Padding="2,1"
+                             Text="{Binding Height, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
+                             LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
+                </StackPanel>
+            </StackPanel>
+        </DataTemplate>
     </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
@@ -27,72 +58,22 @@
                     Background="#52C41A" Foreground="White" FontWeight="Bold"/>
             <Button Content="❌ 关闭" Click="Close_Click" Margin="2" Padding="8,4"/>
             <TextBlock VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#888" FontSize="11"
-                       TextWrapping="Wrap" MaxWidth="520">
-                用法：点「新建区域」后在画面上拖拽画矩形；右侧列表可改名（名称即区域ID，供 hand_in_region 等步骤条件引用）；双击画面可重置视图。
+                       TextWrapping="Wrap" MaxWidth="560">
+                用法：切换顶部相机页签分别标定各相机画面；区域按所属相机自动加载到对应画面，可拖动/改坐标；名称即区域ID，供步骤条件引用。
             </TextBlock>
         </ToolBar>
 
-        <!-- 主区：画面 + 区域列表 -->
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="300"/>
-            </Grid.ColumnDefinitions>
-
-            <controls:ROIEditorControl x:Name="RoiEditor" Grid.Column="0"/>
-
-            <Border Grid.Column="1" BorderBrush="#DDD" BorderThickness="1,0,0,0">
-                <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                    </Grid.RowDefinitions>
-                    <TextBlock Grid.Row="0" Text="区域列表（名称 = 区域ID）"
-                               FontWeight="Bold" Padding="10,8" Background="#F5F5F5"/>
-                    <ListBox Grid.Row="1" BorderThickness="0"
-                             ItemsSource="{Binding EditorVm.ROIs}"
-                             SelectedItem="{Binding EditorVm.SelectedROI, Mode=TwoWay}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Margin="8,5">
-                                    <TextBox Text="{Binding ROIName, UpdateSourceTrigger=PropertyChanged}"
-                                             FontWeight="Bold" BorderThickness="0" Padding="0"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,3,0,0">
-                                        <TextBlock Text="{Binding Converter={StaticResource RoiRectConverter}}"
-                                                   Foreground="#666" FontSize="11"/>
-                                        <Button Content="删除" Tag="{Binding}" Click="DeleteRegion_Click"
-                                                Margin="10,0,0,0" Padding="8,1" FontSize="11"/>
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
-                                        <TextBlock Text="X" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="0,0,2,0"/>
-                                        <TextBox Width="48" FontSize="11" Padding="2,1"
-                                                 Text="{Binding Left, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
-                                                 LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
-                                        <TextBlock Text="Y" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
-                                        <TextBox Width="48" FontSize="11" Padding="2,1"
-                                                 Text="{Binding Top, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
-                                                 LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
-                                        <TextBlock Text="W" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
-                                        <TextBox Width="48" FontSize="11" Padding="2,1"
-                                                 Text="{Binding Width, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
-                                                 LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
-                                        <TextBlock Text="H" VerticalAlignment="Center" FontSize="11" Foreground="#888" Margin="6,0,2,0"/>
-                                        <TextBox Width="48" FontSize="11" Padding="2,1"
-                                                 Text="{Binding Height, Mode=TwoWay, UpdateSourceTrigger=LostFocus, ValidatesOnExceptions=True, NotifyOnValidationError=True}"
-                                                 LostFocus="RoiParamTextBox_LostFocus" KeyDown="RoiParamTextBox_KeyDown"/>
-                                    </StackPanel>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </Grid>
-            </Border>
-        </Grid>
+        <!-- 主区：多相机页签（每页 = 该相机画面 + 区域列表） -->
+        <TabControl x:Name="CameraTabs" Grid.Row="1" Margin="4,4,4,0"
+                    SelectionChanged="CameraTabs_SelectionChanged"/>
 
         <!-- 状态栏 -->
         <StatusBar Grid.Row="2">
             <StatusBarItem>
                 <TextBlock x:Name="YamlPathText" Text="(未选择 YAML)" FontSize="11" Foreground="#666"/>
+            </StatusBarItem>
+            <StatusBarItem HorizontalAlignment="Right">
+                <TextBlock x:Name="StatusText" Text="" FontSize="11" Foreground="#888"/>
             </StatusBarItem>
         </StatusBar>
     </Grid>

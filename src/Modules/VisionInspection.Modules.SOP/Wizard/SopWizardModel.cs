@@ -99,6 +99,18 @@ public class WizardAction
     /// <summary>该步超时秒数（0 = 不限制），生成 YAML 时写入 step.timeout</summary>
     public int TimeoutSec { get; set; } = 30;
 
+    /// <summary>
+    /// 该步骤使用的相机 ID（如 main_camera / cam_2），生成 YAML 时写入 step.camera。
+    /// 缺省主相机；状态机评估该步检测条件时取该相机画面的检测结果。
+    /// </summary>
+    public string CameraId { get; set; } = "main_camera";
+
+    /// <summary>
+    /// 该步骤使用的 YOLO 模型路径；null/空 = 使用全局模型（sop.model.path）。
+    /// 生成 YAML 时写入 step.model。支持每个相机/步骤指定不同模型。
+    /// </summary>
+    public string? ModelPath { get; set; }
+
     public string GetParam(string name) => Params.TryGetValue(name, out var v) ? v : "";
 }
 

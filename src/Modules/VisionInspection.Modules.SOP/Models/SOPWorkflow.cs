@@ -20,6 +20,9 @@ public class SOPWorkflow
 
     // ⭐ 新增：区域监控配置（在标定区域内检测"未戴安全帽的人"）
     public SOPMonitoringConfig? Monitoring { get; set; }
+
+    // ⭐ 新增：跨相机协同规则配置（多相机分别检测后按规则组合报警）
+    public SOPCrossCameraConfig? CrossCamera { get; set; }
 }
 
 /// <summary>
@@ -37,6 +40,18 @@ public class SOPStep
     public List<ViolationRule> ViolationRules { get; set; } = new();
     public List<int> RequiredPreviousSteps { get; set; } = new();
     public List<string> NextSteps { get; set; } = new();
+
+    /// <summary>
+    /// 该步骤使用的相机 ID（如 main_camera / cam_2），缺省主相机。
+    /// 状态机评估该步检测条件时使用该相机画面的检测结果。
+    /// </summary>
+    public string CameraId { get; set; } = "main_camera";
+
+    /// <summary>
+    /// 该步骤使用的 YOLO 模型路径；null = 使用全局模型（sop.model.path）。
+    /// 支持给每个相机/步骤指定不同模型。
+    /// </summary>
+    public string? ModelPath { get; set; }
 }
 
 /// <summary>
@@ -121,6 +136,57 @@ public class ZoneDefinition
     public float Y { get; set; }
     public float Width { get; set; }
     public float Height { get; set; }
+
+    /// <summary>区域所属相机 ID（缺省主相机；跨相机规则按 (CameraId, ZoneId) 匹配）</summary>
+    public string CameraId { get; set; } = "main_camera";
+}
+
+/// <summary>
+/// 跨相机协同规则配置：多相机分别检测后，按条件组合（全部满足）触发报警。
+/// 由 YAML 的 sop.cross_camera 节点解析而来。
+/// </summary>
+public class SOPCrossCameraConfig
+{
+    /// <summary>是否启用跨相机协同规则</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>报警冷却时间（秒），防止每帧连续播放 ng.wav，默认 5 秒</summary>
+    public double CooldownSeconds { get; set; } = 5;
+
+    public List<SOPCrossCameraRule> Rules { get; set; } = new();
+}
+
+/// <summary>
+/// 跨相机规则：一组条件全部满足即命中。
+/// 例如：相机1区域1有人 且 相机2区域2有人 → 报警。
+/// </summary>
+public class SOPCrossCameraRule
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public int Severity { get; set; } = 1;
+    public List<SOPCrossCameraCondition> Conditions { get; set; } = new();
+}
+
+/// <summary>
+/// 跨相机规则条件：指定相机在指定区域内出现/不出现某类别。
+/// </summary>
+public class SOPCrossCameraCondition
+{
+    /// <summary>相机 ID（如 main_camera / cam_2），detections 按此取</summary>
+    public string CameraId { get; set; } = "main_camera";
+
+    /// <summary>区域 ID（与 regions 中的 ZoneId 对应）</summary>
+    public string RegionId { get; set; } = "";
+
+    /// <summary>目标类别名（与模型 classes 一致，如 person / cup / cell phone）</summary>
+    public string ObjectClass { get; set; } = "";
+
+    /// <summary>true=该类别出现在区域内触发；false=该类别未出现在区域内触发</summary>
+    public bool Present { get; set; } = true;
+
+    /// <summary>检测置信度阈值（0-1），默认 0.5</summary>
+    public float MinConfidence { get; set; } = 0.5f;
 }
 
 /// <summary>

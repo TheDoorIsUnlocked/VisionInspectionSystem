@@ -76,8 +76,30 @@ namespace VisionInspection.Core.Models
         public int ImageHeight { get; set; } = 1080;
 
         /// <summary>
+        /// 多相机槽位配置列表（v1 主用；旧字段保留作主相机快捷项兼容）
+        /// </summary>
+        public List<CameraSlotConfig> Cameras { get; set; } = new();
+
+        /// <summary>
         /// 最后更新时间
         /// </summary>
         public DateTime LastUpdated { get; set; } = DateTime.Now;
+    }
+
+    /// <summary>
+    /// 单路相机槽位配置（持久化到 camera_config.json 的 cameras 数组）
+    /// </summary>
+    public class CameraSlotConfig
+    {
+        public string CameraId { get; set; } = "main_camera";
+        public string DisplayName { get; set; } = "";
+        public string SerialNumber { get; set; } = "";
+        public string InterfaceType { get; set; } = "GigE";   // GigE / ONVIF / WebCam
+        public bool IsPrimary { get; set; }
+        public float ExposureTime { get; set; } = 5000;
+        public float Gain { get; set; } = 0;
+        public float FrameRate { get; set; } = 30;
+        public bool AutoExposure { get; set; }
+        public bool AutoGain { get; set; }
     }
 }

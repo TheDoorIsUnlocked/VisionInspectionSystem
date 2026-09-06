@@ -1,0 +1,120 @@
+# 跨相机协同检测 SOP 配方（示例）
+# 场景：双相机协同监控——相机1监控工位（主相机），相机2监控门口。
+# 规则A：相机1工位区域有人 且 相机2门区出现人 → 报警（疑似陌生人进入/双人同时在场）
+# 规则B：相机1工位区域无杯子 且 相机2门区出现手部 → 报警
+# ----------------------------------------------------------------------------
+# ⚠️ 使用前必读：
+#   1) 模型：使用 yolo26n.onnx（COCO 通用模型，位于 yolo_models/），
+#      可直接识别人(person)、书(book)、手机(cell phone)、杯子(cup) 等；
+#      手部姿态由 MediaPipe/YoloPose 提供（仅主相机执行）。
+#   2) 区域坐标：regions 的坐标是各相机画面像素，务必用「🎯 标定区域」工具
+#      按真实画面重新拖框标定。区域用 camera 字段声明归属哪个相机。
+#   3) 相机接线：需在相机配置窗口连接 ≥2 台相机（第1台=主相机 main_camera，
+#      第2台=cam_2），否则依赖 cam_2 的规则不会触发。
+# ----------------------------------------------------------------------------
+
+sop:
+  name: "跨相机协同示例"
+  version: "1.0"
+  description: "双相机协同：工位有人+门区有人报警；工位无杯+门区有手报警"
+
+  # 全局设置
+  settings:
+    detectionMode: "UnifiedDetection"
+    confidenceThreshold: 0.5
+    stableFrames: 3
+    timeoutSeconds: 30
+    enableSkipDetection: true
+    enableTimeoutDetection: true
+    auto_reset_on_complete: true
+    reset_delay_sec: 2
+
+  # 区域定义（坐标需按真实画面标定；camera 字段声明归属相机）
+  regions:
+    seat_zone:                          # 相机1（主相机）工位区域
+      x1: 150
+      y1: 100
+      x2: 450
+      y2: 550
+      name: "工位区域"
+      camera: "main_camera"
+      color: "#4CAF50"
+
+    door_zone:                          # 相机2 门区
+      x1: 50
+      y1: 60
+      x2: 300
+      y2: 480
+      name: "门区"
+      camera: "cam_2"
+      color: "#2196F3"
+
+  # 步骤定义：简单占位（主要靠 cross_camera 规则协同报警）
+  steps:
+    - id: "1"
+      name: "等待"
+      description: "主相机检测到人员在场"
+      timeout: 0
+      detection:
+        method: "person_present"
+        min_confidence: 0.5
+        stable_frames: 3
+
+    - id: "2"
+      name: "完成"
+      description: "本轮通过，自动循环"
+      timeout: 5
+      detection:
+        method: "time_elapsed"
+        duration_ms: 2000
+
+  # 模型配置：yolo26n.onnx（COCO 通用模型）
+  model:
+    path: "yolo_models/yolo26n.onnx"
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    useGpu: true
+    classes:
+      - "person"
+      - "cup"
+      - "cell phone"
+      - "book"
+      - "laptop"
+      - "bottle"
+      - "chair"
+
+  # 跨相机协同规则（核心）
+  cross_camera:
+    enabled: true
+    cooldown_seconds: 5
+    rules:
+      - id: "double_person"
+        name: "工位有人且门区有人"
+        severity: 2
+        conditions:
+          - camera: "main_camera"
+            region: "seat_zone"
+            object: "person"
+            present: true
+            min_confidence: 0.5
+          - camera: "cam_2"
+            region: "door_zone"
+            object: "person"
+            present: true
+            min_confidence: 0.5
+
+      - id: "no_cup_with_hand"
+        name: "工位无杯且门区出现手"
+        severity: 3
+        conditions:
+          - camera: "main_camera"
+            region: "seat_zone"
+            object: "cup"
+            present: false
+            min_confidence: 0.4
+          - camera: "cam_2"
+            region: "door_zone"
+            object: "hand"
+            present: true
+            min_confidence: 0.4

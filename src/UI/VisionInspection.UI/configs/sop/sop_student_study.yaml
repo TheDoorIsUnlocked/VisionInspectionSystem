@@ -1,0 +1,130 @@
+# 学生学习监控 SOP 配方
+# 场景：监控学生在书桌前是否在认真学习（阅读/书写），检测开小差（玩手机）、离座、趴桌睡觉等行为。
+# ----------------------------------------------------------------------------
+# ⚠️ 使用前必读：
+#   1) 模型：本配方使用 yolo26n.onnx（COCO 80 类通用模型，已复制到 yolo_models/），
+#      可直接识别人(person)、书(book)、笔记本电脑(laptop)、手机(cell phone) 等；
+#      手部姿态由 MediaPipe/YoloPose 提供（后台自动启用），无需额外配置。
+#   2) 区域坐标：下方 regions 的坐标是相机画面像素，务必用「🎯 标定区域」工具
+#      按真实画面重新拖框标定，否则步骤不会推进。
+#   3) 报警：违规（玩手机/离座/材料被拿走）会触发 ng.wav；无违规则正常流转。
+# ----------------------------------------------------------------------------
+
+sop:
+  name: "学生学习监控"
+  version: "1.0"
+  description: "监控学生在书桌前是否在认真学习：就座→学习材料在桌→手在书本附近(阅读/书写)→持续学习；玩手机/离座/收走材料会触发违规"
+
+  # 全局设置
+  settings:
+    detectionMode: "UnifiedDetection"   # YOLO 物体 + 手部姿态统一检测
+    confidenceThreshold: 0.5
+    stableFrames: 3
+    timeoutSeconds: 30
+    enableSkipDetection: true
+    enableTimeoutDetection: true
+    auto_reset_on_complete: true        # 全部步骤通过后自动循环，持续监控
+    reset_delay_sec: 2                  # 每轮完成间隔 2 秒，便于查看 PASS
+
+  # 区域定义（坐标需在「🎯 标定区域」工具中按真实画面重新标定）
+  regions:
+    seat_zone:                          # 座位区域：学生身体应在此区域
+      x1: 150
+      y1: 100
+      x2: 450
+      y2: 550
+      name: "座位区域"
+      description: "学生坐姿所在区域（用标定工具对准书桌前的座位）"
+      color: "#4CAF50"
+
+    desk_zone:                          # 桌面区域：书本/笔记本电脑应在此区域
+      x1: 120
+      y1: 300
+      x2: 480
+      y2: 620
+      name: "桌面区域"
+      description: "书桌上学习材料所在区域"
+      color: "#2196F3"
+
+  # 步骤定义（按顺序通过；任一步超时或违规即报警）
+  steps:
+    # 步骤1: 学生就座
+    - id: "1"
+      name: "学生就座"
+      description: "检测到学生身体位于座位区域"
+      timeout: 60
+      detection:
+        method: "object_in_zone"
+        target_object: "person"          # COCO 类别：人
+        region: "seat_zone"
+        min_confidence: 0.5
+        stable_frames: 5
+
+    # 步骤2: 学习材料在桌（书/笔记本电脑任其一在桌面区域）
+    - id: "2"
+      name: "学习材料在桌"
+      description: "检测到书本或笔记本电脑位于桌面区域"
+      timeout: 30
+      detection:
+        method: "object_in_zone"
+        target_object: "book"            # COCO 类别：书
+        region: "desk_zone"
+        min_confidence: 0.4
+        stable_frames: 5
+      must_keep:                          # 材料必须持续在桌，被收走即违规
+        - "book"
+        - "laptop"
+
+    # 步骤3: 手在书本附近（正在阅读/书写）
+    - id: "3"
+      name: "正在阅读/书写"
+      description: "检测到手靠近书本（手与书本框相交或相邻），视为正在学习"
+      timeout: 30
+      detection:
+        method: "hand_near_object"
+        hand: "any"
+        target_object: "book"
+        tolerance: 60                     # 手与书本外扩 60px 即算靠近
+        min_confidence: 0.4
+        stable_frames: 5
+
+    # 步骤4: 持续学习计时（保持学习状态一段时间，防止秒过）
+    - id: "4"
+      name: "持续学习"
+      description: "保持阅读/书写状态 30 秒，确认学生持续专注"
+      timeout: 0                         # 0 = 本步不限制超时（靠下一步时间条件控制）
+      detection:
+        method: "time_elapsed"
+        duration_ms: 30000                # 持续 30 秒
+      required_objects:                   # 计时期间学生和书本必须都在场
+        - object: "person"
+          zone: "seat_zone"
+          min_confidence: 0.5
+        - object: "book"
+          zone: "desk_zone"
+          min_confidence: 0.4
+
+    # 步骤5: 完成（本轮通过，2 秒后自动循环下一轮）
+    - id: "5"
+      name: "完成"
+      description: "本轮学习检测通过，自动进入下一轮持续监控"
+      timeout: 5
+      detection:
+        method: "time_elapsed"
+        duration_ms: 2000
+
+  # 模型配置：yolo26n.onnx（COCO 通用模型，已复制到 yolo_models/）
+  model:
+    path: "yolo_models/yolo26n.onnx"
+    type: "ObjectDetection"
+    confidence: 0.5
+    iou: 0.45
+    useGpu: true
+    classes:
+      - "person"
+      - "book"
+      - "laptop"
+      - "cell phone"
+      - "chair"
+      - "bottle"
+      - "cup"
