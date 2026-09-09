@@ -99,6 +99,40 @@ yolo_models/
 - 手动放入的 YOLO 模型文件若不在 `yolo_models/` 下，配置下拉中不会出现；运行时也找不到。
 - 模型文件体积较大，默认被 `.gitignore` 排除，不纳入版本库，请在各部署环境单独放置。
 
+## CUDA GPU 加速（可选）
+
+系统通过 YoloDotNet 的 CUDA 执行提供器调用 ONNX Runtime GPU（`Microsoft.ML.OnnxRuntime.Gpu 1.23.2`）进行推理加速；**未安装 CUDA 时自动回退 CPU，功能不受影响**，仅推理速度较慢。
+
+### 推荐版本
+
+| 组件 | 版本 | 说明 |
+| --- | --- | --- |
+| NVIDIA 显卡驱动 | ≥ 525.60 | 支持 CUDA 12.x 即可 |
+| CUDA Toolkit | **12.x**（推荐 12.4+） | 与 ONNX Runtime 1.23 GPU 构建匹配 |
+| cuDNN | **9.x**（推荐 9.1+） | ONNX Runtime 1.23 需要 cuDNN 9（不再支持 cuDNN 8） |
+
+> 注意：本项目 ONNX Runtime GPU 为 **1.23.2**，对应 **CUDA 12.x + cuDNN 9.x**。请勿安装 CUDA 11.x 或 cuDNN 8.x（运行时加载 GPU 会话会失败并回退 CPU）。
+
+### 安装步骤
+
+1. **安装 CUDA Toolkit 12.x**
+   - 下载：[NVIDIA CUDA Toolkit](https://developer.nvidia.com/cuda-downloads)，选 12.4 或 12.6 版本
+   - 默认安装即可（自动写入 `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.x`）
+
+2. **安装 cuDNN 9.x**
+   - 下载：[NVIDIA cuDNN](https://developer.nvidia.com/cudnn)（需注册 NVIDIA 账号），选与 CUDA 12 对应的 cuDNN 9.x
+   - 解压后把 `bin / include / lib` 三个目录下的文件**复制到 CUDA 安装目录同名文件夹**，或把 cuDNN 的 `bin` 目录加入系统 `PATH`
+
+3. **验证**
+   - 打开系统命令提示符执行 `nvidia-smi`，确认驱动支持 CUDA 12.x
+   - 运行程序后，主界面工具栏 ⚡ 按钮显示 **GPU** 即为 GPU 推理生效（显示 CPU 表示回退到 CPU，点按钮可切换）
+
+### 故障排查
+
+- 状态栏/日志出现 CUDA 不可用提示时，程序已自动回退 CPU（`GpuSwitchFailed` 事件触发界面告警），按上述步骤检查驱动、CUDA、cuDNN 版本是否匹配
+- 多个 CUDA 版本共存时，确保系统 `PATH` 与 `CUDA_PATH` 环境变量指向所需版本
+- 若 GPU 显存不足（OOM），可关闭部分相机的 GPU 推理或改用 CPU
+
 ## 最近更新
 
 ### 多相机实时检测（最多 4 路）
