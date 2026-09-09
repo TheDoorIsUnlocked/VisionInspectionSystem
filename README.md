@@ -64,6 +64,41 @@ dotnet run --project src/UI/VisionInspection.UI
 - `configs/products/`：按产品组织的配置，包含 ROI 区域、启用的检测模块、所用模型及模块参数；新增 / 切换产品只需增加对应配置文件。
 - 模型文件放置于 `models/`（体积较大，默认不纳入版本库，详见 `.gitignore`）。
 
+## 模型文件放置说明
+
+### 1. MediaPipe 手部模型（SOP 手部检测必需）
+
+SOP 手部姿态识别使用 MediaPipe 两阶段 ONNX 模型，共 **2 个文件**，放在**项目根目录 `models/`**：
+
+```
+models/
+├── palm_detection_full_Nx3x192x192_post.onnx   # 第一阶段：手掌检测（192×192）
+└── hand_landmark_sparse_Nx3x224x224.onnx       # 第二阶段：21 关键点（224×224）
+```
+
+- 构建时由 `VisionInspection.UI.csproj` 自动复制到输出目录 `bin\Debug\net8.0-windows\models\`，**clean 重建后会自动恢复，无需手动放置**。
+- 若这两个文件缺失，SOP 手部检测不会初始化（日志出现 `Backend=MediaPipe 但模型文件缺失，手部检测未初始化`），手部动作类步骤（hand_in_region 等）将无法判定。
+
+### 2. YOLO 检测模型（SOP / 实时检测）
+
+YOLO 系列模型（检测 / 分割 / 姿态 / OBB）统一放在**项目根目录 `yolo_models/`**：
+
+```
+yolo_models/
+├── yolo26n.onnx          # 示例：SOP 目标检测
+├── yolov8s.onnx
+└── ...
+```
+
+- SOP 配方（YAML）中的 `model.path` 建议写相对路径，如 `yolo_models/yolo26n.onnx`，运行时按"当前目录 → 程序集目录 → 向上逐层查找 `yolo_models/`"解析，换机器无需修改。
+- 配置窗口 / 生成向导的"模型"下拉会自动扫描 `yolo_models/` 下的 `.onnx` 文件。
+
+### 3. 注意事项
+
+- 手部模型**不要**只放在输出目录 `bin\...\models\`——clean 重建会清除该目录；请放项目根 `models\`，由 csproj 自动复制。
+- 手动放入的 YOLO 模型文件若不在 `yolo_models/` 下，配置下拉中不会出现；运行时也找不到。
+- 模型文件体积较大，默认被 `.gitignore` 排除，不纳入版本库，请在各部署环境单独放置。
+
 ## 开发计划
 
 | 状态 | 内容 |
