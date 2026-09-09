@@ -67,12 +67,14 @@
     </None>
   </ItemGroup>
 
-  <!-- MediaPipe手部检测模型文件 -->
+  <!-- MediaPipe手部检测模型文件：从项目根 models\ 复制到输出目录 models\ -->
   <ItemGroup>
-    <None Update="models\palm_detection_full_Nx3x192x192_post.onnx">
+    <None Include="..\..\..\models\palm_detection_full_Nx3x192x192_post.onnx">
+      <Link>models\palm_detection_full_Nx3x192x192_post.onnx</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="models\hand_landmark_sparse_Nx3x224x224.onnx">
+    <None Include="..\..\..\models\hand_landmark_sparse_Nx3x224x224.onnx">
+      <Link>models\hand_landmark_sparse_Nx3x224x224.onnx</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
