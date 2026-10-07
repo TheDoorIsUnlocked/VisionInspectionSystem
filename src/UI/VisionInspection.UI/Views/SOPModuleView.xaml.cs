@@ -594,7 +594,7 @@ namespace VisionInspection.UI.Views
     type: ""ObjectDetection""
     confidence: 0.5
     iou: 0.45
-    useGpu: true
+    use_gpu: true
     classes: []
   monitoring:
     enabled: true

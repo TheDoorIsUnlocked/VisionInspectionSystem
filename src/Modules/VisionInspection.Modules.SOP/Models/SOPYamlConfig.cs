@@ -458,6 +458,8 @@ public static class SOPYamlConverter
     {
         try
         {
+            yaml = NormalizeLegacyYamlAliases(yaml);
+
             var deserializer = new DeserializerBuilder()
                 .Build();
 
@@ -1093,6 +1095,26 @@ public static class SOPYamlConverter
     }
 
     /// <summary>
+    /// 兼容早期示例中 model.useGpu / model.gpuId 的 camelCase 写法。
+    /// 当前规范统一使用 use_gpu / gpu_id；解析时转换旧字段，避免已有配方直接加载失败。
+    /// </summary>
+    private static string NormalizeLegacyYamlAliases(string yaml)
+    {
+        if (string.IsNullOrEmpty(yaml)) return yaml;
+
+        yaml = System.Text.RegularExpressions.Regex.Replace(
+            yaml,
+            @"(?m)^(\\s*)useGpu(\\s*:)",
+            "$1use_gpu$2");
+        yaml = System.Text.RegularExpressions.Regex.Replace(
+            yaml,
+            @"(?m)^(\\s*)gpuId(\\s*:)",
+            "$1gpu_id$2");
+
+        return yaml;
+    }
+
+    /// <summary>
     /// 加载完整 YAML 配置模型（保留 steps / regions / model / monitoring / settings / violations 等全部节点），
     /// 供 SOP 流程预览与编辑窗口直接读写，避免经 SOPWorkflow 中转丢失信息。
     /// </summary>
@@ -1103,7 +1125,7 @@ public static class SOPYamlConverter
             throw new FileNotFoundException($"YAML配置文件不存在: {yamlPath}");
         }
 
-        var yaml = File.ReadAllText(yamlPath);
+        var yaml = NormalizeLegacyYamlAliases(File.ReadAllText(yamlPath));
         var deserializer = new DeserializerBuilder()
             .IgnoreUnmatchedProperties()
             .Build();
@@ -1135,7 +1157,7 @@ public static class SOPYamlConverter
         SOPYamlConfig config;
         if (File.Exists(yamlPath))
         {
-            var yaml = File.ReadAllText(yamlPath);
+            var yaml = NormalizeLegacyYamlAliases(File.ReadAllText(yamlPath));
             // 不使用全局命名约定，完全由 [YamlMember(Alias = "...")] 控制字段名，
             // 与 ParseYaml 和序列化器保持一致，避免 snake_case 字段在往返中丢失。
             var deserializer = new DeserializerBuilder()
