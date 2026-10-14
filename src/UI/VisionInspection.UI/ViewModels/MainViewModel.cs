@@ -103,6 +103,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [ObservableProperty]
     private SKBitmap? _detectionResultImage;
 
+    // ROI 编辑器当前显示帧由 ViewModel 独占。
+    // 相机、视频解码器和推理线程只提供源帧，进入 UI 前必须复制，避免外部复用/释放原生 SKBitmap。
+    private SKBitmap? _roiPreviewImage;
+
     // ===== 多相机画面 =====
 
     /// <summary>多相机画面集合（主相机在前，供主界面宫格布局）</summary>
@@ -355,34 +359,66 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
         }
 
-        // 在UI线程更新对应画面（主相机同步到 ROI 编辑画面，避免阻塞相机采集线程）
+        // 每个异步消费者持有自己的 SKBitmap，禁止 UI、ROI 编辑器、推理线程共享同一个可释放的原生对象。
+        // 否则下一帧替换画面时 Dispose 旧位图，会让仍在绘制/推理的一方访问已经释放的 Skia 原生内存。
+        var roiBitmap = isPrimary ? skBitmap.Copy() : null;
+        SKBitmap? inferenceBitmap = null;
+        if (isPrimary && IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
+        {
+            inferenceBitmap = skBitmap.Copy();
+        }
+
+        // 在 UI 线程更新对应画面（主相机同步到 ROI 编辑画面，避免阻塞相机采集线程）
         System.Windows.Application.Current.Dispatcher.BeginInvoke(new Action(() =>
         {
-            if (_isDisposed) return;
-
-            var item = CameraViews.FirstOrDefault(v => string.Equals(v.CameraId, e.CameraId, StringComparison.OrdinalIgnoreCase));
-            if (item != null)
-            {
-                item.CurrentImage?.Dispose();
-                item.CurrentImage = skBitmap;
-                item.IsConnected = true;
-            }
-            else
+            if (_isDisposed)
             {
                 skBitmap.Dispose();
+                roiBitmap?.Dispose();
                 return;
             }
 
-            if (isPrimary && RoiEditorViewModel != null)
+            var item = CameraViews.FirstOrDefault(v => string.Equals(v.CameraId, e.CameraId, StringComparison.OrdinalIgnoreCase));
+            if (item == null)
             {
-                RoiEditorViewModel.CurrentImage = skBitmap;
+                skBitmap.Dispose();
+                roiBitmap?.Dispose();
+                return;
             }
+
+            // 先切换引用，再释放旧图，避免 PropertyChanged / PaintSurface 观察到已释放对象。
+            var oldItemImage = item.CurrentImage;
+            item.CurrentImage = skBitmap;
+            item.IsConnected = true;
+
+            SKBitmap? oldRoiPreview = null;
+            if (isPrimary && RoiEditorViewModel != null && roiBitmap != null)
+            {
+                oldRoiPreview = _roiPreviewImage;
+                _roiPreviewImage = roiBitmap;
+                RoiEditorViewModel.CurrentImage = roiBitmap;
+            }
+            else
+            {
+                roiBitmap?.Dispose();
+            }
+
+            // 旧 CameraView 图像若仍被其他已知入口引用，则不在这里释放，由对应所有者负责。
+            if (oldItemImage != null &&
+                !ReferenceEquals(oldItemImage, CurrentImage) &&
+                !ReferenceEquals(oldItemImage, DetectionResultImage) &&
+                !ReferenceEquals(oldItemImage, RoiEditorViewModel?.CurrentImage))
+            {
+                oldItemImage.Dispose();
+            }
+
+            oldRoiPreview?.Dispose();
         }));
 
-        // 实时检测（仅主相机）触发推理
-        if (isPrimary && IsRealTimeDetecting && _detectionService.IsInitialized && !_isProcessingFrame)
+        // 实时检测使用独立副本；PerformRealTimeDetectionAsync 负责释放。
+        if (inferenceBitmap != null)
         {
-            _ = PerformRealTimeDetectionAsync(skBitmap);
+            _ = PerformRealTimeDetectionAsync(inferenceBitmap);
         }
     }
 
@@ -412,8 +448,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         // 移除已断开或已注销的槽位
         foreach (var removed in CameraViews.Where(v => !connected.Any(c => string.Equals(c.CameraId, v.CameraId, StringComparison.OrdinalIgnoreCase))).ToList())
         {
-            removed.CurrentImage?.Dispose();
             CameraViews.Remove(removed);
+            removed.CurrentImage?.Dispose();
+
+            if (removed.IsPrimary && _roiPreviewImage != null)
+            {
+                if (ReferenceEquals(RoiEditorViewModel?.CurrentImage, _roiPreviewImage))
+                {
+                    RoiEditorViewModel.CurrentImage = null;
+                }
+
+                _roiPreviewImage.Dispose();
+                _roiPreviewImage = null;
+            }
         }
 
         // 新增/更新已连接槽位（主相机在前）
@@ -646,6 +693,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task PerformRealTimeDetectionAsync(SKBitmap bitmap)
     {
+        using var ownedBitmap = bitmap;
+
         // 使用信号量防止并发处理（支持异步）
         if (!await _inferenceLock.WaitAsync(0))
             return;
@@ -2899,29 +2948,33 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                     try
                     {
                         // 使用FFmpeg或视频库提取第一帧
-                        var videoCapture = new OpenCvSharp.VideoCapture(VideoPath);
+                        using var videoCapture = new OpenCvSharp.VideoCapture(VideoPath);
                         if (videoCapture.IsOpened())
                         {
                             using var frame = new OpenCvSharp.Mat();
                             if (videoCapture.Read(frame))
                             {
                                 // 转换OpenCV Mat为SKBitmap
-                                var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(frame);
+                                using var bitmap = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(frame);
                                 using var ms = new MemoryStream();
                                 bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
                                 ms.Position = 0;
-                                
-                                var skBitmap = SKBitmap.Decode(ms);
-                                
-                                // 在UI线程更新图像
+
+                                var skBitmap = SKBitmap.Decode(ms)
+                                    ?? throw new InvalidOperationException("无法解码视频首帧");
+                                var roiBitmap = skBitmap.Copy();
+
+                                // CurrentImage 与 ROI 预览分别持有独立位图，避免后续任一路径释放时影响另一方。
                                 Application.Current.Dispatcher.Invoke(() =>
                                 {
+                                    var oldRoiPreview = _roiPreviewImage;
                                     CurrentImage = skBitmap;
-                                    RoiEditorViewModel.CurrentImage = skBitmap;
+                                    _roiPreviewImage = roiBitmap;
+                                    RoiEditorViewModel.CurrentImage = roiBitmap;
+                                    oldRoiPreview?.Dispose();
                                     Status = $"视频已加载: {Path.GetFileName(VideoPath)}";
                                 });
                             }
-                            videoCapture.Release();
                         }
                     }
                     catch (Exception ex)
@@ -3046,9 +3099,27 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     private void OnVideoFrameDetected(object? sender, VideoFrameResult e)
     {
-        // 在UI线程更新
-        Application.Current.Dispatcher.Invoke(() =>
+        // YoloDotNet 会复用同一个视频帧缓冲区处理下一帧，因此不能把 e.Frame 直接交给 UI 长期持有。
+        var displayImage = e.DetectionResult.Objects.Count > 0
+            ? DrawDetectionResults(e.Frame, e.DetectionResult.Objects)
+            : e.Frame.Copy();
+
+        var dispatcher = Application.Current?.Dispatcher;
+        if (dispatcher == null || dispatcher.HasShutdownStarted)
         {
+            displayImage.Dispose();
+            return;
+        }
+
+        // 同步切到 UI 线程形成天然背压，避免视频帧更新在 Dispatcher 队列中无限堆积。
+        dispatcher.Invoke(() =>
+        {
+            if (_isDisposed)
+            {
+                displayImage.Dispose();
+                return;
+            }
+
             CurrentFrameIndex = e.FrameIndex;
             DetectionResults = e.DetectionResult.Objects;
             HighConfidenceCount = e.DetectionResult.Objects.Count(o => o.Confidence >= 0.5);
@@ -3064,16 +3135,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 _lastFrameTime = now;
             }
 
-            // 绘制检测结果
-            if (e.DetectionResult.Objects.Count > 0)
-            {
-                var resultImage = DrawDetectionResults(e.Frame, e.DetectionResult.Objects);
-                RoiEditorViewModel.CurrentImage = resultImage;
-            }
-            else
-            {
-                RoiEditorViewModel.CurrentImage = e.Frame;
-            }
+            var oldRoiPreview = _roiPreviewImage;
+            _roiPreviewImage = displayImage;
+            RoiEditorViewModel.CurrentImage = displayImage;
+            oldRoiPreview?.Dispose();
 
             Status = $"处理帧 {e.FrameIndex}，检测到 {e.DetectionResult.Objects.Count} 个对象，FPS: {Fps:F1}";
         });
@@ -3171,6 +3236,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _cameraManager.SlotStatusChanged -= OnCameraSlotStatusChanged;
             _cameraManager.ConnectionStatusChanged -= OnCameraConnectionStatusChanged;
             _detectionService.DetectionError -= OnDetectionError;
+            _detectionService.VideoFrameDetected -= OnVideoFrameDetected;
+            _detectionService.VideoInferenceCompleted -= OnVideoInferenceCompleted;
+
+            // 视频处理同样会占用 YoloDotNet/FFmpeg 原生资源，必须在释放检测服务前先停止。
+            try { _detectionService.StopVideoInference(); } catch (Exception) { }
+
             if (_sopModule != null)
             {
                 _sopModule.StepChanged -= OnSOPStepChanged;
@@ -3207,27 +3278,35 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             CurrentImage?.Dispose();
             DetectionResultImage?.Dispose();
 
-            // CameraViews 绑定到 ItemsControl（UI CollectionView），必须在 UI 线程清空，
-            // 否则关闭时在后台线程执行 Clear() 会抛 NotSupportedException
-            var dispatcher = System.Windows.Application.Current?.Dispatcher;
-            if (dispatcher != null && !dispatcher.CheckAccess())
-            {
-                dispatcher.Invoke(new Action(() =>
-                {
-                    foreach (var item in CameraViews)
-                    {
-                        item.CurrentImage?.Dispose();
-                    }
-                    CameraViews.Clear();
-                }));
-            }
-            else
+            // CameraViews 与 ROI 预览都绑定 UI，统一在 UI 线程解除引用后再释放。
+            void DisposeUiImages()
             {
                 foreach (var item in CameraViews)
                 {
                     item.CurrentImage?.Dispose();
                 }
                 CameraViews.Clear();
+
+                if (_roiPreviewImage != null)
+                {
+                    if (ReferenceEquals(RoiEditorViewModel?.CurrentImage, _roiPreviewImage))
+                    {
+                        RoiEditorViewModel.CurrentImage = null;
+                    }
+
+                    _roiPreviewImage.Dispose();
+                    _roiPreviewImage = null;
+                }
+            }
+
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+            {
+                dispatcher.Invoke(new Action(DisposeUiImages));
+            }
+            else
+            {
+                DisposeUiImages();
             }
 
             // 释放检测服务（YOLO 推理会话）

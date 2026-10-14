@@ -121,6 +121,11 @@ namespace VisionInspection.Modules.Detection
 
         public void Dispose()
         {
+            if (_isVideoProcessing || _videoInferenceCts != null)
+            {
+                StopVideoInference();
+            }
+
             lock (_lockObject)
             {
                 _yolo?.Dispose();
@@ -374,7 +379,7 @@ namespace VisionInspection.Modules.Detection
 
             // 检查FFmpeg是否已安装并获取路径
             var ffmpegPath = GetFFmpegPath();
-            if (string.IsNullOrEmpty(ffmpegPath))
+            if (ffmpegPath is null)
             {
                 DetectionError?.Invoke(this, "FFmpeg未安装或未添加到系统PATH。请安装FFmpeg并确保ffmpeg.exe和ffprobe.exe在系统PATH中。");
                 return false;
@@ -488,7 +493,7 @@ namespace VisionInspection.Modules.Detection
         /// </summary>
         private bool IsFFmpegInstalled()
         {
-            return !string.IsNullOrEmpty(GetFFmpegPath());
+            return GetFFmpegPath() is not null;
         }
 
         public void StartVideoInference()

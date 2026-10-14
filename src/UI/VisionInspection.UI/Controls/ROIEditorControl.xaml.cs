@@ -310,13 +310,15 @@ public partial class ROIEditorControl : SKElement
         // 清空画布
         canvas.Clear(SKColors.DarkGray);
 
-        if (ViewModel.CurrentImage == null) return;
+        // 单次绘制只使用同一个快照引用，避免属性在检查与绘制之间被替换。
+        var image = ViewModel.CurrentImage;
+        if (image == null) return;
 
         // 保存当前状态
         canvas.Save();
 
-        var imageWidth = ViewModel.CurrentImage.Width;
-        var imageHeight = ViewModel.CurrentImage.Height;
+        var imageWidth = image.Width;
+        var imageHeight = image.Height;
 
         // 应用变换：先平移到控件中心，然后缩放，再旋转/翻转，最后平移使图像居中
         canvas.Translate(info.Width / 2.0f, info.Height / 2.0f);  // 移到控件中心
@@ -338,7 +340,7 @@ public partial class ROIEditorControl : SKElement
 
         // 绘制图像（使用原始尺寸，缩放由canvas.Scale处理）
         var drawRect = new SKRect(0, 0, imageWidth, imageHeight);
-        canvas.DrawBitmap(ViewModel.CurrentImage, drawRect);
+        canvas.DrawBitmap(image, drawRect);
 
         // 绘制所有ROI
         foreach (var roi in ViewModel.ROIs)
